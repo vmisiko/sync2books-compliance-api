@@ -44,6 +44,13 @@ OSCU Adapter is transport-only.
 
 ---
 
+# Related Specs
+
+- **[11-sync2books-compliance-inter-service-sla-and-communication-spec.md](11-sync2books-compliance-inter-service-sla-and-communication-spec.md)** – How Sync2Books and Compliance communicate, SLAs, identity mapping, embedded vs standalone modes.
+- **[12-personas-and-platform-contract.md](12-personas-and-platform-contract.md)** – Personas (CFO, Developer, Platform Builder), data source architecture, shared UI strategy, platform contract.
+
+---
+
 # Design Principles
 
 - Immutable financial history
