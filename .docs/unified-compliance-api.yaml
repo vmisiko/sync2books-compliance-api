@@ -1,0 +1,342 @@
+openapi: 3.0.3
+info:
+  title: Unified Compliance API
+  version: 1.0.0
+  description: >
+    Unified compliance abstraction layer for ERP systems integrating with eTIMS (OSCU).
+    Handles document submission, item registration, stock management, validation,
+    reverse invoicing, reconciliation, and audit-safe workflows.
+
+servers:
+  - url: https://api.sync2books.com/compliance/v1
+
+tags:
+  - name: Documents
+  - name: Items
+  - name: Inventory
+  - name: Branches
+  - name: Validation
+  - name: Reconciliation
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+
+    Money:
+      type: object
+      properties:
+        currency:
+          type: string
+        amount:
+          type: number
+          format: double
+
+    DocumentType:
+      type: string
+      enum:
+        - SALE
+        - CREDIT_NOTE
+        - DEBIT_NOTE
+        - PURCHASE
+        - REVERSE_INVOICE
+
+    DocumentStatus:
+      type: string
+      enum:
+        - DRAFT
+        - VALIDATED
+        - ITEM_SYNC_REQUIRED
+        - PENDING_SUBMISSION
+        - SUBMITTED
+        - FAILED_VALIDATION
+        - FAILED_SUBMISSION
+        - CANCELLED
+        - RECONCILED
+
+    ItemType:
+      type: string
+      enum:
+        - GOODS
+        - SERVICE
+
+    MovementType:
+      type: string
+      enum:
+        - SALE
+        - PURCHASE
+        - TRANSFER_OUT
+        - TRANSFER_IN
+        - ADJUSTMENT
+        - RETURN
+
+    ComplianceItem:
+      type: object
+      required:
+        - externalId
+        - name
+        - itemType
+        - taxCategory
+        - classificationCode
+        - unitCode
+      properties:
+        id:
+          type: string
+        externalId:
+          type: string
+        name:
+          type: string
+        sku:
+          type: string
+        itemType:
+          $ref: '#/components/schemas/ItemType'
+        taxCategory:
+          type: string
+        classificationCode:
+          type: string
+        unitCode:
+          type: string
+        version:
+          type: integer
+        status:
+          type: string
+
+    DocumentLine:
+      type: object
+      required:
+        - itemExternalId
+        - quantity
+        - unitPrice
+      properties:
+        itemExternalId:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: number
+        unitPrice:
+          type: number
+        taxAmount:
+          type: number
+
+    ComplianceDocument:
+      type: object
+      required:
+        - branchId
+        - documentType
+        - documentNumber
+        - lines
+      properties:
+        id:
+          type: string
+        branchId:
+          type: string
+        documentType:
+          $ref: '#/components/schemas/DocumentType'
+        documentNumber:
+          type: string
+        externalReferenceId:
+          type: string
+        customerPin:
+          type: string
+        currency:
+          type: string
+        exchangeRate:
+          type: number
+        subtotalAmount:
+          type: number
+        taxAmount:
+          type: number
+        totalAmount:
+          type: number
+        status:
+          $ref: '#/components/schemas/DocumentStatus'
+        oscuReceiptNumber:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocumentLine'
+
+    StockMovement:
+      type: object
+      required:
+        - branchId
+        - itemExternalId
+        - movementType
+        - quantity
+      properties:
+        id:
+          type: string
+        branchId:
+          type: string
+        itemExternalId:
+          type: string
+        movementType:
+          $ref: '#/components/schemas/MovementType'
+        quantity:
+          type: number
+        referenceType:
+          type: string
+        referenceId:
+          type: string
+
+paths:
+
+  /branches:
+    get:
+      tags: [Branches]
+      summary: List compliance branches
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of branches
+
+  /items:
+    post:
+      tags: [Items]
+      summary: Create or update compliance item
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceItem'
+      responses:
+        '201':
+          description: Item created or updated
+
+    get:
+      tags: [Items]
+      summary: List compliance items
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Item list
+
+  /documents:
+    post:
+      tags: [Documents]
+      summary: Create compliance document (DRAFT)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceDocument'
+      responses:
+        '201':
+          description: Document created
+
+    get:
+      tags: [Documents]
+      summary: List documents
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Document list
+
+  /documents/{id}:
+    get:
+      tags: [Documents]
+      summary: Get document details
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Document details
+
+  /documents/{id}/validate:
+    post:
+      tags: [Validation]
+      summary: Validate document before submission
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Validation result
+
+  /documents/{id}/submit:
+    post:
+      tags: [Documents]
+      summary: Submit document to eTIMS
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Submission result
+
+  /documents/{id}/reverse:
+    post:
+      tags: [Documents]
+      summary: Create reverse invoice
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Reverse document created
+
+  /inventory/movements:
+    post:
+      tags: [Inventory]
+      summary: Create stock movement
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockMovement'
+      responses:
+        '201':
+          description: Stock movement recorded
+
+  /inventory/{branchId}/{itemExternalId}:
+    get:
+      tags: [Inventory]
+      summary: Get stock level for item in branch
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: branchId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: itemExternalId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stock level
+
+  /reconciliation/run:
+    post:
+      tags: [Reconciliation]
+      summary: Trigger reconciliation job
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Reconciliation started
