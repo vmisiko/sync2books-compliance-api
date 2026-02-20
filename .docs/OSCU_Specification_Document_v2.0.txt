@@ -1,0 +1,13881 @@
+PUBLIC
+
+ISO 9001:2015 CERTIFIED
+
+ONLINE SALES
+CONTROL UNIT
+(OSCU)
+REQUIREMENTS &
+COMMUNICATION
+PROTOCOLS
+
+Version 2.0
+
+Date: April 2023
+
+DOMESTIC TAXES
+DEPARTMENT
+
+PUBLIC
+
+ISO 9001:2015 CERTIFIED
+
+CONFIDENTIALITY DISCLAIMER
+
+THIS DOCUMENT AND THE INFORMATION IN IT ARE PROVIDED IN CONFIDENCE, FOR THE SOLE
+PURPOSE OF KENYA REVENUE AUTHORITY AND MAY NOT BE DISCLOSED TO ANY THIRD PARTY
+OR USED FOR ANY OTHER PURPOSE WITHOUT THE EXPRESS WRITTEN PERMISSION OF KENYA
+REVENUE AUTHORITY.
+
+Any form of reproduction, dissemination, copying, disclosure, modification, distribution and or publication
+of this material is strictly prohibited.
+
+The contents of this document have not been independently verified and they do not purport to be
+comprehensive, or to contain all the information that a prospective investor may need. No representation,
+warranty or undertaking, expressed or implied is or will be made or given and no responsibility or liability is
+or will be accepted by KENYA REVENUE AUTHORITY or by any of its directors, employees or advisors in
+relation to the accuracy or completeness of this document or any other written or oral information made
+available in connection with the Company.
+
+DOMESTIC TAXES DEPARTMENT
+
+1
+
+PUBLIC
+
+ISO 9001:2015 CERTIFIED
+
+DOCUMENT REVISION
+
+REVISION
+NO.
+
+1.0.1
+
+2.0
+
+TITLE/ WHAT’S NEW
+
+AUTHOR
+
+DATE
+
+OSCU Specification doc
+
+Updated OSCU production and test urls
+
+KRA
+
+KRA
+
+03/02/2023
+
+20/04/2023
+
+2
+
+Online Sales Control Unit API Specification Document
+
+ISO 9001:2015 CERTIFIED
+
+PUBLIC
+
+1.1.
+1.2.
+
+2.1
+2.2
+2.3
+
+3.1
+3.2
+3.2.1
+3.3
+3.3.1
+3.3.2
+3.3.3
+3.3.4
+3.3.5
+3.3.6
+3.3.7
+3.3.8
+
+1. OSCU Service ................................................................................................. 4
+Introduction ................................................................................ 4
+Environment ............................................................................... 4
+2. Technical Outline ............................................................................................ 5
+The Application Process to Use OSCU .................................................. 5
+OSCU running process and main configurations ...................................... 5
+A sample of OSCU Guide document ..................................................... 5
+3 OSCU Business Process ................................................................................... 6
+OSCU functions ............................................................................ 6
+Details of OSCU functions ................................................................ 9
+List of OSCU functions .................................................................... 9
+Specification ...............................................................................13
+Device Initialization ...................................................................... 13
+Code information ......................................................................... 15
+Item Information ......................................................................... 20
+Branch Information ...................................................................... 27
+Import Item Information ................................................................ 32
+Sales Information .........................................................................37
+Purchase Information ....................................................................43
+Stock Information ........................................................................ 53
+Code Definition ........................................................................................... 60
+Tax Type ................................................................................... 60
+Taxpayer Status .......................................................................... 60
+Product Type ..............................................................................60
+Countries Code ........................................................................... 60
+Packaging Unit ........................................................................... 68
+Unit of Quantity .......................................................................... 69
+Currency ................................................................................... 71
+Transaction Type ......................................................................... 76
+Sales Receipt Type ........................................................................77
+Payment Method ......................................................................... 77
+Transaction Progress .....................................................................77
+Registration Type .........................................................................77
+Purchase Receipt Type ................................................................... 78
+Stock In/Out .............................................................................. 78
+Import Item Status ....................................................................... 78
+Credit Note Reason .......................................................................78
+API Response Code .......................................................................79
+Item Code ..................................................................................80
+
+4.1.
+4.2.
+4.3.
+4.4.
+4.6
+4.7
+4.8
+4.9
+4.10
+4.11
+4.12
+4.13
+4.14
+4.15
+4.16
+4.17
+4.18
+4.19
+
+4
+
+3
+
+PUBLIC
+
+1. OSCU service
+
+1.1. Introduction
+
+ISO 9001:2015 CERTIFIED
+
+Online Sales Control Unit (OSCU) is a communication module for private Trader Invoicing System (TIS)
+applications to send/receive various data to and from the KRA eTIMS API server. OSCU includes SKMM
+that manages encryption and signature data, internal data, and keys.
+
+1.2. Environment
+
+OSCU has two types; Production and Test.
+
+Type
+
+Production OSCU
+
+Test OSCU
+
+Description
+Server TIS application utilizes a Production OSCU to send and receive data to
+and from the KRA eTIMS API production server.
+During development, the test application can send and receive test data to and
+from the KRA eTIMS API test server using a Test OSCU.
+
+Remark
+
+The following are the test OSCU technical information
+Contents
+Title
+JSON
+Interface data format
+
+Remark
+
+OSCU
+
+eTIMS
+(Production)
+eTIMS OSCU API Server Address (Test)
+
+Server
+
+API
+
+Address
+
+https://etims-api.kra.go.ke/etims-api/
+
+https://etims-api-sbx.kra.go.ke/etims-api/
+
+4
+
+PUBLIC
+
+2. Technical Outline
+
+ISO 9001:2015 CERTIFIED
+
+2.1 The Application Process to Use OSCU
+
+To use OSCU, a taxpayer must apply for OSCU service and get approval from KRA.
+
+After the approval of OSCU, a taxpayer can install OSCU in a server and start activation. When a taxpayer
+calls the initialization Method of OSCU with PIN, branch office, and equipment information, OSCU will begin
+verification of the device and receive communication key from the KRA eTIMS API server.
+
+2.2 OSCU Running Process and Main Configurations
+
+There are several technical policies that OSCU users have to follow.
+
+1. To use OSCU Library, Internet is always needed as OSCU Library will be communicating to KRA
+
+eTIMS API.
+
+2. Sending/Receiving data to and from eTIMS API Server will be done by calling Methods of OSCU
+
+Java library.
+
+3. To retrieve the latest data from eTIMS API server, OSCU shall send the ‘Date and Time’ on which the
+kind of data was finally received from the eTIMS API server. So, the ‘Date and Time’ of final request
+should be managed by TIS, and once successfully retrieved, TIS shall update the latest ‘Date and
+Time’ to the related data for the next update.
+
+Note: For non Java application, you can directly connect to eTIMS API server without passing through
+OSCU Library.
+
+2.3 A Sample of OSCU Guide Document
+
+Below is a sample Java code to show how developers can use OSCU library
+
+The figure above shows the flow of data exchanged between eTIMS API server and TIS application using
+OSCU.
+
+5
+
+PUBLIC
+
+3 OSCU Business Process
+
+3.1 OSCU Functions
+
+ISO 9001:2015 CERTIFIED
+
+The Java Methods used in this OSCU are grouped by its purpose into eight (8) categories. The below briefly
+introduces the purpose of each category.
+1. Data initialization (Send only)
+
+a. For a device authentication (OSCU), registration and approval of equipment must be
+
+completed.
+2. Code data (Get only)
+
+a. Methods of this category are used to receive necessary standard codes and data from the
+eTIMS API Server, which is the basis of generating invoice data. To send Invoice data to the
+eTIMS API server, the consistency of the data is essential.
+
+b. The standard codes and data are including; item classification code for managing item,
+location code, and package, weight code, PIN list and notice from KRA. For more
+information, check code definition chapter.
+
+3. Branch information (Get and Send)
+
+accounts of branch offices.
+
+a. Some methods of this category are to send customer list of head and branch offices and user
+
+4.
+
+5.
+
+b. This category has a method which requests branch codes to be used later while sending stock
+
+from main branch to branch offices.
+
+Item information (Get and Send)
+
+a. Methods of this category are to send registered item and item composition information in a
+
+TIS application.
+In case you want to recover your items, you can receive them through eTIMS API server.
+
+b.
+
+Imported item (Get and Send)
+
+a. Methods of this category are to receive data of imported items which is declared by the PIN
+
+of TIS application owner and to send confirmation of the received imported items.
+
+b. The imported items data are retrieved from KRA customs system and data can be used for
+
+stock adjustment.
+
+6. Sales management (Send only)
+
+Server.
+
+a. Methods of this category are to send data of sales transaction and sales Invoice to eTIMS
+
+b. Sales transaction data is composed of sales contract such as Customer PIN, Customer Name,
+Sales Type Code, Receipt Type Code, Payment Type Code, Invoice Status Code, Validated
+Date, Sale Date, Stock Released Date, Cancel Requested Date, Canceled Date Refunded Date
+and etc.
+
+c. Sales Invoice data is composed of Invoice information such as Invoice Number, Current
+Receipt Number, Total Receipt Number, Customer PIN, Customer Mobile Number, Receipt
+Published Date, Internal Data, Receipt Signature and etc.
+
+7. Purchase information (Get and Send)
+
+a. Methods of this category are to request data of purchase transaction of the PIN of TIS
+
+application owner to eTIMS Server and send confirmation of the transaction.
+
+b. When a seller registers sales transaction and Invoice data to eTIMS Server, buyer can
+
+request such data for purchase confirmation and stock adjustment purpose.
+
+8. Stock information (Get and Send)
+
+application to eTIMS Server.
+
+a. Methods of this category are to send inventory in and out and stock status by item of TIS
+
+b. Methods of this category also request stock from main branch
+
+6
+
+PUBLIC
+
+ISO 9001:2015 CERTIFIED
+
+The table below outlines the tasks required to send and receive data to and from the eTIMS API server.
+
+Category
+Initialization
+
+Action of TIS side
+Device authentication
+(OSCU)
+
+Basic data
+management
+
+Get code list
+
+Get item classification list
+
+Get PIN information
+
+Get the branch list of head
+office(store)
+
+Get notice list from eTIMS
+API server
+
+Send customer information
+
+Send branch user account
+
+Send branch insurance
+information
+
+Branch
+information
+management
+
+Item
+management
+
+Send Item information
+
+Send Item Composition
+information
+
+Get item list
+
+Imported item
+management
+
+Get imported item
+information
+
+7
+
+Description
+Device authentication (OSCU) from
+KRA.
+3rd party users must complete an
+eTIMS service request. Registration
+and approval of equipment is
+completed by KRA after submission
+of equipment use application
+(tentative name).
+TIS application can update common
+standard codes managed by KRA
+from eTIMS API server
+Server TIS application can update
+item classification codes managed by
+KRA from eTIMS API server.
+TIS application can get information
+on a certain PIN from eTIMS server
+TIS application can update the
+branch office information of head
+office into eTIMS API server.
+TIS application gets eTIMS
+notification managed by KRA from
+eTIMS API server.
+TIS application sends customer
+information of the head & branch
+offices into eTIMS Server.
+TIS application sends branch user
+account information to upload it in
+eTIMS Server.
+TIS application sends insurance
+information of the head & branch
+offices and update it in eTIMS
+Server
+TIS application sends item
+information (name, unit price, bar
+code and etc.) of the head or branch
+offices and updates them in eTIMS
+Server
+TIS application sends item
+composition information of the head
+or branch store and updates them in
+eTIMS API server. Item composition
+is used to calculate BOM (Bill of
+Material) of the final processed
+items.
+TIS application gets item
+information updated to eTIMS
+Server by TIS application.
+TIS application gets imported item
+information managed by KRA
+
+Remark
+Refer to '2.1.
+Appling
+Process to use
+OSCU'
+
+Applied to
+Pharmacy only
+
+Head
+office(store)
+role
+
+Head
+office(store)
+role
+
+Head
+office(store)
+
+PUBLIC
+
+Remark
+role
+
+Head
+office(store)
+role
+
+Head
+office(store)
+role
+
+Head
+office(store)
+role
+
+ISO 9001:2015 CERTIFIED
+Description
+customs department. All the import
+declaration result of an owner of TIS
+application is provided from eTIMS
+Server.
+TIS shall convert the received
+imported item information into
+eTIMS standard item information
+for sales (inventory).
+TIS application sends converted
+imported items information to
+eTIMS API server.
+TIS application sends sales
+transaction and sales invoice
+information to eTIMS API server.
+
+TIS application gets purchase
+transaction information which were
+registered to eTIMS Server by a
+seller under TIS application owner’s
+PIN.
+TIS application sends purchase
+transaction confirmation of received
+purchase transaction information to
+eTIMS Server.
+When adjusting inventory quantities
+or selling items at each branches or
+head office, TIS application sends
+the stock in/out information to the
+eTIMS Server.
+Every stock in/out information must
+have its sales Invoice information
+sent in advance to eTIMS Server.
+If stock inventory information is
+changed due to stock IN / OUT,
+Server TIS application sends the
+changed information of the
+inventory master and stores it in the
+eTIMS API server.
+Every stock inventory information
+must have its stock in/out
+information sent in advance to
+eTIMS Server.
+Branch office should request for
+inventory coming from head office.
+
+Category
+
+Action of TIS side
+
+Send (converted) imported
+item information
+
+Sales
+management
+
+Purchase
+transaction
+management
+
+Send sales transaction and
+sales Invoice information
+
+Get purchase transaction
+information
+
+Send purchase transaction
+confirmation
+
+Stock
+management
+
+Send stock in/out
+information
+
+Send stock inventory
+information
+
+Receive stock from head
+office.
+
+8
+
+PUBLIC
+
+3.2 Details of OSCU functions
+
+3.2.1 List of OSCU functions
+
+ISO 9001:2015 CERTIFIED
+
+Section
+
+Class
+
+Method
+
+Description
+
+Initialization
+
+DeviceVerific
+ationExcute
+
+verification
+
+Lookup initial setup
+information of OSCU
+Device
+
+Preconditional
+method
+
+Argument Object
+
+Return Object
+
+DeviceVerificationR
+eq
+
+DeviceVerificationR
+es
+
+Basic data
+management
+
+CodeExcute
+
+ItemExcute
+
+CustomerExc
+ute
+
+BhfExcute
+
+NoticeExcute
+
+You can look up the initial configuration information registered in the server. This function provides authenticated information
+of OSCU device.
+search
+
+Lookup list of code
+
+CodeSearchReq
+
+CodeSearchRes
+
+You can lookup common code list registered in server with this function. This API function provides code classification and code
+detail at once.
+searchCls
+
+ItemClsSearchReq
+
+ItemClsSearchRes
+
+Lookup list of item
+classification
+
+You can lookup list of item classification registered in server with this function. This API function provides item category and
+item list at once.
+search
+
+CustSearchReq
+
+CustSearchRes
+
+Lookup customer
+information
+
+You can Lookup taxpayer’s information registered in server with this function. This API function synchronizes the taxpayer
+information registered on the server with client.
+Lookup list of taxpayer
+search
+branch information
+
+BhfSearchReq
+
+BhfSearchRes
+
+You can lookup list of taxpayer branch information registered in server. This API function provides every information of
+taxpayer branch.
+search
+
+Lookup the list of notice
+
+NoticeSearchReq
+
+NoticeSearchRes
+
+You can lookup the list of notice in taxpayer client. This API function provides list of notice registered in the server.
+
+BhfExcute
+
+saveCustomer
+
+Save customer of branch
+
+BhfCustSaveReq
+
+BhfCustSaveRes
+
+You can store branch infomation in server for recover the client data. This API function stores the client customer information
+managed by the store on the server.
+saveUser
+
+Save branch user account
+
+BhfUserSaveReq
+
+BhfUserSaveRes
+
+Branch
+information
+management
+
+9
+
+You can store branch user account in server. This API function stores the user account information of taxpayer branch in server.
+
+ISO 9001:2015 CERTIFIED
+
+saveInsurance
+
+Save Insurance company
+information of branch
+
+BhfInsuranceSaveR
+eq
+
+BhfInsuranceSaveR
+es
+
+PUBLIC
+
+You can save insurance company information which taxpayer branch uses in server. This API function performs storing the
+insurance company information managed by taxpayer pharmacy.
+search
+
+ItemSearchReq
+
+ItemSearchRes
+
+Lookup list of
+item(product)
+
+You can lookup the list of Item information in server. This API function provides list of product information for taxpayer
+registered in server. For more information, refer to ‘3.3.3.3. ItemSearchReq/Res’
+save
+
+ItemSaveReq
+
+ItemSaveRes
+
+Save Item
+
+You can save the product information in server. This API function performs storing item information managed by the taxpayer
+client in the server. For more information, refer to ‘3.3.3.2 ItemSaveReq/Res’
+saveComposition
+
+Save Item Composition
+
+save
+
+ItemCompositionSa
+veReq
+
+ItemCompositionSa
+veRes
+
+You can store item composition in server. This API function performs storing taxpayer’s item composition information in server.
+But this information is used during restoration of client. It is not able to be looked up in server.
+search
+
+ImportItemSearchR
+eq
+
+ImportItemSearchR
+es
+
+Lookup list of imported
+item
+
+You can lookup list of taxpayer’s imported item in server. This API function provides information of taxpayer’s imported item in
+server. For more information, refer to ’3.3.5.1 ImportItemSearchReq /Res‘
+update
+
+Revise imported item
+
+ImportItemUpdateR
+eq
+
+ImportItemUpdate
+Res
+
+You can approve or reject imported items from the server. The taxpayer adds the imported items to item and stock. The
+imported item information is transferred to the server through this API function.
+save
+
+Save sales transaction
+
+TrnsSalesSaveWrRe
+q
+
+TrnsSalesSaveWrRe
+s
+
+You can save sales transaction and sales invoice information in server. This API function transfers the transaction information
+of taxpayer client’s sales to the server.
+saerchPurchaseSa
+les
+You can lookup sales infomation in order to regiser purchases on taxpayer's branch registered in server. This API function
+provides unregistered infomations on taxpayer's purchases list among sales list that taxpayer is assigned to transaction party.
+save
+
+Lookup purchases-sales
+transaction list
+
+TrnsPurchaseSalesS
+earchReq
+
+TrnsPurchaseSalesS
+earchRes
+
+Save Purchase information
+
+TrnsPurchaseSaveR
+eq
+
+TrnsPurchaseSaveR
+es
+
+You can store purchases info in server. This API function sends the purchase transaction information generated from the
+
+Product item
+management
+
+ItemExcute
+
+Imported item
+management
+
+ImportItemE
+xcute
+
+Sales
+transaction
+management
+
+Purchase
+transaction
+management
+
+TrnsSalesExc
+ute
+
+TrnsPurchase
+Excute
+
+10
+
+Stock
+management
+
+StockExcute
+
+saveMaster
+
+Save stock master
+information
+
+saveIO
+
+StockMasterSaveRe
+q
+
+StockMasterSaveRe
+s
+
+taxpayer client and stores it.
+
+ISO 9001:2015 CERTIFIED
+
+PUBLIC
+
+You can store the stock master information in server. This API function saves the inventory master information managed by
+taxpayer client to the server.
+getMoveList
+
+StockMoveReq
+
+StockMoveRes
+
+Lookup the list of stock
+movement
+
+You can lookup the stock movement list in server. This API function provides the result of the shifting stock quantity between
+the head office and the branches. in the server.
+saveIO
+
+StockIoSaveReq
+
+StockIoSaveRes
+
+Save stock in/out
+
+You can store taxpayer stock in/out information in server. This API function performs storing stock in/out data registered by
+taxpayer client of head/branch in the server.
+
+※ Sample of guidance for developers
+Below feature illustrate how a module can retrieve code list. This example is intended to help developers understand the contents of the next page “3.3.
+Specification”.
+
+11
+
+PUBLIC
+
+ISO 9001:2015 CERTIFIED
+
+12
+
+PUBLIC
+
+3.3 Specification
+
+3.3.1 Device Initialization
+
+3.3.1.1
+
+DeviceVerificationReq/Res
+
+ISO 9001:2015 CERTIFIED
+
+This part describes the components of API function (url : /selectInitOsdcInfo) and data types for each item. This API function is divided into 'Request:
+Argument' and 'Response: Return Object'. The DeviceVerificationReq is an Argument Object of Request, The DeviceVerificationRes is a Return Object of
+Response.
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+Required
+
+Data Length
+
+Object ID
+
+Object Name
+
+DeviceVerific
+ationReq
+
+Initialization Request of
+OSCU device
+authentication
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","dvcSrlNo":"dvcv1130"}
+
+tin
+
+bhfId
+
+dvcSrlNo
+
+PIN
+
+Branch ID
+
+Device Serial
+Number
+
+CHAR
+
+CHAR
+
+CHAR
+
+Y
+
+Y
+
+Y
+
+11
+
+2
+
+100
+
+※ The contents of the JSON SAMPLE column are example code of JSON data transmitted when sending / receiving API.
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+Required
+
+Data Length
+
+DeviceVerifica
+tionRes
+
+Response of OSCU
+device
+authentication
+
+13
+
+Object ID
+
+Object Name
+
+InitTaxpayer
+
+InitBranch
+
+Taxpayer
+information
+
+Branch
+information
+
+resultCd
+
+resultMsg
+
+resultDt
+
+tin
+
+taxprNm
+
+bsnsActv
+
+bhfId
+
+bhfNm
+
+bhfOpenDt
+
+prvncNm
+
+Result Code
+
+Result Message
+
+Result Date
+
+PIN
+
+Taxpayer Name
+
+Business Activity
+
+Branch Office Id
+
+Branch Office Name
+
+Branch Registration
+Date
+County Name
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+3
+
+14
+
+11
+
+60
+
+100
+
+2
+
+60
+
+8
+
+100
+
+PUBLIC
+
+Object
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+Required
+
+Data Length
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+dstrtNm
+
+sctrNm
+
+locDesc
+
+hqYn
+
+mgrNm
+
+mgrTelNo
+
+mgrEmail
+
+dvcId
+
+sdicId
+
+mrcNo
+
+cmcKey
+
+Sub-County Name
+
+Tax Locality Name
+
+Location Description
+
+Head Quarter
+
+Manager Name
+
+Manager Contract
+Number
+Manage Email
+
+Device id
+
+Sales Control Unit ID
+
+MRC No
+
+Communication KEY
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+100
+
+100
+
+100
+
+1
+
+60
+
+20
+
+50
+
+20
+
+18
+
+11
+
+255
+
+InitDevice
+
+Device
+information
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It is succeeded","resultDt":"20200226143124",
+"data":{"info":{“tin”:”A123456789Z”,"taxprNm":"Taxpayer1130","bsnsActv":"business","bhfId":"00","bhfNm":"Headquater","bhfOpenDt":"20200226","prvncNm":"NAIROBI
+CITY","dstrtNm":"WESTLANDS","sctrNm":"WON",”locDesc”:”Westlands
+Towers”,"hqYn":"Y","mgrNm":"manage1130_00","mgrTelNo":"0789001130","mgrEmail":"manage113000@test.com","dvcId":"9999911300000001","sdcId":"KRACU013000001",
+"mrcNo":"WIS01000150”,"cmcKey":"f0b9831bd2334874b7ec815e40347bc4"}}}
+
+14
+
+PUBLIC
+
+3.3.2 Code Information
+
+3.3.2.1
+
+CodeSearchReq/Res
+
+ISO 9001:2015 CERTIFIED
+
+This part describes the items of code API function (url : /selectCodeList) and data types for each item. API functions are divided into 'Request: Argument' and
+'Response: Return Object'. The CodeSearchReq is an Argument Object of Request, The CodeSearchRes is a Return Object of Response.
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+CodeSea
+rchReq
+
+Search code
+Request
+
+Object ID
+
+Object Name
+
+Object ID
+
+Object Name
+
+-
+
+-
+
+-
+
+-
+
+-
+
+-
+
+-
+
+-
+
+-
+
+-
+
+-
+
+-
+
+tin
+
+bhfId
+
+PIN
+
+Branch ID
+
+CHAR
+
+CHAR
+
+cmcKey
+
+Communication Key
+
+CHAR
+
+lastReqDt
+
+Last Request Date
+
+CHAR
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","lastReqDt":"20180520000000"}
+
+※ ‘lastReqDt’ is the search condition. Based on the ‘lastReqDt’ of date Argument, the server provides code registered or modified after the date.
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+CodeSea
+rchRes
+
+Search code
+Response
+
+Object ID
+
+Object Name
+
+Object ID
+
+Object Name
+
+-
+
+-
+
+-
+
+-
+
+-
+
+-
+
+CodeCls
+<List>
+
+Code
+classification
+information
+
+-
+
+-
+
+-
+
+-
+
+-
+
+-
+
+-
+
+-
+
+resultCd
+
+Result Code
+
+resultMsg
+
+Result Message
+
+resultDt
+
+cdCls
+
+Result Date
+
+Code Class
+
+cdClsNm
+
+Code Class Name
+
+cdClsDesc
+
+userDfnNm1
+
+Code Class
+Description
+User Define Name 1
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+userDfnNm2
+
+User Define Name 2
+
+CHAR
+
+userDfnNm3
+
+User Define Name 3
+
+CHAR
+
+Require
+d
+
+Y
+
+Y
+
+Y
+
+Y
+
+Require
+d
+
+Data
+Lengt
+h
+11
+
+2
+
+255
+
+14
+
+Data
+Lengt
+h
+3
+
+14
+
+2
+
+60
+
+500
+
+60
+
+60
+
+60
+
+15
+
+PUBLIC
+
+Object
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+Object ID
+
+Object Name
+
+Object ID
+
+Object Name
+
+Code
+<List>
+
+Code Details
+information
+
+useYn
+
+cd
+
+cdNm
+
+cdDesc
+
+srtOrd
+
+Use Yes or No
+
+Code
+
+Code Name
+
+Code Description
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+Sort Order
+
+NUMBER
+
+userDfnCd1
+
+User Define Code 1
+
+userDfnCd2
+
+User Define Code 2
+
+userDfnCd3
+
+User Define Code 3
+
+useYn
+
+Use Yes or No
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+Require
+d
+
+Data
+Lengt
+h
+1
+
+5
+
+60
+
+500
+
+5
+
+20
+
+20
+
+20
+
+1
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It is succeeded","resultDt":"20200226143506",
+"data":{"clsList":[{"cdCls":"04","cdClsNm":"Taxation
+Rate","userDfnNm2":null,"userDfnNm3":null,"dtlList":[{"cd":"A","cdNm":"A-
+EX","cdDesc":"...","useYn":"Y","srtOrd":1,"userDfnCd1":"0","userDfnCd2":null,"userDfnCd3":null},{"cd":"B","cdNm":"B-18.00%","cdDesc":"B-
+18.00%","useYn":"Y","srtOrd":2,"userDfnCd1":"18","userDfnCd2":null,"userDfnCd3":null},{"cd":"C","cdNm":"C","cdDesc":"C","useYn":"Y","srtOrd":3,"userDfnCd1":"0","userDfnC
+d2":null,"userDfnCd3":null},{"cd":"D","cdNm":"D","cdDesc":"D","useYn":"Y","srtOrd":4,"userDfnCd1":"0","userDfnCd2":null,"userDfnCd3":null}]}]}}
+※ ‘resuldCd’ is response code. The resultCd 000 means ‘It is succeeded’. For more information, refer to ‘4.17. API Response Code’.
+
+Type","cdClsDesc":null,"useYn":"Y","userDfnNm1":"Tax
+
+3.3.2.2
+
+CustSearchReq/Res
+
+This part describes the Customer API function (url : /selectCustomer) and data types for each item. The Customer means the taxpayer. API functions are divided
+into 'Request:Argument' and 'Response:Return Object'. The CustSearchReq is an Argument Object of Request, The CustSearchRes is a Return Object of
+Response. Based on the ‘custmTin ‘, the server provides customer information registered to the provided PIN.
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object ID
+
+Object
+Name
+
+Attribute
+ID
+
+Attribute Name
+
+Data Type
+
+Required
+
+Data Length
+
+Format
+
+CustSearc
+
+Search
+
+tin
+
+PIN
+
+CHAR
+
+Y
+
+11
+
+16
+
+PUBLIC
+
+hReq
+
+Customer
+Request
+
+ISO 9001:2015 CERTIFIED
+bhfId
+
+Branch ID
+
+cmcKey
+
+custmTin
+
+Communication
+Key
+Customer PIN
+
+CHAR
+
+CHAR
+
+CHAR
+
+Y
+
+Y
+
+Y
+
+2
+
+255
+
+11
+
+JSON SAMPLE
+
+{"tin":" A123456789Z ","bhfId":"00", "custmTin":"A123456789Z " }
+
+Object
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object ID
+
+Object
+Name
+
+Attribute
+
+Attribute
+ID
+
+Attribute Name
+
+Data Type
+
+Required
+
+Data
+Length
+
+Format
+
+CustSearc
+hRes
+
+Search
+Customer
+Response
+
+Cust
+
+Taxpayer
+informati
+on
+
+resultCd
+
+Result Code
+
+CHAR
+
+resultMsg
+
+Result Message
+
+CHAR
+
+resultDt
+
+Result Date
+
+tin
+
+Taxpayer PIN
+
+CHAR
+
+CHAR
+
+taxprNm
+
+Taxpayer Name
+
+CHAR
+
+taxprSttsC
+d
+
+Taxpayer Status
+Code
+
+CHAR
+
+prvncNm
+
+County Name
+
+dstrtNm
+
+sctrNm
+
+locDesc
+
+Sub-County
+Name
+Tax Locality
+Name
+Location
+Description
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+3
+
+14
+
+11
+
+60
+
+5
+
+100
+
+100
+
+100
+
+100
+
+See ‘4.2.
+Taxpayer
+Status’
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It is
+succeeded","resultDt":"20200226192053","data":{"custList":[{"tin":"A123456789Z","taxprNm":"TAXPAYER1","taxprSttsCd":"A","prvncNm":"NAIROBI
+CITY","dstrtNm":"WESTLANDS","sctrNm":"WON","locDesc":" Westlands Towers"}]}}
+
+17
+
+PUBLIC
+
+3.3.2.3
+
+NoticeSearchReq/Res
+
+ISO 9001:2015 CERTIFIED
+
+This part describes the components of Notice API function(url : /selectNoticeList) and data types for each item. This API function is divided into 'Request:
+Argument' and 'Response: Return Object'. The NoticeSearchReq is an Argument Object of Request, The NoticeSearchRes is a Return Object of
+Response.
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+Required
+
+Data Length
+
+NoticeSear
+chReq
+
+Search Notice Request
+
+Object ID
+
+Object Name
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","lastReqDt":"20200218191141"}
+
+tin
+
+bhfId
+
+Taxpayer PIN
+
+Branch user ID
+
+CHAR
+
+CHAR
+
+cmcKey
+
+Communication Key
+
+CHAR
+
+lastReqDt
+
+Last Request date
+time
+
+CHAR
+
+Y
+
+Y
+
+Y
+
+Y
+
+11
+
+2
+
+255
+
+14
+
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+Required
+
+Data Length
+
+NoticeSea
+rchRes
+
+Search Notice
+Response
+
+Object ID
+
+Object Name
+
+Notice
+<List>
+
+Search
+Information
+
+resultCd
+
+resultMsg
+
+resultDt
+
+noticeNo
+
+title
+
+cont
+
+dtlUrl
+
+regrNm
+
+regDt
+
+Result Code
+
+Result Message
+
+Result Date time
+
+CHAR
+
+CHAR
+
+CHAR
+
+Notice Number
+
+NUMBER
+
+Title
+
+Contents
+
+detail URL
+
+Registration name
+
+Registration date
+time
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+3
+
+14
+
+1000
+
+4000
+
+200
+
+60
+
+14
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It is succeeded","resultDt":"20200226191722","data":{"noticeList":[{"noticeNo":42,"title":"Notice Test [2020.02.18]","cont":"Notice Test
+[2020.02.18]\r\n\r\nNotice Test
+
+18
+
+[2020.02.18]","dtlUrl":"http://localhost:9980/common/link/ebm/receipt/indexEbmNotice?noticeNo=42","regrNm":"Administrator","regDt":"20200218191141"}]}}
+
+ISO 9001:2015 CERTIFIED
+
+PUBLIC
+
+19
+
+PUBLIC
+
+3.3.3 Item Information
+
+3.3.3.1
+
+ItemClsSearchReq/Res
+
+ISO 9001:2015 CERTIFIED
+
+This part describes the item API function (url : /selectItemClsList) of product classification and data types for each item. API functions are divided into
+'Request:Argument' and 'Response:Return Object'. The ItemClsSearchReq is an Argument Object of Request, The ItemClsSearchRes is a Return Object of
+Response.
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+Requir
+ed
+
+Data
+Length
+
+Format
+
+ItemClsSea
+rchReq
+
+Search
+Request
+
+Classification
+
+Object ID
+
+Object Name
+
+tin
+
+bhfId
+
+cmcKey
+
+lastReqDt
+
+PIN
+
+Branch ID
+
+Communication
+Key
+
+Last Request Date
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+Y
+
+Y
+
+Y
+
+Y
+
+11
+
+2
+
+255
+
+14
+
+Ex:20190412092
+700
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","lastReqDt":"20180523000000"}
+
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+ItemClsSear
+chRes
+
+Search
+Response
+
+Classification
+
+Object ID
+
+Object Name
+
+ItemCls
+<List>
+
+Item
+classification
+information
+
+20
+
+Requir
+ed
+
+Data
+Length
+
+Format
+
+resultCd
+
+resultMsg
+
+resultDt
+
+itemClsCd
+
+itemClsNm
+
+itemClsLvl
+
+taxTyCd
+
+Result Code
+
+Result Message
+
+Result Date
+
+Item Class Code
+
+Item Class Name
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+Item Class Level
+
+NUMBER
+
+Taxation
+Code
+
+Type
+
+CHAR
+
+3
+
+14
+
+10
+
+200
+
+5
+
+See‘4.1
+Type’
+
+Tax
+
+JSON SAMPLE
+
+useYn
+
+Used / UnUsed
+
+CHAR
+
+ISO 9001:2015 CERTIFIED
+
+mjrTgYn
+
+Whether
+Major Taget
+
+it
+
+is
+
+CHAR
+
+PUBLIC
+
+1
+
+1
+
+{"resultCd":"000","resultMsg":"It is succeeded","resultDt":"20200226185625",
+"data":{"itemClsList":[{"itemClsCd":"14111400","itemClsNm":"Paper
+use","itemClsLvl":3,"taxTyCd":null,"mjrTgYn":null,"useYn":"Y"},{"itemClsCd":"14111401","itemClsNm":"Paper
+Commodity","itemClsLvl":4,"taxTyCd":null,"mjrTgYn":null,"useYn":"Y"},{"itemClsCd":"3133130600","itemClsNm":"Non
+assemblies","itemClsLvl":5,"taxTyCd":"B","mjrTgYn":"N","useYn":"Y"}]}}
+
+products
+
+products
+metallic
+
+sonic
+
+no
+welded
+
+no
+use
+structural
+
+3.3.3.2
+
+ItemSaveReq/Res
+
+This part describes the components of SaveItem API function (url : /saveItem) and data types for each item. This API function is divided into 'Request: Argument'
+and 'Response: Return Object'. The ItemSaveReq is an Argument Object of Request, The ItemSaveRes is a Return Object of Response.
+Object
+
+Attribute
+
+Object ID
+
+Object
+Name
+
+ItemSaveR
+eq
+
+Item
+
+Save
+Request
+
+21
+
+Sub Object_1
+
+Sub Object_2
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+Attribute
+ID
+
+Attribute Name
+
+Data Type
+
+Required
+
+Data
+Length
+
+Format
+
+tin
+
+PIN
+
+bhfId
+
+Branch ID
+
+cmcKey
+
+itemClsCd
+
+itemCd
+
+itemTyCd
+
+Communication
+Key
+Item Code
+
+Item
+Classification
+Code
+item Type Code
+
+itemNm
+
+item Name
+
+itemStdN
+m
+orgnNatCd
+
+pkgUnitCd
+
+Item Standard
+Name
+Origin
+Code (Nation)
+Packaging Unit
+
+Place
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+N
+
+Y
+
+Y
+
+11
+
+2
+
+255
+
+10
+
+20
+
+5
+
+200
+
+200
+
+5
+
+5
+
+See‘4.18.
+code’
+
+Item
+
+See‘4.3. Product
+type’
+
+See ‘4.4. Nation’
+
+See‘4.5.
+
+Object
+
+Object ID
+
+Object
+Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+PUBLIC
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Attribute Name
+
+Data Type
+
+Required
+
+Data
+Length
+
+Format
+
+Attribute
+ID
+
+qtyUnitCd
+
+taxTyCd
+
+btchNo
+
+bcd
+
+dftPrc
+
+grpPrcL1
+
+grpPrcL2
+
+grpPrcL3
+
+grpPrcL4
+
+grpPrcL5
+
+addInfo
+
+sftyQty
+
+Code
+
+Unit
+
+Type
+
+Quantity
+Code
+Taxation
+Code
+Batch Number
+
+Barcode
+
+Unit
+
+Unit
+
+Unit
+
+Unit
+
+Unit
+
+Unit
+
+Default
+Price
+Group1
+Price
+Group2
+Price
+Group3
+Price
+Group4
+Price
+Group5
+Price
+Additional
+Information
+Safty Quantity
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBER
+
+NUMBER
+
+NUMBER
+
+NUMBER
+
+NUMBER
+
+NUMBER
+
+CHAR
+
+NUMBER
+
+Packaging Unit’
+
+See ‘4.6. Unit of
+Quantity’
+See ‘4.1. Tax Type’
+
+Y
+
+Y
+
+N
+
+N
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+N
+
+N
+
+N
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+5
+
+5
+
+10
+
+20
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+7
+
+13,2
+
+1
+
+1
+
+20
+
+60
+
+20
+
+60
+
+isrcAplcbY
+n
+useYn
+
+Insurance
+Appicable(Y/N)
+Used / UnUsed
+
+CHAR
+
+CHAR
+
+regrId
+
+Registration ID
+
+CHAR
+
+regrNm
+
+modrId
+
+Registration
+Name
+Modifier ID
+
+CHAR
+
+CHAR
+
+modrNm
+
+Modifier Name
+
+CHAR
+
+22
+
+PUBLIC
+
+Object
+
+Object ID
+
+JSON SAMPLE
+
+Object
+Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+Attribute
+ID
+
+Attribute Name
+
+Data Type
+
+Required
+
+Data
+Length
+
+Format
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+{“tin”:”A123456789Z”,"bhfId":"00","itemCd":”KE1NTXU0000006","itemClsCd":"5059690800","itemTyCd":"1","itemNm":"test
+item
+3","itemStdNm":null,"orgnNatCd":”KE","pkgUnitCd":"NT","qtyUnitCd":"U","taxTyCd":"B","btchNo":null,"bcd":null,"dftPrc":3500,"grpPrcL1":3500,"grpPrcL2":3500,"grpPrcL3":
+3500,"grpPrcL4":3500,"grpPrcL5":null,"addInfo":null,"sftyQty":null,"isrcAplcbYn":"N","useYn":"Y","regrId":"Test", "regrNm":"Test", "modrId":"Test", "modrNm":"Test"}
+
+material
+
+Object
+
+Object ID
+
+Object
+Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+Attribute
+
+Attribute
+ID
+
+Attribute Name
+
+Data Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+ItemSaveRe
+s
+
+Item
+
+Save
+Response
+
+JSON SAMPLE
+
+resultCd
+
+resultMsg
+
+resultDt
+
+Result Code
+
+Result Message
+
+Result Date
+
+CHAR
+
+CHAR
+
+CHAR
+
+3
+
+14
+
+{"resultCd":"000","resultMsg":"It is succeeded","resultDt":"20200226193918","data":null}
+
+23
+
+3.3.3.3
+
+ItemSearchReq/Res
+
+ISO 9001:2015 CERTIFIED
+
+This part describes the components of SelectItemList API function (url : /selectItemList) and data types for each item. This API function is divided into 'Request:
+Argument' and 'Response: Return Object'. The ItemSearchReq is an Argument Object of Request, The ItemSearchRes is a Return Object of Response.
+Object
+
+Attribute
+
+PUBLIC
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+ItemSea
+rchReq
+
+Search
+Request
+
+Item
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","lastReqDt":"20160523000000"}
+
+※ bhfId is branch ID. ‘00’ means head office, 01~n is branch office.
+Object
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object ID
+
+Object
+Name
+
+ItemSear
+chRes
+
+Search Item
+Response
+
+Item
+<List>
+
+Item
+informatio
+n
+
+24
+
+Attribute
+ID
+
+tin
+
+bhfId
+
+cmcKey
+
+lastReqD
+t
+
+Attribute Name
+
+Data Type
+
+Required
+
+Data
+Length
+
+Format
+
+PIN
+
+Branch ID
+
+Communication
+Key
+Last
+Date
+
+Request
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+Y
+
+Y
+
+Y
+
+Y
+
+11
+
+2
+
+255
+
+14
+
+Attribute
+
+Attribute
+ID
+
+Attribute
+Name
+
+resultCd
+
+Result Code
+
+resultMsg
+
+resultDt
+
+Result
+Message
+Result Date
+
+tin
+
+PIN
+
+itemClsCd
+
+itemCd
+
+itemTyCd
+
+Item
+Classification
+Code
+Item Code
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+item
+Code
+
+Type
+
+CHAR
+
+Data Type
+
+Required
+
+Data
+Length
+
+Format
+
+3
+
+14
+
+11
+
+10
+
+20
+
+5
+
+See‘4.3.
+Product type’
+
+Object
+
+ISO 9001:2015 CERTIFIED
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object ID
+
+Object
+Name
+
+Attribute
+ID
+
+Attribute
+Name
+
+Data Type
+
+Required
+
+itemNm
+
+item Name
+
+itemStdN
+m
+orgnNatC
+d
+pkgUnitC
+d
+
+qtyUnitCd
+
+taxTyCd
+
+btchNo
+
+regBhfId
+
+bcd
+
+dftPrc
+
+grpPrcL1
+
+grpPrcL2
+
+grpPrcL3
+
+grpPrcL4
+
+grpPrcL5
+
+addInfo
+
+sftyQty
+
+Item Standard
+Name
+Origin
+Place
+Code (Nation)
+Packaging
+Unit Code
+
+Quantity Unit
+Code
+Taxation Type
+Code
+Batch Number
+
+Regist Branch
+Office ID
+Barcode
+
+Default Unit
+Price
+Group1 Unit
+Price
+Group2 Unit
+Price
+Group3 Unit
+Price
+Group4 Unit
+Price
+Group5 Unit
+Price
+Add
+Information
+Safty Quantity
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBER
+
+NUMBER
+
+NUMBER
+
+NUMBER
+
+NUMBER
+
+NUMBER
+
+CHAR
+
+NUMBER
+
+isrcAplcb
+
+Insurance
+
+CHAR
+
+25
+
+PUBLIC
+
+Format
+
+Data
+Length
+
+200
+
+200
+
+‘4.5.
+
+‘4.4.
+
+See
+Nation’
+See
+Packaging
+Unit’
+See ‘4.6. Unit
+of Quantity’
+See‘4.1.Tax
+Type’
+
+5
+
+5
+
+5
+
+5
+
+10
+
+2
+
+20
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+7
+
+13,2
+
+1
+
+PUBLIC
+
+Object
+
+ISO 9001:2015 CERTIFIED
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object ID
+
+Object
+Name
+
+Attribute
+ID
+
+Attribute
+Name
+
+Data Type
+
+Required
+
+Data
+Length
+
+Format
+
+Yn
+
+Appicable Y/N
+
+rraModYn
+
+useYn
+
+KRA Modify
+Y/N
+(Item
+Classification
+Code)
+Used
+UnUsed
+
+/
+
+CHAR
+
+CHAR
+
+1
+
+1
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It
+is
+succeeded","resultDt":"20200226193501","data":{"itemList":[{“tin”:”A123456789Z”,"itemCd":"KR2AMXBLL0000001","itemClsCd":"1110160600","itemTyCd":"2","itemNm":"rest
+item#1","itemStdNm":null,"orgnNatCd":"KR","pkgUnitCd":"AM","qtyUnitCd":"BLL","taxTyCd":"B","btchNo":null,"regBhfId":"00","bcd":"8801234567061","dftPrc":21000,"grpPr
+cL1":0,"grpPrcL2":0,"grpPrcL3":0,"grpPrcL4":0,"grpPrcL5":0,"addInfo":null,"sftyQty":0,"isrcAplcbYn":"N","rraModYn":"N","useYn":"Y"},{“tin”:”A123456789Z”,"itemCd":"KR2A
+MXCAX0000001","itemClsCd":"1110170400","itemTyCd":"2","itemNm":"coke1","itemStdNm":null,"orgnNatCd":"KR","pkgUnitCd":"AM","qtyUnitCd":"CA","taxTyCd":"B","btchN
+o":null,"regBhfId":"00","bcd":"8801234567891","dftPrc":5000,"grpPrcL1":0,"grpPrcL2":0,"grpPrcL3":0,"grpPrcL4":0,"grpPrcL5":0,"addInfo":null,"sftyQty":0,"isrcAplcbYn":"Y","
+rraModYn":"N","useYn":"Y"}]}}
+
+26
+
+PUBLIC
+
+3.3.4 Branch Information
+
+3.3.4.1
+
+BhfSearchReq/Res
+
+ISO 9001:2015 CERTIFIED
+
+This part describes the components of API function(url : /selectBhfList) and data types for each item. This API function is divided into 'Request: Argument' and
+'Response: Return Object'. The BhfSearchReq is an Argument Object of Request, The BhfSearchRes is a Return Object of Response.
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+Object ID
+
+Object Name
+
+Object ID
+
+Object Name
+
+Require
+d
+
+Data Length
+
+BhfSearc
+hReq
+
+Search
+Request
+
+Branch
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","lastReqDt":"20191130000000"}
+
+tin
+
+bhfId
+
+cmcKey
+
+lastReqDt
+
+PIN
+
+Branch ID
+
+Communication
+Key
+Last
+Date
+
+Request
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+Y
+
+Y
+
+Y
+
+Y
+
+11
+
+2
+
+255
+
+14
+
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+Required
+
+Object ID
+
+Object Name
+
+Object ID
+
+Object Name
+
+BhfSear
+chRes
+
+Search
+Response
+
+Branch
+
+Bhf
+<List>
+
+Branch
+Information
+
+27
+
+resultCd
+
+Result Code
+
+resultMsg
+
+Result Message
+
+resultDt
+
+Result Date
+
+tin
+
+bhfId
+
+PIN
+
+Branch Office ID
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+bhfNm
+
+Branch Office Name
+
+CHAR
+
+bhfSttsCd
+
+Branch Status Code
+
+CHAR
+
+prvncNm
+
+County Name
+
+dstrtNm
+
+Sub-County Name
+
+CHAR
+
+CHAR
+
+Data
+Length
+
+3
+
+14
+
+11
+
+2
+
+60
+
+5
+
+100
+
+100
+
+Object
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+Required
+
+Object ID
+
+Object Name
+
+Object ID
+
+Object Name
+
+PUBLIC
+
+sctrNm
+
+locDesc
+
+mgrNm
+
+Tax Locality Name
+
+CHAR
+
+Location Description
+
+CHAR
+
+Manager Name
+
+mgrTelNo
+
+Manager Contact
+
+mgrEmail
+
+Manager Email
+
+CHAR
+
+CHAR
+
+CHAR
+
+hqYn
+
+Head Office Yes/No
+
+CHAR
+
+Data
+Length
+
+100
+
+100
+
+60
+
+20
+
+100
+
+1
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It
+succeeded","resultDt":"20200226193023","data":{"bhfList":[{“tin”:”A123456789Z”,"bhfId":"00","bhfNm":"Headquater","bhfSttsCd":"01","prvncNm":"NAIROBI
+CITY","dstrtNm":"WESTLANDS","sctrNm":"WON",”locDesc”:”Westlands
+Towers”,"mgrNm":"manage1130_00","mgrTelNo":"0789001130","mgrEmail":"manage113000@test.com","hqYn":"Y"},{“tin”:”A123456789Z”,"bhfId":"01","bhfNm":"Branch01","b
+CITY","dstrtNm":"WESTLANDS","sctrNm":"WON",”locDesc”:”Westlands
+hfSttsCd":"01","prvncNm":"NAIROBI
+Towers”,"mgrNm":"manage1130_01","mgrTelNo":"0789011130","mgrEmail":"manage113001@test.com","hqYn":"N"}]}}
+
+is
+
+3.3.4.2
+
+BhfCustSaveReq/Res
+
+This part describes the components of branch customer API function(url : /saveBhfCustomer) and data types for each item. This API function is divided into
+'Request: Argument' and 'Response: Return Object'. The BhfCustSaveReq is an Argument Object of Request, The BhfCustSaveRes is a Return Object of
+Response.
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object
+ID
+
+Object Name
+
+Object
+ID
+
+Object Name
+
+BhfCustSaveR
+eq
+
+Store branch
+custormers
+Request
+
+Attribute
+ID
+
+Attribute Name
+
+tin
+
+bhfId
+
+PIN
+
+Branch ID
+
+Data
+Type
+
+CHAR
+
+CHAR
+
+cmcKey
+
+Communication Key
+
+CHAR
+
+custNo
+
+custTin
+
+Customer Number
+
+Customer PIN
+
+custNm
+
+Customer Name
+
+CHAR
+
+CHAR
+
+CHAR
+
+Required
+
+Data
+Length
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+11
+
+2
+
+255
+
+9
+
+11
+
+60
+
+28
+
+Object
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+ISO 9001:2015 CERTIFIED
+
+PUBLIC
+
+Required
+
+N
+
+N
+
+N
+
+N
+
+Y
+
+N
+
+Y
+
+Y
+
+Y
+
+Y
+
+Data
+Length
+300
+
+20
+
+50
+
+20
+
+1
+
+1000
+
+20
+
+60
+
+20
+
+60
+
+Attribute
+
+Attribute
+ID
+adrs
+
+telNo
+
+email
+
+faxNo
+
+useYn
+
+remark
+
+regrId
+
+regrNm
+
+modrId
+
+Attribute Name
+
+Address
+
+Contact
+
+Email
+
+Fax Number
+
+Used (Y/N)
+
+Remark
+
+Registration ID
+
+Registration Name
+
+Modifier ID
+
+modrNm
+
+Modifier Name
+
+Data
+Type
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","custNo":"999991113","custTin":"A123456789Z","custNm":"Taxpayer1113","adrs":null,"telNo":null,"email":null,"faxNo":null,"useYn":"Y","rem
+ark":null, "regrId":"Test", "regrNm":"Test", "modrId":"Test", "modrNm":"Test"}
+
+Object
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Attribute
+
+Object
+ID
+
+Object Name
+
+Object
+ID
+
+Object Name
+
+BhfCustSaveR
+es
+
+branch
+
+Store
+custormers
+Response
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It is succeeded","resultDt":"20200226193115","data":null}
+
+resultCd
+
+resultMsg
+
+resultDt
+
+Result Code
+
+Result Message
+
+Result Date
+
+Data
+Type
+
+CHAR
+
+CHAR
+
+CHAR
+
+Required
+
+Data Length
+
+3
+
+14
+
+29
+
+3.3.4.3
+
+BhfUserSaveReq/Res
+
+ISO 9001:2015 CERTIFIED
+
+This part describes the components of branch user account API function (url /saveBhfUser) and data types for each item. This function send branch
+user(employee) account to server and stores it. This API function is divided into 'Request: Argument' and 'Response: Return Object'. The BhfUserSaveReq is an
+Argument Object of Request, The BhfUserSaveRes is a Return Object of Response.
+Object
+
+Attribute
+
+PUBLIC
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object
+ID
+
+Object Name
+
+Object
+ID
+
+Object Name
+
+BhfUserSaveRe
+q
+
+Save
+User Request
+
+Branch
+
+Attribute
+ID
+
+tin
+
+bhfId
+
+Attribute Name
+
+PIN
+
+Branch ID
+
+Data
+Type
+
+CHAR
+
+CHAR
+
+cmcKey
+
+Communication Key
+
+CHAR
+
+userId
+
+userNm
+
+pwd
+
+adrs
+
+cntc
+
+authCd
+
+remark
+
+useYn
+
+regrId
+
+regrNm
+
+modrId
+
+User ID
+
+User Name
+
+Password
+
+Address
+
+Contact
+
+Authority Code
+
+Remark
+
+Used / UnUsed
+
+Registration ID
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+Registration Name
+
+CHAR
+
+Modifier ID
+
+modrNm
+
+Modifier Name
+
+CHAR
+
+CHAR
+
+Require
+d
+
+Data Length
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+11
+
+2
+
+255
+
+20
+
+60
+
+255
+
+200
+
+20
+
+100
+
+2000
+
+1
+
+20
+
+60
+
+20
+
+60
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","userId":"userId3","userNm":"User Name3","pwd":"12341234","adrs":null,"cntc":null,"authCd":null,"remark":null,"useYn":"Y","regrId":"Test",
+"regrNm":"Test", "modrId":"Test", "modrNm":"Test"}
+
+Object
+
+30
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+ISO 9001:2015 CERTIFIED
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+Object ID
+
+Object Name
+
+Object ID
+
+Object Name
+
+PUBLIC
+
+Require
+d
+
+Data Length
+
+BhfUserSaveR
+es
+
+Save Branch User
+Response
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It is succeeded","resultDt":"20200226192427","data":null}
+
+3.3.4.4
+
+BhfInsuranceSaveReq/Res
+
+resultCd
+
+resultMsg
+
+resultDt
+
+Result Code
+
+Result Message
+
+Result Date
+
+CHAR
+
+CHAR
+
+CHAR
+
+3
+
+14
+
+This part describes the components of branch Insurance API function (url : /saveBhfInsurance) and data types for each item. This function sends the insurance
+company information to server and stores it. The insurance company information are insurance code, insurance name and insurance rate. This API function is
+divided into 'Request: Argument' and 'Response: Return Object'. The BhfInsuranceSaveReq is an Argument Object of Request, The BhfInsuranceSaveRes is
+a Return Object of Response.
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+Require
+d
+
+Data Length
+
+BhfInsuranceSaveReq
+
+Insurance
+
+Save
+Branch
+Request
+
+Object
+ID
+
+Object Name
+
+Object
+ID
+
+Object Name
+
+31
+
+tin
+
+bhfId
+
+cmcKey
+
+isrccCd
+
+PIN
+
+Branch ID
+
+Communication
+Key
+Insurance Code
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+isrccNm
+
+Insurance Name
+
+CHAR
+
+isrcRt
+
+useYn
+
+regrId
+
+regrNm
+
+modrId
+
+Premium Rate
+
+NUMBER
+
+Used / UnUsed
+
+CHAR
+
+Registration ID
+
+CHAR
+
+Registration
+Name
+Modifier ID
+
+CHAR
+
+CHAR
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+11
+
+2
+
+255
+
+10
+
+100
+
+3
+
+1
+
+20
+
+60
+
+20
+
+PUBLIC
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","isrccCd":"ISRCC01","isrccNm":"ISRCC NAME","isrcRt":20,"useYn":"Y","regrId":"Test", "regrNm":"Test", "modrId":"Test", "modrNm":"Test"}
+
+ISO 9001:2015 CERTIFIED
+
+modrNm
+
+Modifier Name
+
+CHAR
+
+Y
+
+60
+
+Object
+
+Object ID
+
+BhfInsuranceSaveRes
+
+JSON SAMPLE
+
+Object Name
+
+Insurance
+
+Save
+Branch
+Response
+
+Sub Object_1
+Object
+ID
+
+Object Name
+
+Sub Object_2
+Object
+ID
+
+Object Name
+
+Attribute
+
+Attribute ID
+
+Attribute Name
+
+Data Type
+
+Require
+d
+
+Data Length
+
+resultCd
+
+resultMsg
+
+Result Code
+
+Result Message
+
+resultDt
+
+Result Date
+
+CHAR
+
+CHAR
+
+CHAR
+
+3
+
+14
+
+{"resultCd":"000","resultMsg":"It is succeeded","resultDt":"20200226192852","data":null}
+
+3.3.5 Import Item Information
+
+3.3.5.1
+
+ImportItemSearchReq/Res
+
+This part describes the components of SelectImportItem API function (url : /selectImportItemList) and data types for each item. This API function is divided
+into 'Request: Argument' and 'Response: Return Object'. The ImportItemReq is an Argument Object of Request, The ImportItemRes is a Return Object of
+Response.
+Object
+
+Attribute
+
+Object ID
+
+Object
+Name
+
+ImportItemSe
+archReq
+
+Search
+Import Item
+Request
+
+JSON SAMPLE
+
+32
+
+Sub Object_1
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+Attribute
+ID
+
+Attribute
+Name
+
+tin
+
+PIN
+
+bhfId
+
+Branch ID
+
+cmcKey
+
+lastReqD
+t
+
+Communicatio
+n Key
+Last Request
+Date
+
+Data
+Type
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+Require
+d
+
+Data
+Length
+
+Format
+
+Y
+
+Y
+
+Y
+
+Y
+
+11
+
+2
+
+255
+
+14
+
+Object
+
+Object ID
+
+Object
+Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+Attribute
+ID
+
+Attribute
+Name
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+{“tin”:”A123456789Z”,"bhfId":"00","lastReqDt":"20190524000000"}
+
+PUBLIC
+
+Object
+
+Object ID
+
+ImportIte
+mSearchR
+es
+
+Object
+Name
+
+Search
+Import
+Item
+Respons
+e
+Respons
+e
+
+33
+
+Sub Object_1
+
+Sub Object_2
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+Attribute
+
+Attribute
+ID
+
+Attribute Name
+
+Data
+Type
+
+Require
+d
+
+resultCd
+
+Result Code
+
+CHAR
+
+Format
+
+Data
+Leng
+th
+
+3
+
+ImportI
+tem<Lis
+t>
+
+Item
+informati
+on
+
+resultMsg
+
+Result Message
+
+resultDt
+
+Result Date
+
+taskCd
+
+dclDe
+
+Task Code
+
+Declaration Date
+
+itemSeq
+
+Item Sequence
+
+dclNo
+
+hsCd
+
+Declaration Number
+
+HS Code
+
+itemNm
+
+Item Name
+
+orgnNatCd
+
+Import Item Status Code
+
+exptNatCd
+
+Origin Nation Code
+
+pkg
+
+Export Nation Code
+
+pkgUnitCd
+
+Package
+
+qty
+
+Packaging Unit Code
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+CHAR
+
+NUMBE
+R
+
+14
+
+50
+
+8
+
+10
+
+50
+
+17
+
+500
+
+5
+
+5
+
+13,2
+
+5
+
+13,2
+
+See ‘4.4. Nation’
+
+See
+‘4.5.
+Packaging Unit’
+
+Object
+
+Object ID
+
+Object
+Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+JSON SAMPLE
+
+ISO 9001:2015 CERTIFIED
+Attribute
+
+Attribute
+ID
+
+Attribute Name
+
+qtyUnitCd
+
+Quantity
+
+totWt
+
+Quantity Unit Code
+
+netWt
+
+Gross Weight
+
+spplrNm
+
+Net Weight
+
+agntNm
+
+Supplier's name
+
+invcFcurA
+mt
+invcFcurCd
+
+invcFcurEx
+crt
+
+Agent name
+
+Invoice Foreign Currency Am
+ount
+Invoice Foreign Currency
+
+Data
+Type
+
+Require
+d
+
+CHAR
+
+NUMBE
+R
+NUMBE
+R
+CHAR
+
+CHAR
+
+NUMBE
+R
+CHAR
+
+NUMBE
+R
+
+PUBLIC
+
+Format
+
+See ‘4.6. Unit of
+Quantity’
+
+‘4.1.
+
+See
+Type’
+See
+Currency’
+
+Tax
+
+‘4.7.
+
+Data
+Leng
+th
+
+5
+
+13,2
+
+13,2
+
+500
+
+500
+
+18,2
+
+5
+
+18,2
+
+{"resultCd":"000","resultMsg":"It
+TZDL","hsCd":"20055900000","itemNm":"BAKED
+BEANS","imptItemsttsCd":"2","orgnNatCd":"BR","exptNatCd":"BR","pkg":2922,"pkgUnitCd":null,"qty":19946,"qtyUnitCd":"KGM","totWt":19945.57,"netWt":19945.57,"spplrNm"
+:"ODERICH CONSERVA QUALIDADE\nBRASIL","agntNm":"BN METRO Ltd","invcFcurAmt":296865.6,"invcFcurCd":"USD","invcFcurExcrt":929.79}]}}
+
+is succeeded","resultDt":"20200226194118","data":{"itemList":[{"taskCd":"2239078","dclDe":"-1
+
+","itemSeq":1,"dclNo":"C3460-2019-
+
+34
+
+3.3.5.2
+
+ImportItemUpdateReq/Res
+
+ISO 9001:2015 CERTIFIED
+
+This part describes the components of Imported Item Save API function(url : /updateImportItem) and data types for each item. This API function is divided into
+'Request: Argument' and 'Response: Return Object'. The ImportItemUpdateReq is an Argument Object of Request, The ImportItemUpdateRes is a Return
+Object of Response.
+Object
+
+Attribute
+
+PUBLIC
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute
+Name
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+Object ID
+
+Object
+Name
+
+Object ID
+
+Objec
+t
+Name
+
+ImportItemUp
+dateReq
+
+Update Item
+Request
+
+tin
+
+bhfId
+
+cmcKey
+
+taskCd
+
+dclDe
+
+itemSeq
+
+hsCd
+
+itemClCd
+
+itemCd
+
+imptItemsttsC
+d
+remark
+modrId
+modrNm
+
+PIN
+
+Branch ID
+
+Communicatio
+n Key
+
+Task Code
+
+Declaration
+Date
+
+Item Sequence
+
+HS Code
+
+Item
+Classification
+Code
+
+Item Code
+
+Item
+
+Import
+Status Code
+Remark
+Modifier ID
+Modifier Name
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+CHAR
+CHAR
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+N
+Y
+Y
+
+11
+
+2
+
+255
+
+50
+
+8
+
+10
+
+17
+
+10
+
+20
+
+5
+
+400
+20
+60
+
+See‘4.15 Import
+Item status”’
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","taskCd":"2231943","dclDe":"20191217","itemSeq":1,"hsCd":"1231531231","itemClsCd":"5022110801","itemCd":”KE1NTXU0000001","imptIte
+mSttsCd":"1","remark":"remark", " modrId":"Test", “ modrNm":"Test"}
+
+35
+
+PUBLIC
+
+ISO 9001:2015 CERTIFIED
+
+Object
+
+Object ID
+
+Object
+Name
+
+ImportItemU
+pdateRes
+
+Update Item
+Response
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute
+
+Object
+ID
+
+Object
+Name
+
+Object ID Obje
+
+ct
+Nam
+e
+
+Attribute
+Name
+
+Data
+Type
+
+Requir
+ed
+
+Data
+Length
+
+Format
+
+resultCd
+resultMsg
+
+resultDt
+
+Result Code
+Result
+Message
+Result Date
+
+CHAR
+CHAR
+
+CHAR
+
+3
+
+14
+
+ㅐ JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It is succeeded","resultDt":"20200226194253","data":null}
+
+36
+
+PUBLIC
+
+3.3.6 Sales Information
+
+3.3.6.1
+
+TrnsSalesSaveWrReq/Res
+
+ISO 9001:2015 CERTIFIED
+
+This part describes the components of Sales-transaction Save API function (url : /saveTrnsSalesOsdc) and data types for each item. This API function is divided
+into 'Request: Argument' and 'Response: Return Object'. The TrnsSalesSaveWrReq is an Argument Object of Request, The TrnsSalesSaveWrRes is a Return
+Object of Response.
+Object
+
+Attribute
+
+Object ID
+
+Object
+Name
+
+TrnsSalesSaveW
+rReq
+
+Save Sales
+Request
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+tin
+
+bhfId
+
+cmcKey
+
+trdInvcNo
+
+invcNo
+
+orgInvcNo
+
+custTin
+
+custNm
+
+rcptTyCd
+
+pmtTyCd
+
+salesSttsCd
+
+Attribute
+Name
+
+PIN
+
+Branch ID
+
+Communicatio
+n Key
+
+Trader Invoice
+Number
+
+Invoice
+Number
+Original
+Invoice
+Number
+
+Customer PIN
+
+Customer
+Name
+Receipt
+Code
+
+Format
+
+Data
+Type
+
+CHAR
+
+CHAR
+
+CHAR
+
+Required
+
+Y
+
+Y
+
+Y
+
+CHAR
+
+Y
+
+Data
+Lengt
+h
+
+11
+
+2
+
+255
+
+50
+
+NUMBE
+R
+NUMBE
+R
+
+CHAR
+
+CHAR
+
+Y
+
+Y
+
+N
+
+N
+
+Y
+
+N
+
+Y
+
+Y
+
+38
+
+38
+
+11
+
+60
+
+5
+
+5
+
+5
+
+14
+
+Sale
+
+‘4.10.
+
+‘4.9.
+
+See
+Receipt Type’
+See
+Payment
+Method’
+See‘4.11.
+Transaction
+Progress‘
+yyyyMMddhhmmss
+
+Type
+
+CHAR
+
+Payment Type
+Code
+
+Invoice Status
+Code
+
+CHAR
+
+CHAR
+
+37
+
+cfmDt
+
+Validated Date
+
+CHAR
+
+Object
+
+Object ID
+
+Object
+Name
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+salesDt
+
+stockRlsDt
+
+cnclReqDt
+
+cnclDt
+
+rfdDt
+
+rfdRsnCd
+
+totItemCnt
+
+taxblAmtA
+
+taxblAmtB
+
+taxblAmtC
+
+taxblAmtD
+
+taxblAmtE
+
+taxRtA
+
+taxRtB
+
+taxRtC
+
+taxRtD
+
+taxRtE
+
+38
+
+Attribute
+Name
+
+Sale Date
+
+Stock Released
+Date
+Cancel
+Reqeuested
+Date
+
+Canceled Date
+
+Note
+
+Note
+
+Item
+
+Credit
+Date
+Credit
+Reason Code
+Total
+Count
+Taxable
+Amount A
+Taxable
+Amount B
+Taxable
+Amount C
+Taxable
+Amount D
+Taxable
+Amount E
+
+Tax Rate A
+
+Tax Rate B
+
+Tax Rate C
+
+Tax Rate D
+
+Tax Rate E
+
+PUBLIC
+
+Required
+
+Format
+
+Data
+Lengt
+h
+
+yyyyMMdd
+
+yyyyMMddhhmmss
+
+yyyyMMddhhmmss
+
+yyyyMMddhhmmss
+
+yyyyMMddhhmmss
+
+See‘4.16.Credit
+Note Reason‘
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+N
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+8
+
+14
+
+14
+
+14
+
+14
+
+5
+
+10
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+7,2
+
+7,2
+
+7,2
+
+7,2
+
+7,2
+
+Data
+Type
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+
+Object
+
+Object ID
+
+Object
+Name
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+Attribute
+Name
+
+Data
+Type
+
+Required
+
+Format
+
+Data
+Lengt
+h
+
+PUBLIC
+
+taxAmtA
+
+taxAmtB
+
+taxAmtC
+
+taxAmtD
+
+taxAmtE
+
+totTaxblAmt
+
+totTaxAmt
+
+totAmt
+
+prchrAcptcY
+n
+remark
+
+regrId
+
+regrNm
+
+modrId
+
+Tax Amt A
+
+Tax Amt B
+
+Tax Amt C
+
+Tax Amt D
+
+Tax Amt E
+
+Total Taxable
+Amount
+Total
+Amount
+
+Tax
+
+Total Amount
+
+Purchase
+Accept Y/N
+
+Remark
+
+Registration
+ID
+Registration
+Name
+Modifier ID
+
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+modrNm
+
+Modifier Name
+
+CHAR
+
+custTin
+
+Customer PIN
+
+CHAR
+
+custMblNo
+
+rcptPbctDt
+
+Customer
+Mobile
+Number
+Receipt
+Published Date
+
+CHAR
+
+CHAR
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+N
+
+Y
+
+Y
+
+Y
+
+Y
+
+N
+
+N
+
+Y
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+1
+
+400
+
+20
+
+60
+
+20
+
+60
+
+11
+
+20
+
+14
+
+TrnsS
+alesS
+aveW
+rRece
+ipt
+
+Sales
+receipt
+intormat
+ion
+
+39
+
+Object
+
+Object ID
+
+Object
+Name
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+Attribute
+Name
+
+trdeNm
+
+Trand Name
+
+adrs
+
+Address
+
+Data
+Type
+
+CHAR
+
+CHAR
+
+TrnsS
+alesS
+aveW
+rItem
+<List>
+
+Deal sale
+registrat
+ion item
+informat
+ion
+
+40
+
+topMsg
+
+Top Message
+
+CHAR
+
+btmMsg
+
+prchrAcptcY
+n
+itemSeq
+
+itemClsCd
+
+itemCd
+
+itemNm
+
+bcd
+
+pkgUnitCd
+
+pkg
+
+qtyUnitCd
+
+qty
+
+prc
+
+splyAmt
+
+dcRt
+
+dcAmt
+
+Bottom
+Message
+Purchase
+Accept Y/N
+Item Sequence
+Number
+
+Item Code
+
+Item
+Classification
+Code
+
+Item Name
+
+Barcode
+
+Packaging Unit
+Code
+
+Package
+
+Quantity Unit
+Code
+
+Quantity
+
+Unit Price
+
+Supply
+Amount
+
+Discount Rate
+
+Discount
+Amount
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+CHAR
+
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+
+PUBLIC
+
+Required
+
+Format
+
+Data
+Lengt
+h
+
+N
+
+N
+
+N
+
+N
+
+Y
+
+Y
+
+N
+
+Y
+
+Y
+
+N
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+20
+
+200
+
+20
+
+20
+
+1
+
+3
+
+10
+
+20
+
+200
+
+20
+
+5
+
+13,2
+
+5
+
+13,2
+
+18,2
+
+18,2
+
+5,2
+
+18,2
+
+See
+Packaging Unit’
+
+‘4.5.
+
+See ‘4.6. Unit of
+Quantity’
+
+Object
+
+Object ID
+
+Object
+Name
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+Attribute
+Name
+
+Data
+Type
+
+Required
+
+isrccCd
+
+isrccNm
+
+isrcRt
+
+isrcAmt
+
+taxTyCd
+
+taxblAmt
+
+totTaxAmt
+
+totAmt
+
+Insurance
+Company Code
+Insurance
+Company
+Name
+
+Insurance Rate
+
+Insurance
+Amount
+Taxation Type
+Code
+Taxable
+Amount
+
+Tax Amount
+
+Total Amount
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+NUMBE
+R
+CHAR
+
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+
+N
+
+N
+
+N
+
+N
+
+Y
+
+Y
+
+Y
+
+Y
+
+JSON SAMPLE
+
+PUBLIC
+
+Format
+
+Data
+Lengt
+h
+
+10
+
+100
+
+3
+
+18,2
+
+5
+
+See ‘4.1. Tax Type’
+
+18,2
+
+18,2
+
+18,2
+
+"bhfId":"00",
+
+”trdInvcNo”:123,
+
+"salesSttsCd":"02",
+
+"cfmDt":"20200127210300",
+
+"invcNo":1,"orgInvcNo":0,"custTin":"A123456789Z",
+
+"rcptTyCd":"S",
+{“tin”:”A123456789Z”,
+"stockRlsDt":"20200127210300",
+"pmtTyCd":"01",
+"cnclReqDt":null,"cnclDt":null,"rfdDt":null,"rfdRsnCd":null,"totItemCnt":2,"taxblAmtA":0,"taxblAmtB":10500,"taxblAmtC":0,"taxblAmtD":0,"taxblAmtE":0,"taxRtA":0,"taxRtB":
+18,"taxRtC":0,"taxRtD":0,"taxRtE":0,"taxAmtA":0,"taxAmtB":1602,"taxAmtC":0,"taxAmtD":0,"taxAmtE":0,"totTaxblAmt":10500,"totTaxAmt":1602,"totAmt":10500,"prchrAcptcY
+n":"N",
+"modrNm":"Test",
+"receipt":{"custTin":"A123456789Z","custMblNo":null,"rcptPbctDt":"20201118120300","trdeNm":null,"adrs":null,"topMsg":null,"btmMsg":null,"prchrAcptcYn":"N"},
+"itemList":[{"itemSeq":1,"itemCd":”KE1NTXU0000001",
+"qty":2,"prc":3500,"splyAmt":7000,"dcRt":0,"dcAmt":0,"isrccCd":null,"isrccNm":null,"isrcRt":null,"isrcAmt":null,"taxTyCd":"B",
+"taxblAmt":7000,"taxAmt":1068,"totAmt":7000},{"itemSeq":2,"itemCd":”KE1NTXU0000002", "itemClsCd":"5022110801", "itemNm":"test item 2", "bcd":null,"pkgUnitCd":"NT",
+"pkg":1,"qtyUnitCd":"U",
+"qty":1,"prc":3500,"splyAmt":3500,"dcRt":0,"dcAmt":0,"isrccCd":null,"isrccNm":null,"isrcRt":null,"isrcAmt":null,"taxTyCd":"B",
+"taxblAmt":3500,"taxAmt":534,"totAmt":3500}]}
+
+"bcd":null,"pkgUnitCd":"NT",
+
+"itemClsCd":"5059690800",
+
+"custNm":"Taxpayer1112",
+
+"pkg":2,"qtyUnitCd":"U",
+
+"salesDt":"20200127",
+
+"regrNm":"Test",
+
+"modrId":"Test",
+
+"salesTyCd":"N",
+
+"regrId":"Test",
+
+"itemNm":"test
+
+"remark":null,
+
+item 1",
+
+Object
+
+41
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+TrnsSalesSave
+WrRe
+
+Save
+Response
+
+Sales
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Response
+data
+
+TrnsSa
+lesSav
+eWrRe
+sData
+
+PUBLIC
+
+Attribute
+Name
+
+Data
+Type
+
+Requir
+ed
+
+Data
+Length
+
+Format
+
+ISO 9001:2015 CERTIFIED
+Attribute
+ID
+
+Object
+Name
+
+resultCd
+
+resultMs
+g
+resultDt
+
+curRcptN
+o
+
+totRcptN
+o
+intrlData
+
+rcptSign
+
+sdcDateT
+ime
+
+Result Code
+
+Result
+Message
+
+Result
+DateTime
+
+Current
+Receipt
+Number
+Total Receipt
+Number
+Internal Data
+
+Receipt
+Signature
+Control Unit
+Date Time
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMB
+ER
+
+NUMB
+ER
+CHAR
+
+CHAR
+
+CHAR
+
+3
+
+14
+
+10
+
+10
+
+26
+
+16
+
+14
+
+yyyyMMddhhm
+mss
+
+yyyyMMddhhm
+mss
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It is succeeded","resultDt":"20200226194328",
+"data":{"curRcptNo ":"1","totRcptNo ":"1","intrlData":"EAHSAV6ECUUXSY6PCCJYAUP6MI", "rcptSign":"QUII27MATATSHFRB", "sdcDateTime":"20210502115145"}}
+
+42
+
+PUBLIC
+
+3.3.7 Purchase Information
+
+3.3.7.1
+
+TrnsPurchaseSalesReq/Res
+
+ISO 9001:2015 CERTIFIED
+
+This part describes the components of Purchase-Sales Transaction API function (url : /selectTrnsPurchaseSalesList) and data types for each item. This API
+function is divided into 'Request: Argument' and 'Response: Return Object'. The TrnsPurchaseSalesReq is an Argument Object of Request, The
+TrnsPurchaseSalesRes is a Return Object of Response.
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+Attribute
+ID
+
+Attribute
+Name
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+TrnsPurchaseS
+alesReq
+
+Search
+Purchase/Sales
+Request
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","lastReqDt":"20190524000000"}
+
+tin
+
+bhfId
+
+cmcKey
+
+lastReqD
+t
+
+PIN
+
+Branch ID
+
+Communic
+ation Key
+Last
+Request
+Date
+
+CHAR
+
+CHAR
+
+CHAR
+
+Y
+
+CHAR
+
+11
+
+2
+
+255
+
+14
+
+Object
+
+Object ID
+
+Object
+Name
+
+Sub Object_1
+
+Object ID
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object
+Name
+
+Attribute
+
+Attribute
+ID
+
+Attribute
+Name
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+TrnsPurchaseS
+alesRes
+
+Search
+Purchase/S
+ales
+Response
+
+43
+
+TrnsPurchas
+eSales
+<List>
+
+Transactio
+n
+purchase
+sales
+
+resultCd
+
+Result Code
+
+CHAR
+
+resultMsg
+
+resultDt
+
+spplrTin
+
+spplrNm
+
+Result
+Message
+Result Date
+
+Supplier
+PIN
+Supplier
+Name
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+3
+
+14
+
+11
+
+60
+
+PUBLIC
+
+Attribute
+Name
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+Object
+
+Object ID
+
+Object
+Name
+
+Sub Object_1
+
+Object ID
+
+ISO 9001:2015 CERTIFIED
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object
+Name
+informati
+on
+
+Attribute
+
+Attribute
+ID
+
+spplrBhfI
+d
+spplrInvc
+No
+
+rcptTyCd
+
+pmtTyCd
+
+cfmDt
+
+Supplier
+Branch ID
+Supplier
+Invoice
+Number
+Receipt
+Type Code
+Payment
+Type Code
+Validated
+Date
+
+CHAR
+
+NUMB
+ER
+
+CHAR
+
+CHAR
+
+CHAR
+
+salesDt
+
+Sale Date
+
+CHAR
+
+stockRlsD
+t
+
+Stock
+Released
+Date
+
+totItemC
+nt
+taxblAmt
+A
+taxblAmt
+B
+taxblAmt
+C
+taxblAmt
+D
+taxblAmt
+E
+taxRtA
+
+Item
+
+Total
+Count
+Taxable
+Amount A
+Taxable
+Amount B
+Taxable
+Amount C
+Taxable
+Amount D
+Taxable
+Amount E
+Tax Rate A
+
+taxRtB
+
+Tax Rate B
+
+CHAR
+
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+
+44
+
+YYYY-
+MM-DD
+HH24:MI
+:SS
+YYYYMM
+DD
+YYYY-
+MM-DD
+HH24:MI
+:SS
+
+2
+
+38
+
+5
+
+5
+
+19
+
+8
+
+19
+
+10
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+7,2
+
+7,2
+
+Object
+
+Object ID
+
+ISO 9001:2015 CERTIFIED
+
+Object
+Name
+
+Sub Object_1
+
+Object ID
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object
+Name
+
+Attribute
+
+Attribute
+ID
+
+Attribute
+Name
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+PUBLIC
+
+taxRtC
+
+Tax Rate C
+
+taxRtD
+
+Tax Rate D
+
+taxRtE
+
+Tax Rate E
+
+taxAmtA
+
+Tax Amt A
+
+taxAmtB
+
+Tax Amt B
+
+taxAmtC
+
+Tax Amt C
+
+taxAmtD
+
+Tax Amt D
+
+taxAmtE
+
+Tax Amt E
+
+totTaxblA
+mt
+
+totTaxAm
+t
+totAmt
+
+remark
+
+itemSeq
+
+itemClsC
+d
+
+itemCd
+
+Tax
+
+Total
+Taxable
+Amount
+Total
+Amount
+Total
+Amount
+Remark
+
+Item
+Sequence
+Number
+Item
+Classificatio
+n Code
+Item Code
+
+ER
+
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+
+NUMB
+ER
+NUMB
+ER
+CHAR
+
+NUMB
+ER
+
+CHAR
+
+CHAR
+
+7,2
+
+7,2
+
+7,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+400
+
+3
+
+10
+
+20
+
+TrnsPurchaseSal
+esItem
+<List>
+
+Transacti
+on
+purchase
+sales
+item
+informati
+on
+
+45
+
+Object
+
+Object ID
+
+ISO 9001:2015 CERTIFIED
+
+Object
+Name
+
+Sub Object_1
+
+Object ID
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object
+Name
+
+Attribute
+
+Attribute
+ID
+
+Attribute
+Name
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+PUBLIC
+
+itemNm
+
+Item Name
+
+CHAR
+
+bcd
+
+Barcode
+
+pkgUnitC
+d
+
+Packaging
+Unit Code
+
+pkg
+
+Package
+
+qtyUnitC
+d
+qty
+
+Quantity
+Unit Code
+Quantity
+
+prc
+
+Unit Price
+
+splyAmt
+
+dcRt
+
+dcAmt
+
+taxTyCd
+
+taxblAmt
+
+taxAmt
+
+totAmt
+
+Supply
+Amount
+Discount
+Rate
+Discount
+Amount
+Taxation
+Type Code
+Taxable
+Amount
+Tax Amount
+
+Total
+Amount
+
+CHAR
+
+CHAR
+
+NUMB
+ER
+CHAR
+
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+NUMB
+ER
+
+See ‘4.5.
+Packagi
+ng Unit’
+
+200
+
+20
+
+5
+
+13,2
+
+5
+
+13,2
+
+18,2
+
+18,2
+
+5,2
+
+18,2
+
+5
+
+18,2
+
+18,2
+
+18,2
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It is
+succeeded","resultDt":"20200226195420","data":{"saleList":[{"spplrTin":"A123456789Z","spplrNm":"Taxpayer1111","spplrBhfId":"00","spplrInvcNo":2,"rcptTyCd":"S","pmtTyCd
+":"01","cfmDt":"2020-01-27 21:03:00","salesDt":"20200127","stockRlsDt":"2020-01-27
+21:03:00","totItemCnt":2,"taxblAmtA":0,"taxblAmtB":10500,"taxblAmtC":0,"taxblAmtD":0,"taxblAmtE":0,"taxRtA":0,"taxRtB":18,"taxRtC":0,"taxRtD":0,"taxRtE":0,"taxAmtA":0
+,"taxAmtB":1602,"taxAmtC":0,"taxAmtD":0,"taxAmtE":0,"totTaxblAmt":10500,"totTaxAmt":1602,"totAmt":10500,"remark":null,"itemList":[{"itemSeq":1,"itemCd":”KE1NTXU00
+
+46
+
+PUBLIC
+
+Object
+
+Object ID
+
+ISO 9001:2015 CERTIFIED
+
+Object
+Name
+
+Sub Object_1
+
+Object ID
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object
+Name
+
+Attribute
+
+Attribute
+ID
+
+Attribute
+Name
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+00001","itemClsCd":"5059690800","itemNm":"test item
+1","bcd":null,"pkgUnitCd":"NT","pkg":2,"qtyUnitCd":"U","qty":2,"prc":3500,"splyAmt":7000,"dcRt":0,"dcAmt":0,"taxTyCd":"B","taxblAmt":7000,"taxAmt":1068,"totAmt":7000},
+{"itemSeq":2,"itemCd":”KE1NTXU0000002","itemClsCd":"5022110801","itemNm":"test item
+2","bcd":null,"pkgUnitCd":"NT","pkg":1,"qtyUnitCd":"U","qty":1,"prc":3500,"splyAmt":3500,"dcRt":0,"dcAmt":0,"taxTyCd":"B","taxblAmt":3500,"taxAmt":534,"totAmt":3500}]}]
+}}
+
+3.3.7.2
+
+TrnsPurchaseSaveReq/Res
+
+This part describes the components of Purchase-Transaction-Save API function (url : /insertTrnsPurchase) and data types for each item. This API function is
+divided into 'Request: Argument' and 'Response: Return Object'. The TrnsPurchaseSaveReq is an Argument Object of Request, The TrnsPurchaseSaveRes
+is a Return Object of Response.
+Object
+
+Attribute
+
+Object ID
+
+TrnsPurchas
+eSaveReq
+
+Object
+Name
+
+Save
+Purchase
+Request
+
+47
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Object ID Object
+Name
+
+Object ID Object
+Name
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+tin
+
+bhfId
+
+cmcKey
+
+spplrTin
+
+PIN
+
+Branch ID
+
+Communication
+Key
+Supplier PIN
+
+invcNo
+
+Invoice Number
+
+orgInvcNo
+
+spplrBhfId
+
+spplrNm
+
+spplrInvcNo
+
+regTyCd
+
+Original Invoice
+Number
+Supplier Branch
+ID
+Supplier Name
+
+Supplier Invoice
+Number
+Registration Type
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+NUMBE
+R
+CHAR
+
+CHAR
+
+NUMBE
+R
+CHAR
+
+Y
+
+Y
+
+Y
+
+N
+
+Y
+
+Y
+
+N
+
+N
+
+N
+
+Y
+
+11
+
+2
+
+255
+
+11
+
+38
+
+38
+
+2
+
+60
+
+38
+
+5
+
+See ‘4.12.
+
+PUBLIC
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+Object
+
+Object ID
+
+Object
+Name
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Object ID Object
+Name
+
+Object ID Object
+Name
+
+Code
+
+pchsTyCd
+
+Purchase Type
+Code
+
+CHAR
+
+rcptTyCd
+
+Receipt Type
+Code
+
+CHAR
+
+pmtTyCd
+
+Payment Type
+Code
+
+pchsSttsCd
+
+Purchase Status
+Code
+
+CHAR
+
+CHAR
+
+cfmDt
+
+Validated Date
+
+CHAR
+
+pchsDt
+
+Purchase Date
+
+CHAR
+
+wrhsDt
+
+cnclReqDt
+
+cnclDt
+
+Warehousing
+Date
+Cancel
+Reqeuested Date
+Canceled Date
+
+CHAR
+
+CHAR
+
+CHAR
+
+rfdDt
+
+Credit Note Date
+
+CHAR
+
+totItemCnt
+
+Total Item Count
+
+NUMBE
+
+Y
+
+Y
+
+Y
+
+Y
+
+N
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+Y
+
+48
+
+Transact
+ion
+Progress
+’
+See ‘4.8.
+Transact
+ion
+Type’
+See ‘4.13.
+Purchas
+e
+Receipt
+Type’
+See ‘4.10.
+Payment
+Method’
+See ‘4.11.
+Transact
+ion
+Progress
+’
+yyyyMMd
+dhhmmss
+yyyyMMd
+d
+yyyyMMd
+dhhmmss
+yyyyMMd
+dhhmmss
+yyyyMMd
+dhhmmss
+yyyyMMd
+dhhmmss
+
+5
+
+5
+
+5
+
+5
+
+14
+
+8
+
+14
+
+14
+
+14
+
+14
+
+10
+
+Object
+
+Object ID
+
+Object
+Name
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Object ID Object
+Name
+
+Object ID Object
+Name
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+PUBLIC
+
+taxblAmtA
+
+taxblAmtB
+
+taxblAmtC
+
+taxblAmtD
+
+taxblAmtE
+
+taxRtA
+
+Taxable Amount
+A
+Taxable Amount
+B
+Taxable Amount
+C
+Taxable Amount
+D
+Taxable Amount
+E
+Tax Rate A
+
+taxRtB
+
+Tax Rate B
+
+taxRtC
+
+Tax Rate C
+
+taxRtD
+
+Tax Rate D
+
+taxRtE
+
+Tax Rate E
+
+taxAmtA
+
+Tax Amt A
+
+taxAmtB
+
+Tax Amt B
+
+taxAmtC
+
+Tax Amt C
+
+taxAmtD
+
+Tax Amt D
+
+taxAmtE
+
+Tax Amt E
+
+totTaxblAmt
+
+Total Taxable
+Amount
+
+R
+
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+7,2
+
+7,2
+
+7,2
+
+7,2
+
+7,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+18,2
+
+49
+
+Object
+
+Object ID
+
+Object
+Name
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Object ID Object
+Name
+
+Object ID Object
+Name
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+PUBLIC
+
+totTaxAmt
+
+totAmt
+
+remark
+
+regrId
+
+regrNm
+
+modrId
+
+Total Tax
+Amount
+Total Amount
+
+Remark
+
+NUMBE
+R
+NUMBE
+R
+CHAR
+
+Registration ID
+
+CHAR
+
+Registration
+Name
+Modifier ID
+
+Y
+
+Y
+
+N
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+N
+
+Y
+
+Y
+
+N
+
+N
+
+N
+
+N
+
+N
+
+Y
+
+18,2
+
+18,2
+
+400
+
+20
+
+60
+
+20
+
+60
+
+3
+
+20
+
+10
+
+200
+
+20
+
+10
+
+20
+
+200
+
+5
+
+13,2
+
+See ‘4.5.
+Packagi
+ng Unit’
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+
+TrnsPur
+chaseSav
+eItem
+<List>
+
+Save
+transaction
+purchase
+item
+information
+
+modrNm
+
+Modifier Name
+
+itemSeq
+
+itemCd
+
+itemClsCd
+
+itemNm
+
+bcd
+
+spplrItemCl
+sCd
+
+spplrItemCd
+
+spplrItemN
+m
+pkgUnitCd
+
+Item Sequence
+Number
+Item Code
+
+Item
+Classification
+Code
+Item Name
+
+Barcode
+
+Supplier Item
+Classification
+Code
+Supplier Item
+Code
+Supplier Item
+Name
+Packaging Unit
+Code
+
+pkg
+
+Package
+
+50
+
+Object
+
+Object ID
+
+Object
+Name
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Object ID Object
+Name
+
+Object ID Object
+Name
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+PUBLIC
+
+qtyUnitCd
+
+Quantity Unit
+Code
+
+CHAR
+
+qty
+
+prc
+
+Quantity
+
+Unit Price
+
+splyAmt
+
+Supply Price
+
+dcRt
+
+Discount Rate
+
+dcAmt
+
+taxblAmt
+
+taxTyCd
+
+Discaount
+Amount
+Taxable Amout
+
+Taxation Type
+Code
+
+taxAmt
+
+Tax Amount
+
+totAmt
+
+Total Amount
+
+itemExprDt
+
+Item Expired
+Date
+
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+
+NUMBE
+R
+NUMBE
+R
+CHAR
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+N
+
+5
+
+13,2
+
+18,2
+
+18,2
+
+5,2
+
+18,2
+
+18,2
+
+5
+
+18,2
+
+18,2
+
+8
+
+See ‘4.6.
+Unit of
+Quantity
+’
+
+See ‘4.1.
+Tax
+Type’
+
+yyyyMMd
+d
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","invcNo":1,"orgInvcNo":0,"spplrTin":”A123456789Z”,"spplrBhfId":null,"spplrNm":null,"spplrInvcNo":null,"regTyCd":"M","pchsTyCd":"N","rc
+ptTyCd":"P","pmtTyCd":"01","pchsSttsCd":"02","cfmDt":"20200127210300","pchsDt":"20200127","wrhsDt":"","cnclReqDt":"","cnclDt":"","rfdDt":"","totItemCnt":2,"taxblAmtA":
+0,"taxblAmtB":10500,"taxblAmtC":0,"taxblAmtD":0,"taxblAmtE":0,"taxRtA":0,"taxRtB":18,"taxRtC":0,"taxRtD":0,"taxRtE":0,"taxAmtA":0,"taxAmtB":1890,"taxAmtC":0,"taxAmt
+D":0,"taxAmtE":0,"totTaxblAmt":10500,"totTaxAmt":1890,"totAmt":10500,"remark":null,
+"regrId":"Test","regrNm":"Test","modrId":"Test","modrNm":"Test","itemList":[{"itemSeq":1,"itemCd":”KE1NTXU0000001","itemClsCd":"5059690800","itemNm":"test
+item
+1","bcd":"","spplrItemClsCd":null,"spplrItemCd":null,"spplrItemNm":null,"pkgUnitCd":"NT","pkg":2,"qtyUnitCd":"U","qty":2,"prc":3500,"splyAmt":7000,"dcRt":0,"dcAmt":0,"tax
+blAmt":7000,"taxTyCd":"B","taxAmt":1260,"totAmt":7000,"itemExprDt":null},{"itemSeq":2,"itemCd":”KE1NTXU0000002","itemClsCd":"5022110801","itemNm":"test
+item
+2","bcd":"","spplrItemClsCd":null,"spplrItemCd":null,"spplrItemNm":null,"pkgUnitCd":"NT","pkg":1,"qtyUnitCd":"U","qty":1,"prc":3500,"splyAmt":3500,"dcRt":0,"dcAmt":0,"tax
+
+51
+
+PUBLIC
+
+Object
+
+Object ID
+
+Object
+Name
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute ID
+
+Attribute Name
+
+Object ID Object
+Name
+
+Object ID Object
+Name
+
+Data
+Type
+
+Require
+d
+
+Data
+Length
+
+Format
+
+blAmt":3500,"taxTyCd":"B","taxAmt":630,"totAmt":3500,"itemExprDt":null}]}
+
+Object
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object
+ID
+
+Object
+Name
+
+Object
+ID
+
+Object
+Name
+
+TrnsPurchaseSaveR
+es
+
+Purchase
+
+Save
+Response
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It is succeeded","resultDt":"20200226194650","data":null}
+
+Attribute
+
+Attribut
+e ID
+
+Attribute
+Name
+
+Data
+Type
+
+Require
+d
+
+Data Length
+
+Format
+
+resultCd
+
+resultMs
+g
+resultDt
+
+Result Code
+
+Result
+Message
+Result
+DateTime
+
+CHAR
+
+CHAR
+
+CHAR
+
+3
+
+14
+
+52
+
+PUBLIC
+
+3.3.8 Stock Information
+
+3.3.8.1
+
+StockMoveReq/Res
+
+ISO 9001:2015 CERTIFIED
+
+This part describes the components of Stock-movement API function (url : /selectStockMoveList) and data types for each item. This API function is divided into
+'Request: Argument' and 'Response: Return Object'. The StockMoveReq is an Argument Object of Request, The StockMoveRes is a Return Object of
+Response.
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+Object ID
+
+Object
+Name
+
+StockMoveReq
+
+Stock
+
+Search
+Movement
+Request
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","lastReqDt":"20180524000000"}
+
+Object
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Object ID
+
+Object
+Name
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+StockMov
+eRes
+
+Search Stock
+Movement
+Response
+
+StockMove
+<List>
+
+Stock
+movement
+information
+
+Attribute
+ID
+
+Attribute
+Name
+
+tin
+
+bhfId
+
+cmcKey
+
+lastReqDt
+
+PIN
+
+Branch ID
+
+Communicati
+on Key
+Last Request
+date time
+
+Data
+Type
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+Required
+
+Data
+Length
+
+Format
+
+Y
+
+Y
+
+Y
+
+Y
+
+11
+
+2
+
+255
+
+14
+
+Attribute
+
+Attribute
+ID
+
+resultCd
+
+resultMsg
+
+resultDt
+
+custTin
+
+custBhfId
+
+sarNo
+
+Attribute
+Name
+
+Result Code
+
+Result
+Message
+
+Result Date
+
+Customer PIN
+
+Customer
+Branch Office
+ID
+Stored
+released
+
+and
+
+Data
+Type
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+
+Require
+d
+
+Data
+Length
+
+Format
+
+3
+
+14
+
+11
+
+2
+
+38
+
+53
+
+Object
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+StockMove
+Item
+<List>
+
+Stock
+movement
+Item
+
+54
+
+Attribute
+ID
+
+ocrnDt
+
+totItemCn
+t
+totTaxblA
+mt
+totTaxAm
+t
+totAmt
+
+Attribute
+Name
+Number
+
+Occurred Date
+
+Total Item Cou
+nt
+Total Supply P
+rice
+
+Total VAT
+
+Total Amount
+
+remark
+
+Remark
+
+itemSeq
+
+Item Sequence
+
+itemClsCd
+
+itemCd
+
+Class
+
+Item
+Code
+Item Code
+
+itemNm
+
+Item Name
+
+bcd
+
+Barcode
+
+pkgUnitC
+d
+pkg
+
+qtyUnitCd
+
+qty
+
+itemExpr
+Dt
+prc
+
+splyAmt
+
+totDcAmt
+
+Package unit c
+ode
+Package Quant
+ity
+Unit Quantity
+Code
+Unit Quantity
+
+Item
+Expired Date
+Unit Price
+
+Supply
+Amount
+Discount Rate
+
+Data
+Type
+
+CHAR
+
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+CHAR
+
+NUMBE
+R
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+CHAR
+
+NUMBE
+R
+CHAR
+
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+
+PUBLIC
+
+Require
+d
+
+Data
+Length
+
+Format
+
+yyyyMMd
+d
+
+yyyyMMd
+d
+
+8
+
+10
+
+18,2
+
+18,2
+
+18,2
+
+400
+
+3
+
+10
+
+20
+
+200
+
+20
+
+5
+
+13,2
+
+5
+
+13,2
+
+8
+
+15,2
+
+18,2
+
+18,2
+
+Object
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+PUBLIC
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Attribute
+ID
+taxblAmt
+
+taxTyCd
+
+taxAmt
+
+totAmt
+
+Attribute
+Name
+Taxable
+Amount
+
+Taxation Type
+Code
+
+Tax Amount
+
+Total Amount
+
+Data
+Type
+NUMBE
+R
+CHAR
+
+NUMBE
+R
+NUMBE
+R
+
+Require
+d
+
+Data
+Length
+18,2
+
+5
+
+18,2
+
+18,2
+
+Format
+
+See‘4.1.
+Tax
+Type’
+
+0
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It
+succeeded","resultDt":"20200226200723","data":{"stockList":[{"custTin":"A123456789Z","custBhfId":"00","sarNo":6,"ocrnDt":"20200120","totItemCnt":1,"totTaxblAmt":18000
+00,"totTaxAmt":274576.27,"totAmt":1800000,"remark":null,"itemList":[{"itemSeq":1,"itemCd":"KR2BZX0000001","itemClsCd":"1110162100","itemNm":"Grocery_Item#1","bcd"
+:"8801234567051","pkgUnitCd":"BZ","pkg":0,"qtyUnitCd":"CA","qty":450,"itemExprDt":null,"prc":4000,"splyAmt":1800000,"totDcAmt":0,"taxblAmt":1800000,"taxTyCd":"B","t
+axAmt":274576.27,"totAmt":1800000}]},{"custTin":"A123456789Z","custBhfId":"00","sarNo":59,"ocrnDt":"20200110","totItemCnt":1,"totTaxblAmt":660000,"totTaxAmt":10067
+7.97,"totAmt":660000,"remark":null,"itemList":[{"itemSeq":1,"itemCd":"KR2AMXCRX0000001","itemClsCd":"1110151600","itemNm":"sample_nudle#1","bcd":"8801234567001
+","pkgUnitCd":"AM","pkg":0,"qtyUnitCd":"CR","qty":600,"itemExprDt":null,"prc":1100,"splyAmt":660000,"totDcAmt":0,"taxblAmt":660000,"taxTyCd":"B","taxAmt":100677.97,"
+totAmt":660000}]}]}}
+
+is
+
+3.3.8.2
+
+StockIOSaveReq/Res
+
+This part describes the components of Stock-In/Out-Save API function (url : /insertStockIO) and data types for each item. This API function is divided into
+'Request: Argument' and 'Response: Return Object'. The StockIOSaveReq is an Argument Object of Request, The StockIOSaveRes is a Return Object of
+Response.
+Object
+
+Attribute
+
+Object ID
+
+Object
+Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object ID
+
+Object Name
+
+Object ID
+
+Object
+Name
+
+StockIOSav
+eReq
+
+Save Stock
+In/Out
+Request
+
+55
+
+Attribute
+ID
+
+tin
+
+bhfId
+
+cmcKey
+
+sarNo
+
+Attribute Name
+
+PIN
+
+Branch ID
+
+Communication
+Key
+Stored
+
+Data
+Type
+
+CHAR
+
+CHAR
+
+CHAR
+
+and NUMBE
+
+Required
+
+Data
+Length
+
+Format
+
+Y
+
+Y
+
+Y
+
+Y
+
+11
+
+2
+
+255
+
+38
+
+255
+
+Object
+
+Object ID
+
+Object
+Name
+
+Sub Object_1
+
+Sub Object_2
+
+StockIoIte
+mSaveRe
+q
+<List>
+
+Stock in/out
+item
+information
+
+56
+
+ISO 9001:2015 CERTIFIED
+Attribute
+
+Attribute
+ID
+
+orgSarNo
+
+regTyCd
+
+custTin
+
+custNm
+
+Attribute Name
+
+released Number
+
+Stored
+released
+
+Original
+and
+Number
+Registration Type
+Code
+Customer PIN
+
+Customer Name
+
+Data
+Type
+R
+
+NUMBE
+R
+
+CHAR
+
+CHAR
+
+CHAR
+
+custBhfId
+
+Customer BHF ID
+
+CHAR
+
+sarTyCd
+
+ocrnDt
+
+totItemCn
+t
+totTaxblA
+mt
+totTaxAmt
+
+and
+Type
+
+Stored
+released
+Code
+Occurred Date ti
+me
+Total Item Count
+
+Total Supply Price
+
+Total VAT
+
+totAmt
+
+Total Amount
+
+remark
+
+regrId
+
+regrNm
+
+modrId
+
+Remark
+
+Registration ID
+
+Registration
+Name
+Modifier ID
+
+modrNm
+
+Modifier Name
+
+itemSeq
+
+itemCd
+
+itemClsCd
+
+itemNm
+
+Item Sequence
+
+Item Code
+
+Item Class Code
+
+Item Name
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+CHAR
+
+CHAR
+
+CHAR
+
+PUBLIC
+
+Required
+
+Data
+Length
+
+Format
+
+See‘4.14
+Stock
+In/Out’
+yyyyMMdd
+
+Y
+
+Y
+
+N
+
+N
+
+N
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+N
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+N
+
+Y
+
+Y
+
+38
+
+5
+
+11
+
+100
+
+2
+
+5
+
+8
+
+10
+
+18,2
+
+18,2
+
+18,2
+
+400
+
+20
+
+60
+
+20
+
+60
+
+3
+
+20
+
+10
+
+200
+
+Object
+
+Object ID
+
+Object
+Name
+
+Sub Object_1
+
+Sub Object_2
+
+ISO 9001:2015 CERTIFIED
+Attribute
+
+Attribute
+ID
+bcd
+
+Attribute Name
+
+Barcode
+
+pkgUnitCd
+
+Package unit code
+
+pkg
+
+qtyUnitCd
+
+qty
+
+itemExpr
+Dt
+prc
+
+splyAmt
+
+totDcAmt
+
+taxblAmt
+
+taxTyCd
+
+taxAmt
+
+totAmt
+
+Package Quantity
+
+Unit Quantity Cod
+e
+
+Unit Quantity
+
+Item Expired Date
+
+Unit Price
+
+Supply Amount
+
+Discount Amount
+
+Taxable Amount
+
+Taxation
+Code
+
+Type
+
+Tax Amount
+
+Total Amount
+
+Data
+Type
+CHAR
+
+CHAR
+
+NUMBE
+R
+CHAR
+
+NUMBE
+R
+CHAR
+
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+NUMBE
+R
+CHAR
+
+NUMBE
+R
+NUMBE
+R
+
+Required
+
+N
+
+Y
+
+Y
+
+Y
+
+Y
+
+N
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+PUBLIC
+
+Format
+
+Data
+Length
+20
+
+5
+
+13,2
+
+5
+
+13,2
+
+8
+
+15,2
+
+18,2
+
+18,2
+
+18,2
+
+5
+
+18,2
+
+18,2
+
+See
+‘4.5.
+Packagin
+g Unit’
+
+yyyyMMdd
+
+‘4.1
+See
+Tax Type’
+
+JSON SAMPLE
+
+{“tin”:”A123456789Z”,"bhfId":"00","sarNo":2,"orgSarNo":2,"regTyCd":"M","custTin":"A123456789Z","custNm":null,"custBhfId":null,"sarTyCd":"11","ocrnDt":"20200126","totIte
+mCnt":2,"totTaxblAmt":70000,"totTaxAmt":10677.96,"totAmt":70000,"remark":null,"regrId":"Test","regrNm":"Test","modrId":"Test","modrNm":"Test","itemList":[{"itemSeq":1,
+"itemCd":”KE1NTXU0000001","itemClsCd":"5059690800","itemNm":"test
+item
+1","bcd":null,"pkgUnitCd":"NT","pkg":10,"qtyUnitCd":"U","qty":10,"itemExprDt":null,"prc":3500,"splyAmt":35000,"totDcAmt":0,"taxblAmt":35000,"taxTyCd":"B","taxAmt":5338
+item
+.98,"totAmt":35000},{"itemSeq":2,"itemCd":”KE1NTXU0000002","itemClsCd":"5059690800","itemNm":"test
+2","bcd":null,"pkgUnitCd":"BL","pkg":10,"qtyUnitCd":"U","qty":10,"itemExprDt":null,"prc":3500,"splyAmt":35000,"totDcAmt":0,"taxblAmt":35000,"taxTyCd":"B","taxAmt":5338
+.98,"totAmt":35000}]}
+
+57
+
+PUBLIC
+
+ISO 9001:2015 CERTIFIED
+
+Attribute
+
+Attribute
+ID
+
+resultCd
+
+resultMsg
+
+resultDt
+
+Attribute Name
+
+Data
+Type
+
+Requir
+ed
+
+Data
+Length
+
+Format
+
+Result Code
+
+Result Message
+
+Result Date
+
+CHAR
+
+CHAR
+
+CHAR
+
+3
+
+14
+
+Object
+
+Object ID
+
+Object
+Name
+
+Sub Object_1
+
+Object ID
+
+Object
+Name
+
+Sub Object_2
+
+Object ID
+
+Object
+Name
+
+StockIOSav
+eRes
+
+Save Stock
+In/Out
+Response
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It is succeeded","resultDt":"20200226195801","data":null}
+
+3.3.8.3
+
+StockMasterSaveReq/Res
+
+This part describes the components of Save-StockMaster API function (url : /saveStockMaster) and data types for each item. This API function is divided into
+'Request: Argument' and 'Response: Return Object'. The StockMasterSaveReq is an Argument Object of Request, The StockMasterSaveRes is a Return Object
+of Response.
+Object
+
+Attribute
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object
+ID
+
+Object Name
+
+Object
+ID
+
+Object Name
+
+StockMasterSave
+Req
+
+Stock
+
+Save
+Master
+Request
+
+Attribute
+ID
+
+Attribute
+Name
+
+tin
+
+bhfId
+
+cmcKey
+
+itemCd
+
+rsdQty
+
+regrId
+
+regrNm
+
+modrId
+modrNm
+
+PIN
+
+Branch ID
+
+Communicati
+on Key
+Item Code
+
+Remain
+Quantity
+Registration
+ID
+Registration
+Name
+Modifier ID
+Modifier
+Name
+
+Data
+Type
+
+CHAR
+
+CHAR
+
+CHAR
+
+CHAR
+
+NUMBE
+R
+CHAR
+
+CHAR
+
+CHAR
+CHAR
+
+Require
+d
+
+Data
+Length
+
+Format
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+
+Y
+Y
+
+11
+
+2
+
+255
+
+20
+
+13,2
+
+20
+
+60
+
+20
+60
+
+JSON SAMPLE
+
+58
+
+PUBLIC
+
+{“tin”:”A123456789Z”,"bhfId":"00","itemCd":”KE1NTXU0000002","rsdQty":10,"regrId":"Test","regrNm":"Test","modrId":"Test","modrNm":"Test"}
+
+ISO 9001:2015 CERTIFIED
+
+Object
+
+Object ID
+
+Object Name
+
+Sub Object_1
+
+Sub Object_2
+
+Object
+ID
+
+Object Name
+
+Object
+ID
+
+Object Name
+
+Attribute
+
+Attribute
+ID
+
+Attribute
+Name
+
+Data
+Type
+
+Requir
+ed
+
+Data
+Length
+
+Format
+
+StockMasterSa
+veRes
+
+Stock
+
+Save
+Master
+Response
+
+JSON SAMPLE
+
+{"resultCd":"000","resultMsg":"It is succeeded","resultDt":"20200226195637","data":null}
+
+resultCd
+resultMsg
+
+resultDt
+
+Result Code
+Result
+Message
+Result Date
+
+CHAR
+CHAR
+
+CHAR
+
+3
+
+14
+
+59
+
+PUBLIC
+
+4 Code Definition
+
+ISO 9001:2015 CERTIFIED
+
+4.1. Tax Type
+
+Code
+Classification
+04
+
+Code Classification Name
+
+Tax Type
+
+Code
+
+Sort Order
+
+Code Name
+
+Code Description
+
+remark
+
+A
+
+B
+
+C
+
+D
+
+E
+
+1
+
+2
+
+3
+
+4
+
+5
+
+A
+
+B-16.00%
+
+C
+
+D
+
+E
+
+A-Exempt
+
+B-16.00%
+
+C-0%
+
+D- Non-VAT
+
+E-8%
+
+4.2. Taxpayer Status
+
+Code
+Classification
+15
+
+Code Classification Name
+
+Taxpayer Status
+
+Code
+
+Sort Order
+
+Code Name
+
+Code Description
+
+remark
+
+A
+
+D
+
+1
+
+2
+
+Active
+
+Inactive
+
+Active
+
+Inactive
+
+4.3. Product Type
+
+Code
+Classification
+24
+
+Code Classification Name
+
+Product Type
+
+Code
+
+Sort Order
+
+Code Name
+
+Code Description
+
+remark
+
+1
+
+2
+
+3
+
+1
+
+2
+
+3
+
+Raw Material
+
+Raw Material
+
+Finished Product
+
+Finished Product
+
+Service
+
+Service without stock
+
+4.4. Countries Code
+
+Code Classification
+05
+Code
+
+Sort
+Order
+
+AC
+
+AD
+
+AE
+
+AG
+
+1
+
+2
+
+3
+
+4
+
+Code Name
+
+ASCENSION
+ISLAND
+ANDORRA
+UNITED
+EMIRATES
+ANTIGUA
+
+Code Classification Name
+Nation
+Code Description
+
+remark
+
+ASCENSION ISLAND
+
+ANDORRA
+
+ARAB
+
+UNITED ARAB EMIRATES
+
+AND ANTIGUA AND BARBUDA
+
+60
+
+Code Classification
+05
+Code
+
+Sort
+Order
+
+Code Name
+
+BARBUDA
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Nation
+Code Description
+
+PUBLIC
+
+remark
+
+AI
+AL
+AM
+
+AN
+
+AO
+AQ
+AR
+
+AS
+
+AT
+AU
+AW
+AX
+AZ
+
+BA
+
+BB
+BD
+BE
+BF
+BG
+BH
+BI
+BJ
+BM
+
+BN
+
+BO
+BR
+BS
+BT
+BV
+BW
+BY
+BZ
+CA
+
+CC
+
+CD
+
+CF
+
+5
+6
+7
+
+8
+
+9
+10
+11
+
+12
+
+13
+14
+15
+16
+17
+
+18
+
+19
+20
+21
+22
+23
+24
+25
+26
+27
+
+28
+
+29
+30
+31
+32
+33
+34
+35
+36
+37
+
+38
+
+39
+
+40
+
+AND
+
+ANGUILLA
+ALBANIA
+ARMENIA
+NETHERLANDS
+ANTILLES
+ANGOLA
+ANTARCTICA
+ARGENTINA
+AMERICAN
+SAMOA
+AUSTRIA
+AUSTRALIA
+ARUBA
+ALAND ISLANDS
+AZERBAIJAN
+BOSNIA
+HERZEGOVINA
+BARBADOS
+BANGLADESH
+BELGIUM
+BURKINA FASO
+BULGARIA
+BAHRAIN
+BURUNDI
+BENIN
+BERMUDA
+BRUNEI
+DARUSSALAM
+BOLIVIA
+BRAZIL
+BAHAMAS
+BHUTAN
+BOUVET ISLAND
+BOTSWANA
+BELARUS
+BELIZE
+CANADA
+COCOS (KEELING)
+ISLANDS
+CONGO,
+DEMOCRATIC
+REPUBLIC
+CENTRAL
+
+ANGUILLA
+ALBANIA
+ARMENIA
+
+NETHERLANDS ANTILLES
+
+ANGOLA
+ANTARCTICA
+ARGENTINA
+
+AMERICAN SAMOA
+
+AUSTRIA
+AUSTRALIA
+ARUBA
+ALAND ISLANDS
+AZERBAIJAN
+
+BOSNIA AND HERZEGOVINA
+
+BARBADOS
+BANGLADESH
+BELGIUM
+BURKINA FASO
+BULGARIA
+BAHRAIN
+BURUNDI
+BENIN
+BERMUDA
+
+BRUNEI DARUSSALAM
+
+BOLIVIA
+BRAZIL
+BAHAMAS
+BHUTAN
+BOUVET ISLAND
+BOTSWANA
+BELARUS
+BELIZE
+CANADA
+
+COCOS (KEELING) ISLANDS
+
+CONGO, DEMOCRATIC REPUBLIC
+
+CENTRAL AFRICAN REPUBLIC
+
+61
+
+Code Classification
+05
+Code
+
+Sort
+Order
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Nation
+Code Description
+
+Code Name
+
+PUBLIC
+
+remark
+
+CG
+CH
+
+CI
+
+CK
+CL
+CM
+CN
+CO
+CR
+
+CS
+
+CU
+CV
+
+CX
+
+CY
+CZ
+DE
+DJ
+DK
+DM
+
+DO
+
+DZ
+EC
+EE
+EG
+
+EH
+
+ER
+ES
+ET
+
+EU
+
+FI
+FJ
+
+FK
+
+FM
+FO
+FR
+
+41
+42
+
+43
+
+44
+45
+46
+47
+48
+49
+
+50
+
+51
+52
+
+53
+
+54
+55
+56
+57
+58
+59
+
+60
+
+61
+62
+63
+64
+
+65
+
+66
+67
+68
+
+69
+
+70
+71
+
+72
+
+73
+74
+75
+
+D'IVOIRE
+
+AFRICAN
+REPUBLIC
+CONGO
+SWITZERLAND
+COTE
+(IVORY COAST)
+COOK ISLANDS
+CHILE
+CAMEROON
+CHINA
+COLOMBIA
+COSTA RICA
+CZECHOSLOVAKIA
+(FORMER)
+CUBA
+CAPE VERDE
+CHRISTMAS
+ISLAND
+CYPRUS
+CZECH REPUBLIC
+GERMANY
+DJIBOUTI
+DENMARK
+DOMINICA
+DOMINICAN
+REPUBLIC
+ALGERIA
+ECUADOR
+ESTONIA
+EGYPT
+WESTERN
+SAHARA
+ERITREA
+SPAIN
+ETHIOPIA
+EUROPEAN
+UNION
+FINLAND
+FIJI
+FALKLAND
+ISLANDS
+(MALVINAS)
+MICRONESIA
+FAROE ISLANDS
+FRANCE
+
+CONGO
+SWITZERLAND
+
+COTE D'IVOIRE (IVORY COAST)
+
+COOK ISLANDS
+CHILE
+CAMEROON
+CHINA
+COLOMBIA
+COSTA RICA
+
+CZECHOSLOVAKIA (FORMER)
+
+CUBA
+CAPE VERDE
+
+CHRISTMAS ISLAND
+
+CYPRUS
+CZECH REPUBLIC
+GERMANY
+DJIBOUTI
+DENMARK
+DOMINICA
+
+DOMINICAN REPUBLIC
+
+ALGERIA
+ECUADOR
+ESTONIA
+EGYPT
+
+WESTERN SAHARA
+
+ERITREA
+SPAIN
+ETHIOPIA
+
+EUROPEAN UNION
+
+FINLAND
+FIJI
+
+FALKLAND ISLANDS (MALVINAS)
+
+MICRONESIA
+FAROE ISLANDS
+FRANCE
+
+62
+
+Code Classification
+05
+Code
+
+Sort
+Order
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Nation
+Code Description
+
+Code Name
+
+PUBLIC
+
+remark
+
+FX
+
+GA
+
+GB
+
+GD
+GE
+GF
+GG
+GH
+GI
+GL
+GM
+GN
+GP
+
+GQ
+
+GR
+
+GS
+
+GT
+GU
+GW
+GY
+HK
+
+HM
+
+HN
+
+HR
+
+HT
+HU
+ID
+IE
+IL
+IM
+IN
+
+IO
+
+IQ
+IR
+IS
+
+76
+
+77
+
+78
+
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+
+89
+
+90
+
+91
+
+92
+93
+94
+95
+96
+
+97
+
+98
+
+99
+
+100
+101
+102
+103
+104
+105
+106
+
+107
+
+108
+109
+110
+
+BRITAIN
+
+FRANCE,
+METROPOLITAN
+GABON
+GREAT
+(UK)
+GRENADA
+GEORGIA
+FRENCH GUIANA
+GUERNSEY
+GHANA
+GIBRALTAR
+GREENLAND
+GAMBIA
+GUINEA
+GUADELOUPE
+EQUATORIAL
+GUINEA
+GREECE
+S. GEORGIA AND
+S.
+SANDWICH
+ISLS.
+GUATEMALA
+GUAM
+GUINEA BISSAU
+GUYANA
+HONG KONG
+HEARD
+MCDONALD
+ISLANDS
+HONDURAS
+CROATIA
+(HRVATSKA)
+HAITI
+HUNGARY
+INDONESIA
+IRELAND
+ISRAEL
+ISLE OF MAN
+INDIA
+BRITISH INDIAN
+OCEAN
+TERRITORY
+IRAQ
+IRAN
+ICELAND
+
+AND
+
+FRANCE, METROPOLITAN
+
+GABON
+
+GREAT BRITAIN (UK)
+
+GRENADA
+GEORGIA
+FRENCH GUIANA
+GUERNSEY
+GHANA
+GIBRALTAR
+GREENLAND
+GAMBIA
+GUINEA
+GUADELOUPE
+
+EQUATORIAL GUINEA
+
+GREECE
+
+S. GEORGIA AND S. SANDWICH ISLS.
+
+GUATEMALA
+GUAM
+GUINEA BISSAU
+GUYANA
+HONG KONG
+
+HEARD AND MCDONALD ISLANDS
+
+HONDURAS
+
+CROATIA (HRVATSKA)
+
+HAITI
+HUNGARY
+INDONESIA
+IRELAND
+ISRAEL
+ISLE OF MAN
+INDIA
+
+BRITISH
+TERRITORY
+
+IRAQ
+IRAN
+ICELAND
+
+63
+
+INDIAN
+
+OCEAN
+
+PUBLIC
+
+remark
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Nation
+Code Description
+
+Code Name
+
+ITALY
+JERSEY
+JAMAICA
+JORDAN
+JAPAN
+KENYA
+KYRGYZSTAN
+CAMBODIA
+KIRIBATI
+COMOROS
+SAINT KITTS AND
+NEVIS
+NORTH KOREA
+SOUTH KOREA
+KUWAIT
+CAYMAN ISLANDS
+KAZAKHSTAN
+LAOS
+LEBANON
+SAINT LUCIA
+LIECHTENSTEIN
+SRI LANKA
+LIBERIA
+LESOTHO
+LITHUANIA
+LUXEMBOURG
+LATVIA
+LIBYA
+MOROCCO
+MONACO
+MOLDOVA
+MONTENEGRO
+MADAGASCAR
+MARSHALL
+ISLANDS
+F.Y.R.O.M.
+(MACEDONIA)
+MALI
+MYANMAR
+MONGOLIA
+MACAU
+NORTHERN
+MARIANA
+ISLANDS
+
+ITALY
+JERSEY
+JAMAICA
+JORDAN
+JAPAN
+KENYA
+KYRGYZSTAN
+CAMBODIA
+KIRIBATI
+COMOROS
+
+SAINT KITTS AND NEVIS
+
+NORTH KOREA
+SOUTH KOREA
+KUWAIT
+CAYMAN ISLANDS
+KAZAKHSTAN
+LAOS
+LEBANON
+SAINT LUCIA
+LIECHTENSTEIN
+SRI LANKA
+LIBERIA
+LESOTHO
+LITHUANIA
+LUXEMBOURG
+LATVIA
+LIBYA
+MOROCCO
+MONACO
+MOLDOVA
+MONTENEGRO
+MADAGASCAR
+
+MARSHALL ISLANDS
+
+F.Y.R.O.M. (MACEDONIA)
+
+MALI
+MYANMAR
+MONGOLIA
+MACAU
+
+NORTHERN MARIANA ISLANDS
+
+64
+
+Sort
+Order
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+
+121
+
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+
+143
+
+144
+
+145
+146
+147
+148
+
+149
+
+Code Classification
+05
+Code
+
+IT
+JE
+JM
+JO
+JP
+KE
+KG
+KH
+KI
+KM
+
+KN
+
+KP
+KR
+KW
+KY
+KZ
+LA
+LB
+LC
+LI
+LK
+LR
+LS
+LT
+LU
+LV
+LY
+MA
+MC
+MD
+ME
+MG
+
+MH
+
+MK
+
+ML
+MM
+MN
+MO
+
+MP
+
+Code Classification
+05
+Code
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Nation
+Code Description
+
+Code Name
+
+PUBLIC
+
+remark
+
+MARTINIQUE
+MAURITANIA
+MONTSERRAT
+MALTA
+MAURITIUS
+MALDIVES
+MALAWI
+MEXICO
+MALAYSIA
+MOZAMBIQUE
+NAMIBIA
+NEW CALEDONIA
+NIGER
+NORFOLK ISLAND
+NIGERIA
+NICARAGUA
+NETHERLANDS
+NORWAY
+NEPAL
+NAURU
+NEUTRAL ZONE
+NIUE
+NEW
+(AOTEAROA)
+OMAN
+PANAMA
+PERU
+FRENCH
+POLYNESIA
+PAPUA
+GUINEA
+PHILIPPINES
+PAKISTAN
+POLAND
+ST. PIERRE AND
+MIQUELON
+PITCAIRN
+PUERTO RICO
+PALESTINIAN
+TERRITORY,
+OCCUPIED
+PORTUGAL
+PALAU
+PARAGUAY
+
+ZEALAND
+
+NEW
+
+MARTINIQUE
+MAURITANIA
+MONTSERRAT
+MALTA
+MAURITIUS
+MALDIVES
+MALAWI
+MEXICO
+MALAYSIA
+MOZAMBIQUE
+NAMIBIA
+NEW CALEDONIA
+NIGER
+NORFOLK ISLAND
+NIGERIA
+NICARAGUA
+NETHERLANDS
+NORWAY
+NEPAL
+NAURU
+NEUTRAL ZONE
+NIUE
+
+NEW ZEALAND (AOTEAROA)
+
+OMAN
+PANAMA
+PERU
+
+FRENCH POLYNESIA
+
+PAPUA NEW GUINEA
+
+PHILIPPINES
+PAKISTAN
+POLAND
+
+ST. PIERRE AND MIQUELON
+
+TERRITORY,
+
+PITCAIRN
+PUERTO RICO
+
+PALESTINIAN
+OCCUPIED
+
+PORTUGAL
+PALAU
+PARAGUAY
+
+65
+
+Sort
+Order
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+165
+166
+167
+168
+169
+170
+171
+
+172
+
+173
+174
+175
+
+176
+
+177
+
+178
+179
+180
+
+181
+
+182
+183
+
+184
+
+185
+186
+187
+
+MQ
+MR
+MS
+MT
+MU
+MV
+MW
+MX
+MY
+MZ
+NA
+NC
+NE
+NF
+NG
+NI
+NL
+NO
+NP
+NR
+NT
+NU
+
+NZ
+
+OM
+PA
+PE
+
+PF
+
+PG
+
+PH
+PK
+PL
+
+PM
+
+PN
+PR
+
+PS
+
+PT
+PW
+PY
+
+PUBLIC
+
+remark
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Nation
+Code Description
+
+Code Name
+
+QATAR
+REUNION
+ROMANIA
+SERBIA
+RUSSIAN
+FEDERATION
+RWANDA
+SAUDI ARABIA
+SOLOMON
+ISLANDS
+SEYCHELLES
+SUDAN
+SWEDEN
+SINGAPORE
+ST. HELENA
+SLOVENIA
+SVALBARD & JAN
+MAYEN ISLANDS
+SLOVAK
+REPUBLIC
+SIERRA LEONE
+SAN MARINO
+SENEGAL
+SOMALIA
+SURINAME
+SAO TOME AND
+PRINCIPE
+USSR (FORMER)
+EL SALVADOR
+SYRIA
+SWAZILAND
+TURKS
+CAICOS ISLANDS
+CHAD
+FRENCH
+SOUTHERN
+TERRITORIES
+TOGO
+THAILAND
+TAJIKISTAN
+TOKELAU
+TURKMENISTAN
+TUNISIA
+TONGA
+
+AND
+
+QATAR
+REUNION
+ROMANIA
+SERBIA
+
+RUSSIAN FEDERATION
+
+RWANDA
+SAUDI ARABIA
+
+SOLOMON ISLANDS
+
+SEYCHELLES
+SUDAN
+SWEDEN
+SINGAPORE
+ST. HELENA
+SLOVENIA
+
+SVALBARD & JAN MAYEN ISLANDS
+
+SLOVAK REPUBLIC
+
+SIERRA LEONE
+SAN MARINO
+SENEGAL
+SOMALIA
+SURINAME
+
+SAO TOME AND PRINCIPE
+
+USSR (FORMER)
+EL SALVADOR
+SYRIA
+SWAZILAND
+
+TURKS AND CAICOS ISLANDS
+
+CHAD
+
+FRENCH SOUTHERN TERRITORIES
+
+TOGO
+THAILAND
+TAJIKISTAN
+TOKELAU
+TURKMENISTAN
+TUNISIA
+TONGA
+
+66
+
+Sort
+Order
+188
+189
+190
+191
+
+192
+
+193
+194
+
+195
+
+196
+197
+198
+199
+200
+201
+
+202
+
+203
+
+204
+205
+206
+207
+208
+
+209
+
+210
+211
+212
+213
+
+214
+
+215
+
+216
+
+217
+218
+219
+220
+221
+222
+223
+
+Code Classification
+05
+Code
+
+QA
+RE
+RO
+RS
+
+RU
+
+RW
+SA
+
+SB
+
+SC
+SD
+SE
+SG
+SH
+SI
+
+SJ
+
+SK
+
+SL
+SM
+SN
+SO
+SR
+
+ST
+
+SU
+SV
+SY
+SZ
+
+TC
+
+TD
+
+TF
+
+TG
+TH
+TJ
+TK
+TM
+TN
+TO
+
+Code Classification
+05
+Code
+
+Sort
+Order
+224
+225
+
+TP
+TR
+
+TT
+
+TV
+TW
+TZ
+UA
+UG
+
+UK
+
+UM
+
+US
+UY
+UZ
+
+VA
+
+VC
+
+VE
+
+VG
+
+VI
+
+VN
+VU
+
+WF
+
+WS
+YE
+YT
+
+YU
+
+ZA
+ZM
+
+ZR
+
+ZW
+
+226
+
+227
+228
+229
+230
+231
+
+232
+
+233
+
+234
+235
+236
+
+237
+
+238
+
+239
+
+240
+
+241
+
+242
+243
+
+244
+
+245
+246
+247
+
+248
+
+249
+250
+
+251
+
+252
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Nation
+Code Description
+
+Code Name
+
+PUBLIC
+
+remark
+
+AND
+
+MINOR
+
+EAST TIMOR
+TURKEY
+TRINIDAD
+TOBAGO
+TUVALU
+TAIWAN
+TANZANIA
+UKRAINE
+UGANDA
+UNITED
+KINGDOM
+US
+OUTLYING
+ISLANDS
+UNITED STATES
+URUGUAY
+UZBEKISTAN
+CITY
+VATICAN
+STATE (HOLY SEE)
+SAINT VINCENT &
+THE GRENADINES
+VENEZUELA
+BRITISH VIRGIN
+ISLANDS
+VIRGIN ISLANDS
+(U.S.)
+VIET NAM
+VANUATU
+AND
+WALLIS
+FUTUNA ISLANDS
+SAMOA
+YEMEN
+MAYOTTE
+SERBIA
+MONTENEGRO
+(FORMER)
+SOUTH AFRICA
+ZAMBIA
+(ZAIRE) SEE CD
+CONGO,
+DEMOCRATIC
+REPUBLIC
+ZIMBABWE
+
+AND
+
+EAST TIMOR
+TURKEY
+
+TRINIDAD AND TOBAGO
+
+TUVALU
+TAIWAN
+TANZANIA
+UKRAINE
+UGANDA
+
+UNITED KINGDOM
+
+US MINOR OUTLYING ISLANDS
+
+UNITED STATES
+URUGUAY
+UZBEKISTAN
+
+VATICAN CITY STATE (HOLY SEE)
+
+VINCENT
+
+SAINT
+GRENADINES
+VENEZUELA
+
+&
+
+THE
+
+BRITISH VIRGIN ISLANDS
+
+VIRGIN ISLANDS (U.S.)
+
+VIET NAM
+VANUATU
+
+WALLIS AND FUTUNA ISLANDS
+
+SAMOA
+YEMEN
+MAYOTTE
+
+SERBIA
+(FORMER)
+
+AND
+
+MONTENEGRO
+
+SOUTH AFRICA
+ZAMBIA
+
+(ZAIRE)
+DEMOCRATIC REPUBLIC
+
+SEE
+
+CD
+
+CONGO,
+
+ZIMBABWE
+
+67
+
+4.6 Packaging Unit
+
+ISO 9001:2015 CERTIFIED
+
+PUBLIC
+
+Code Classification
+17
+Code
+
+Sort
+Order
+1
+2
+3
+4
+
+AM
+BA
+BC
+BE
+
+BF
+
+BG
+BJ
+BK
+BL
+
+BQ
+
+BR
+BV
+BZ
+CA
+CH
+CJ
+CL
+
+CR
+
+CS
+CT
+CTN
+CY
+DR
+GT
+HH
+IZ
+JR
+JU
+JY
+KZ
+
+LZ
+
+NT
+
+OU
+
+PD
+PG
+PI
+PO
+
+5
+
+6
+7
+8
+9
+
+10
+
+11
+12
+13
+14
+15
+16
+17
+
+18
+
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+
+31
+
+32
+
+33
+
+34
+35
+36
+37
+
+Code Name
+
+Code Classification Name
+Packaging Unit
+Code Description
+
+remark
+
+non-
+
+protected
+
+Ampoule
+Barrel
+Bottlecrate
+Bundle
+Balloon,
+protected
+Bag
+Bucket
+Basket
+Bale
+Bottle,
+cylindrical
+Bar
+Bottle, bulbous
+Bag
+Can
+Chest
+Coffin
+Coil
+Wooden Box, Wooden
+Case
+Cassette
+Carton
+Container
+Cylinder
+Drum
+Extra Countable Item
+Hand Baggage
+Ingots
+Jar
+Jug
+Jerry CAN Cylindrical
+Canester
+Logs,
+bundle/bunch/truss
+Net
+Non-Exterior
+Packaging Unit
+Poddon
+Plate
+Pipe
+Pilot
+
+in
+
+Ampoule
+Barrel
+Bottlecrate
+Bundle
+
+Balloon, non-protected
+
+Bag
+Bucket
+Basket
+Bale
+
+Bottle, protected cylindrical
+
+Bar
+Bottle, bulbous
+Bag
+Can
+Chest
+Coffin
+Coil
+
+Wooden Box, Wooden Case
+
+Cassette
+Carton
+Container
+Cylinder
+Drum
+Extra Countable Item
+Hand Baggage
+Ingots
+Jar
+Jug
+Jerry CAN Cylindrical
+Canester
+
+Logs, in bundle/bunch/truss
+
+Net
+
+Non-Exterior Packaging Unit
+
+Poddon
+Plate
+Pipe
+Pilot
+
+68
+
+Code Classification
+17
+Code
+
+Sort
+Order
+38
+39
+40
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Packaging Unit
+Code Description
+
+Code Name
+
+PUBLIC
+
+remark
+
+in
+
+Traypack
+Reel
+Roll
+Rods,
+bundle/bunch/truss
+Skeletoncase
+Tank, cylindrical
+Bulk,gas(at 1031 mbar
+15 oC)
+Bulk,liquid(at normal
+temperature/pressure
+)
+Bulk,
+particles(nodules)
+Bulk, gas (liquefied at
+abnormal
+temperature/pressure
+)
+Bulk, solid, granular
+particles(grains)
+Extra Bulk Item
+Bulk,
+particles(powder)
+Mills
+TAN
+
+solid,
+
+large
+
+fine
+
+Traypack
+Reel
+Roll
+
+Rods, in bundle/bunch/truss
+
+Skeletoncase
+Tank, cylindrical
+
+Bulk,gas(at 1031 mbar 15 oC)
+
+Bulk,liquid(at
+temperature/pressure)
+
+normal
+
+Bulk, solid, large particles("nodules")
+
+gas(liquefied
+
+Bulk,
+temperature/pressure)
+
+at
+
+abnormal
+
+Bulk, solid, granular particles("grains")
+
+Extra Bulk Item
+
+Bulk, fine particles("powder")
+
+cigarette Mills
+1TAN REFER TO 20BAGS
+
+Code Name
+
+Pair
+Cap
+Barrel
+bundle
+bag
+block
+BLL Barrel
+box
+Can
+Cell
+centimetre
+CARAT
+Drum
+
+Code Classification Name
+Unit of Quantity
+Code Description
+
+remark
+
+Pair
+Cap
+Barrel
+bundle
+bag
+block
+BLL Barrel (petroleum) (158,987 dm3)
+box
+Can
+Cell
+centimetre
+CARAT
+Drum
+
+69
+
+41
+
+42
+43
+
+44
+
+45
+
+46
+
+47
+
+48
+
+49
+
+50
+
+51
+52
+
+Sort
+Order
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+
+PU
+RL
+RO
+
+RZ
+
+SK
+TY
+
+VG
+
+VL
+
+VO
+
+VQ
+
+VR
+
+VT
+
+VY
+
+ML
+TN
+
+4B
+AV
+BA
+BE
+BG
+BL
+BLL
+BX
+CA
+CEL
+CMT
+CR
+DR
+
+4.7 Unit of Quantity
+
+Code Classification
+10
+Code
+
+Code Classification
+10
+Code
+
+Sort
+Order
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+
+30
+
+31
+32
+33
+34
+35
+36
+37
+38
+39
+
+40
+
+41
+
+42
+
+43
+
+DZ
+GLL
+GRM
+GRO
+KG
+KTM
+KWT
+L
+LBR
+LK
+LTR
+M
+M2
+M3
+MGM
+MTR
+
+MWT
+
+NO
+NX
+PA
+PG
+PR
+RL
+RO
+SET
+ST
+
+TNE
+
+TU
+
+U
+
+YRD
+
+PUBLIC
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Unit of Quantity
+Code Description
+
+Code Name
+
+remark
+
+Dozen
+Gallon
+Gram
+Gross
+Kilo-Gramme
+kilometre
+kilowatt
+Litre
+pound
+link
+Litre
+Metre
+Square Metre
+Cubic Metre
+milligram
+metre
+megawatt
+(1000 kW.h)
+Number
+part per thousand
+packet
+plate
+pair
+reel
+roll
+set
+sheet
+tonne
+ton)
+tube
+Pieces/item
+[Number]
+yard
+
+(metric
+
+hour
+
+Dozen
+Gallon
+Gram
+Gross
+Kilo-Gramme
+kilometre
+kilowatt
+Litre
+pound
+link
+Litre
+Metre
+Square Metre
+Cubic Metre
+milligram
+metre
+
+megawatt hour (1000 kW.h)
+
+Number
+part per thousand
+packet
+plate
+pair
+reel
+roll
+set
+sheet
+
+tonne (metric ton)
+
+tube
+
+Pieces/item [Number]
+
+yard
+
+70
+
+PUBLIC
+
+4.8 Currency
+
+Code Classification
+33
+Code
+
+Sort
+Order
+
+ISO 9001:2015 CERTIFIED
+
+Code Name
+
+Code Classification Name
+Currency
+Code Description
+
+remark
+
+AED
+
+AFN
+ALL
+AMD
+
+ANG
+
+AOA
+ARS
+AUD
+AWG
+
+AZN
+
+BAM
+
+BBD
+BDT
+BGN
+BHD
+BIF
+BMD
+BND
+BOB
+
+BOV
+
+BRL
+BSD
+
+BTN
+
+BWP
+
+BYN
+
+BYR
+BZD
+CAD
+CDF
+
+CHE
+
+CHF
+
+CHW
+
+1
+
+2
+3
+4
+
+5
+
+6
+7
+8
+9
+
+10
+
+11
+
+12
+13
+14
+15
+16
+17
+18
+19
+
+20
+
+21
+22
+
+23
+
+24
+
+25
+
+26
+27
+28
+29
+
+30
+
+31
+
+32
+
+and
+
+Arab
+
+United
+Emirates dirham
+Afghan afghani
+Albanian lek
+Armenian dram
+Netherlands
+Antillean guilder
+Angolan kwanza
+Argentine peso
+Australian dollar
+Aruban florin
+Azerbaijani
+manat
+Bosnia
+Herzegovina
+convertible mark
+Barbados dollar
+Bangladeshi taka
+Bulgarian lev
+Bahraini dinar
+Burundian franc
+Bermudian dollar
+Brunei dollar
+Boliviano
+Bolivian Mvdol
+(funds code)
+Brazilian real
+Bahamian dollar
+Bhutanese
+ngultrum
+Botswana pula
+New Belarusian
+ruble
+Belarusian ruble
+Belize dollar
+Canadian dollar
+Congolese franc
+WIR
+(complementary
+currency)
+Swiss franc
+WIR
+(complementary
+
+Franc
+
+Euro
+
+United Arab Emirates dirham
+
+Afghan afghani
+Albanian lek
+Armenian dram
+
+Netherlands Antillean guilder
+
+Angolan kwanza
+Argentine peso
+Australian dollar
+Aruban florin
+
+Azerbaijani manat
+
+Bosnia and Herzegovina convertible
+mark
+
+Barbados dollar
+Bangladeshi taka
+Bulgarian lev
+Bahraini dinar
+Burundian franc
+Bermudian dollar
+Brunei dollar
+Boliviano
+
+Bolivian Mvdol (funds code)
+
+Brazilian real
+Bahamian dollar
+
+Bhutanese ngultrum
+
+Botswana pula
+
+New Belarusian ruble
+
+Belarusian ruble
+Belize dollar
+Canadian dollar
+Congolese franc
+
+WIR Euro (complementary currency)
+
+Swiss franc
+
+WIR Franc (complementary currency)
+
+71
+
+PUBLIC
+
+Code Classification
+33
+Code
+
+Sort
+Order
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Currency
+Code Description
+
+Code Name
+
+remark
+
+CLF
+
+CLP
+CNY
+COP
+
+COU
+
+CRC
+
+CUC
+
+CUP
+
+CVE
+
+CZK
+DJF
+DKK
+DOP
+DZD
+EGP
+ERN
+ETB
+EUR
+FJD
+
+FKP
+
+GBP
+GEL
+GHS
+GIP
+GMD
+GNF
+
+GTQ
+
+GYD
+HKD
+
+HNL
+
+HRK
+HTG
+HUF
+
+IDR
+
+33
+
+34
+35
+36
+
+37
+
+38
+
+39
+
+40
+
+41
+
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+
+52
+
+53
+54
+55
+56
+57
+58
+
+59
+
+60
+61
+
+62
+
+63
+64
+65
+
+66
+
+Unidad de Fomento (funds code)
+
+Unidad de Valor Real (UVR) (funds
+code)
+
+Cuban convertible peso
+
+Cape Verde escudo
+
+Verde
+
+Cuban peso
+
+Costa Rican colon
+
+de
+(funds
+
+Chilean peso
+Chinese yuan
+Colombian peso
+
+Czech koruna
+Djiboutian franc
+Danish krone
+Dominican peso
+Algerian dinar
+Egyptian pound
+Eritrean nakfa
+Ethiopian birr
+Euro
+Fiji dollar
+
+currency)
+Unidad
+Fomento
+code)
+Chilean peso
+Chinese yuan
+Colombian peso
+Unidad de Valor
+Real
+(UVR)
+(funds code)
+Costa Rican colon
+Cuban convertible
+peso
+Cuban peso
+Cape
+escudo
+Czech koruna
+Djiboutian franc
+Danish krone
+Dominican peso
+Algerian dinar
+Egyptian pound
+Eritrean nakfa
+Ethiopian birr
+Euro
+Fiji dollar
+Falkland Islands
+pound
+Pound sterling
+Georgian lari
+Ghanaian cedi
+Gibraltar pound
+Gambian dalasi
+Guinean franc
+Guatemalan
+quetzal
+Guyanese dollar
+Hong Kong dollar Hong Kong dollar
+Honduran
+lempira
+Croatian kuna
+Haitian gourde
+Hungarian forint
+Indonesian
+rupiah
+
+Pound sterling
+Georgian lari
+Ghanaian cedi
+Gibraltar pound
+Gambian dalasi
+Guinean franc
+
+Croatian kuna
+Haitian gourde
+Hungarian forint
+
+Guyanese dollar
+
+Indonesian rupiah
+
+Honduran lempira
+
+Guatemalan quetzal
+
+72
+
+Falkland Islands pound
+
+PUBLIC
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Currency
+Code Description
+
+Code Name
+
+remark
+
+Cayman Islands dollar
+
+North Korean won
+
+South Korean won
+
+Kazakhstani tenge
+
+Islands
+
+Korean
+
+Korean
+
+Kuwaiti dinar
+
+Israeli new shekel
+Indian rupee
+Iraqi dinar
+Iranian rial
+Icelandic króna
+Jamaican dollar
+Jordanian dinar
+Japanese yen
+Kenyan shilling
+Kyrgyzstani som
+Cambodian riel
+Comoro franc
+
+Israeli new shekel
+Indian rupee
+Iraqi dinar
+Iranian rial
+Icelandic króna
+Jamaican dollar
+Jordanian dinar
+Japanese yen
+Kenyan shilling
+Kyrgyzstani som
+Cambodian riel
+Comoro franc
+North
+won
+South
+won
+Kuwaiti dinar
+Cayman
+dollar
+Kazakhstani
+tenge
+Lao kip
+Lebanese pound
+Sri Lankan rupee
+Liberian dollar
+Lesotho loti
+Libyan dinar
+Moroccan dirham Moroccan dirham
+Moldovan leu
+Malagasy ariary
+Macedonian
+denar
+Myanmar kyat
+Mongolian tögrög Mongolian tögrög
+Macanese pataca
+Macanese pataca
+Mauritanian
+ouguiya
+Mauritian rupee
+Maldivian rufiyaa Maldivian rufiyaa
+Malawian kwacha Malawian kwacha
+Mexican peso
+Mexican Unidad
+Inversion
+de
+(UDI)
+(funds
+code)
+
+Lao kip
+Lebanese pound
+Sri Lankan rupee
+Liberian dollar
+Lesotho loti
+Libyan dinar
+
+Moldovan leu
+Malagasy ariary
+
+Mauritian rupee
+
+Myanmar kyat
+
+Mexican peso
+
+Macedonian denar
+
+73
+
+Mauritanian ouguiya
+
+Mexican Unidad de Inversion (UDI)
+(funds code)
+
+Sort
+Order
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+
+79
+
+80
+
+81
+
+82
+
+83
+
+84
+85
+86
+87
+88
+89
+90
+91
+92
+
+93
+
+94
+95
+96
+
+97
+
+98
+99
+100
+101
+
+102
+
+Code Classification
+33
+Code
+
+ILS
+INR
+IQD
+IRR
+ISK
+JMD
+JOD
+JPY
+KES
+KGS
+KHR
+KMF
+
+KPW
+
+KRW
+
+KWD
+
+KYD
+
+KZT
+
+LAK
+LBP
+LKR
+LRD
+LSL
+LYD
+MAD
+MDL
+MGA
+
+MKD
+
+MMK
+MNT
+MOP
+
+MRO
+
+MUR
+MVR
+MWK
+MXN
+
+MXV
+
+Code Classification
+33
+Code
+
+Sort
+Order
+103
+
+MYR
+
+MZN
+
+NAD
+NGN
+
+NIO
+
+NOK
+NPR
+
+NZD
+
+OMR
+
+PAB
+
+PEN
+
+PGK
+
+PHP
+PKR
+PLN
+
+PYG
+
+QAR
+RON
+RSD
+RUB
+RWF
+SAR
+
+SBD
+
+SCR
+SDG
+
+SEK
+
+SGD
+
+SHP
+
+SLL
+
+SOS
+SRD
+
+SSP
+
+STD
+
+104
+
+105
+106
+
+107
+
+108
+109
+
+110
+
+111
+
+112
+
+113
+
+114
+
+115
+116
+117
+
+118
+
+119
+120
+121
+122
+123
+124
+
+125
+
+126
+127
+
+128
+
+129
+
+130
+
+131
+
+132
+133
+
+134
+
+135
+
+PUBLIC
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Currency
+Code Description
+
+Code Name
+
+remark
+
+Papua New Guinean kina
+
+Nicaraguan córdoba
+
+Mozambican metical
+
+Paraguayan guaraní
+
+Panamanian balboa
+
+New Zealand dollar
+
+New
+
+Zealand
+
+Omani rial
+
+Peruvian Sol
+
+Namibian dollar
+Nigerian naira
+
+Norwegian krone
+Nepalese rupee
+
+Philippine peso
+Pakistani rupee
+Polish złoty
+
+Malaysian ringgit Malaysian ringgit
+Mozambican
+metical
+Namibian dollar
+Nigerian naira
+Nicaraguan
+córdoba
+Norwegian krone
+Nepalese rupee
+New
+dollar
+Omani rial
+Panamanian
+balboa
+Peruvian Sol
+Papua
+Guinean kina
+Philippine peso
+Pakistani rupee
+Polish złoty
+Paraguayan
+guaraní
+Qatari riyal
+Romanian leu
+Serbian dinar
+Russian ruble
+Rwandan franc
+Saudi riyal
+Solomon Islands
+dollar
+Seychelles rupee
+Sudanese pound
+Swedish
+krona/kronor
+Singapore dollar
+Saint
+pound
+Sierra
+leone
+Somali shilling
+Surinamese dollar
+South
+Sudanese
+pound
+São Tomé
+Príncipe dobra
+
+Qatari riyal
+Romanian leu
+Serbian dinar
+Russian ruble
+Rwandan franc
+Saudi riyal
+
+Seychelles rupee
+Sudanese pound
+
+Singapore dollar
+
+Leonean
+
+Helena
+
+and
+
+Somali shilling
+Surinamese dollar
+
+Saint Helena pound
+
+Sierra Leonean leone
+
+Swedish krona/kronor
+
+Solomon Islands dollar
+
+South Sudanese pound
+
+São Tomé and Príncipe dobra
+
+74
+
+Code Classification
+33
+Code
+
+Sort
+Order
+136
+137
+138
+139
+
+SVC
+SYP
+SZL
+THB
+
+TJS
+
+TMT
+
+TND
+TOP
+TRY
+
+TTD
+
+TWD
+
+TZS
+
+UAH
+
+UGX
+
+USD
+
+USN
+
+UYI
+
+UYU
+UZS
+
+VEF
+
+VND
+VUV
+WST
+XAF
+
+XAG
+
+XAU
+
+XBA
+
+140
+
+141
+
+142
+143
+144
+
+145
+
+146
+
+147
+
+148
+
+149
+
+150
+
+151
+
+152
+
+153
+154
+
+155
+
+156
+157
+158
+159
+
+160
+
+161
+
+162
+
+PUBLIC
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Currency
+Code Description
+
+Code Name
+
+remark
+
+and
+
+States
+
+Taiwan
+
+Salvadoran colón
+Syrian pound
+Swazi lilangeni
+Thai baht
+Tajikistani
+somoni
+Turkmenistani
+manat
+Tunisian dinar
+Tongan paʻanga
+Turkish lira
+Trinidad
+Tobago dollar
+New
+dollar
+Tanzanian
+shilling
+Ukrainian
+hryvnia
+Ugandan shilling
+United
+dollar
+United
+States
+dollar (next day)
+(funds code)
+Uruguay Peso en
+Unidades
+Indexadas
+(URUIURUI)
+(funds code)
+Uruguayan peso
+Uzbekistan som
+Venezuelan
+bolívar
+Vietnamese dong
+Vanuatu vatu
+Samoan tala
+CFA franc BEAC
+Silver
+ounce)
+Gold (one
+ounce)
+European
+Composite Unit
+(bond
+(EURCO)
+market unit)
+
+(one troy
+
+troy
+
+Salvadoran colón
+Syrian pound
+Swazi lilangeni
+Thai baht
+
+Tajikistani somoni
+
+Turkmenistani manat
+
+Tunisian dinar
+Tongan paʻanga
+Turkish lira
+
+Trinidad and Tobago dollar
+
+New Taiwan dollar
+
+Tanzanian shilling
+
+Ukrainian hryvnia
+
+Ugandan shilling
+
+United States dollar
+
+United States dollar (next day) (funds
+code)
+
+Uruguay Peso en Unidades Indexadas
+(URUIURUI) (funds code)
+
+Uruguayan peso
+Uzbekistan som
+
+Venezuelan bolívar
+
+Vietnamese dong
+Vanuatu vatu
+Samoan tala
+CFA franc BEAC
+
+Silver (one troy ounce)
+
+Gold (one troy ounce)
+
+European Composite Unit
+(bond market unit)
+
+(EURCO)
+
+75
+
+PUBLIC
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Currency
+Code Description
+
+Code Name
+
+remark
+
+European Monetary Unit (E.M.U.-6)
+(bond market unit)
+
+European Unit of Account 9 (E.U.A.-9)
+(bond market unit)
+
+European Unit of Account 17 (E.U.A.-
+17) (bond market unit)
+
+East Caribbean dollar
+
+Special drawing rights
+
+drawing
+
+Caribbean
+
+European
+Monetary
+Unit
+(E.M.U.-6) (bond
+market unit)
+European Unit of
+Account
+9
+(E.U.A.-9)
+(bond
+market unit)
+European Unit of
+Account
+17
+(E.U.A.-17) (bond
+market unit)
+East
+dollar
+Special
+rights
+CFA franc BCEAO CFA franc BCEAO
+Palladium (one
+troy ounce)
+CFP franc (franc
+Pacifique)
+Platinum
+troy ounce)
+SUCRE
+Code reserved for
+testing purposes
+ADB
+Account
+No currency
+Yemeni rial
+South
+rand
+Zambian kwacha
+Zimbabwean
+dollar A/10
+
+No currency
+Yemeni rial
+
+Zambian kwacha
+
+SUCRE
+
+African
+
+(one
+
+Unit
+
+of
+
+South African rand
+
+ADB Unit of Account
+
+Palladium (one troy ounce)
+
+CFP franc (franc Pacifique)
+
+Platinum (one troy ounce)
+
+Zimbabwean dollar A/10
+
+Code reserved for testing purposes
+
+Code Classification
+33
+Code
+
+Sort
+Order
+
+XBB
+
+163
+
+XBC
+
+164
+
+XBD
+
+XCD
+
+XDR
+
+XOF
+
+XPD
+
+XPF
+
+XPT
+
+XSU
+
+XTS
+
+XUA
+
+XXX
+YER
+
+ZAR
+
+ZMW
+
+ZWL
+
+165
+
+166
+
+167
+
+168
+
+169
+
+170
+
+171
+
+172
+
+173
+
+174
+
+175
+176
+
+177
+
+178
+
+179
+
+4.9 Transaction Type
+
+Code Classification
+14
+Code
+
+Sort
+Order
+1
+2
+3
+
+C
+N
+P
+
+Code Name
+
+Copy
+Normal
+Proforma
+
+Code Classification Name
+Transaction Type
+Code Description
+
+remark
+
+Sales and purchase type : Copy
+Sales and purchase type : Normal
+Sales and purchase type : Proforma
+
+Proforma
+
+76
+
+PUBLIC
+
+remark
+
+invoice
+
+remark
+
+remark
+
+Code Classification
+14
+Code
+
+Sort
+Order
+
+ISO 9001:2015 CERTIFIED
+
+Code Classification Name
+Transaction Type
+Code Description
+
+Code Name
+
+T
+
+4
+
+Training
+
+Sales and purchase type : Training
+
+4.10 Sales Receipt Type
+
+Code Classification
+37
+Code
+
+Code Classification Name
+Sales Receipt Type
+Code Description
+
+Sale
+
+Credit Note after Sale
+
+Code Name
+
+Sale
+Credit Note after
+Sale
+
+4.11 Payment Method
+
+Code Classification
+07
+Code
+
+Code Name
+
+CASH
+CREDIT
+CASH/CREDIT
+BANK CHECK
+DEBIT&CREDIT
+CARD
+
+MOBILE MONEY
+
+OTHER
+
+Code Classification Name
+Payment Method
+Code Description
+
+CASH
+CREDIT
+CASH/CREDIT
+BANK CHECK PAYMENT
+
+PAYMENT USING CARD
+
+ANY TRANSACTION USING MOBILE
+MONEY SYSTEM
+OTHER MEANS OF PAYMENT
+
+4.12 Transaction Progress
+
+Code Classification
+11
+Code
+
+Code Name
+
+Code Classification Name
+Unit of Quantity
+Code Description
+
+remark
+
+Wait for Approval Wait for Approval
+Approved
+Cancel Requested
+Canceled
+Credit
+Generated
+Transferred
+
+Approved
+Cancel Requested
+Canceled
+
+Transferred
+
+Note
+
+Credit Note Generated
+
+4.13 Registration Type
+
+Code Classification
+
+Code Classification Name
+
+77
+
+Sort
+Order
+10
+
+11
+
+Sort
+Order
+1
+2
+3
+4
+
+5
+
+6
+
+7
+
+Sort
+Order
+1
+2
+3
+4
+
+5
+
+6
+
+S
+
+R
+
+01
+02
+03
+04
+
+05
+
+06
+
+07
+
+01
+02
+03
+04
+
+05
+
+06
+
+PUBLIC
+
+remark
+
+remark
+
+remark
+
+31
+Code
+
+A
+M
+
+Sort
+Order
+1
+2
+
+Code Name
+
+Automatic
+Manual
+
+ISO 9001:2015 CERTIFIED
+
+Registration Type
+Code Description
+
+Automatic
+Manual
+
+4.14 Purchase Receipt Type
+
+Code Classification
+38
+Code
+
+4.15 Stock In/Out
+
+Code Classification
+12
+Code
+
+Code Classification Name
+Purchase Receipt Type
+Code Description
+
+Purchase
+
+Credit Note after Purchase
+
+Code Name
+
+Purchase
+Credit Note after
+Purchase
+
+Code Name
+
+Import
+Purchase
+Return
+Stock Movement
+Processing
+Adjustment
+Sale
+Return
+Stock Movement
+Processing
+Discarding
+Adjustment
+
+Code Classification Name
+Stock Movement Type
+Code Description
+
+Incoming -Import
+Incoming -Purchase
+Incoming -Return
+Incoming- Stock
+Incoming -Processing
+Incoming -Adjustment
+Outgoing -Sale
+Outgoing- Return
+Outgoing- Stock Movement
+Outgoing- Processing
+Outgoing -Discarding
+Outgoing -Adjustment
+
+Sort
+Order
+1
+
+2
+
+Sort
+Order
+1
+2
+3
+4
+5
+6
+11
+12
+13
+14
+15
+16
+
+Sort
+Order
+1
+2
+3
+4
+
+P
+
+R
+
+01
+02
+03
+04
+05
+06
+11
+12
+13
+14
+15
+16
+
+1
+2
+3
+4
+
+4.16 Import Item Status
+
+Code Classification
+26
+Code
+
+Code Classification Name
+Import item Status
+Code Description
+
+remark
+
+Code Name
+
+Unsent
+Waiting
+Approved
+Cancelled
+
+4.17 Credit Note Reason
+
+Code Classification
+
+Code Classification Name
+
+78
+
+PUBLIC
+
+Code Name
+
+ISO 9001:2015 CERTIFIED
+
+Credit Note Reason
+Code Description
+
+remark
+
+Missing Quantity
+Missing data
+Damaged
+Wasted
+Raw
+Shortage
+Refund
+
+Material
+
+32
+Code
+
+01
+02
+03
+04
+
+05
+
+06
+
+Sort
+Order
+1
+2
+3
+4
+
+5
+
+6
+
+4.18 API Response Code
+
+Code
+
+System
+
+Description
+
+000
+001
+891
+892
+893
+894
+895
+896
+899
+900
+901
+902
+903
+910
+911
+912
+921
+922
+990
+991
+992
+993
+994
+995
+999
+
+Server
+Server
+Client
+Client
+Client
+Client
+Client
+Client
+Client
+Server
+Server
+Server
+Server
+Server
+Server
+Server
+Server
+Server
+Server
+Server
+Server
+Server
+Server
+Server
+Server
+
+It is succeeded
+There is no search result
+
+An error occurred while Request URL is created.
+An error occurred while Request Header data is created.
+An error occurred while Request Body data is created.
+An error regarding server communication occurred.
+An error regarding unallowed Request Method occurred.
+An error regarding Request Status occurred.
+An error regarding Client occurred.
+There is no Header information
+It is not valid device
+This device is installed
+Only OSCU device can be verified.
+Request parameter error
+There is no request full text
+There is a request Method error.
+Sales or sales invoice data which is declared cannot be received.
+Sales invoice data can be received after receiving the sales data.
+The maxium number of views are exceeded
+There is an error during registration
+There is an error during modification
+There is an error during deletion
+There is an overlapped Data
+There is no downloaded file
+There is an unknown error. Please ask it administrator
+
+79
+
+PUBLIC
+
+4.19 Item Code
+
+ISO 9001:2015 CERTIFIED
+
+itemCd is mandatory and it has to be unique. In other words, each item has its unique itemCd.
+
+Below is how item code is generated. For example: itemCd:
+
+KE2NTBA0000012
+
+KE: Country of Origin (Kenya)
+
+2: Product Type (Finished Product)
+
+NT: Packaging Unit (NET)
+BA: Quantity Unity (Barrel)
+0000012: increments from 0000001 to N value
+
+80
+
+

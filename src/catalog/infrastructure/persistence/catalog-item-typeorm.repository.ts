@@ -17,6 +17,9 @@ function ormToDomain(row: CatalogItemOrmEntity): CatalogItem {
     taxCategory: row.taxCategory as CatalogItem['taxCategory'],
     classificationCode: row.classificationCode,
     unitCode: row.unitCode,
+    packagingUnitCode: row.packagingUnitCode,
+    taxTyCd: row.taxTyCd,
+    productTypeCode: row.productTypeCode,
     registrationStatus: row.registrationStatus,
     version: row.version,
     lastSyncedAt: row.lastSyncedAt,
@@ -36,6 +39,9 @@ function domainToOrm(item: CatalogItem): CatalogItemOrmEntity {
   e.taxCategory = item.taxCategory;
   e.classificationCode = item.classificationCode;
   e.unitCode = item.unitCode;
+  e.packagingUnitCode = item.packagingUnitCode;
+  e.taxTyCd = item.taxTyCd;
+  e.productTypeCode = item.productTypeCode;
   e.registrationStatus = item.registrationStatus;
   e.version = item.version;
   e.lastSyncedAt = item.lastSyncedAt;

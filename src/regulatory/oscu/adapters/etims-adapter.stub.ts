@@ -9,7 +9,7 @@ import type { EtimsInvoicePayload } from '../mapping/etims-payload.types';
  * Transport-only: auth, signatures, error normalization.
  */
 export class EtimsAdapterStub implements IEtimsAdapter {
-  async submitInvoice(
+  submitInvoice(
     payload: EtimsInvoicePayload,
     _connectionContext: {
       merchantId: string;
@@ -18,10 +18,12 @@ export class EtimsAdapterStub implements IEtimsAdapter {
       deviceId: string;
     },
   ): Promise<EtimsSubmissionResult> {
-    return {
+    void _connectionContext;
+    const now = Date.now();
+    return Promise.resolve({
       success: true,
-      receiptNumber: `ETR-${Date.now()}-${payload.documentNumber}`,
-      rawResponse: { receiptNumber: `ETR-${Date.now()}` },
-    };
+      receiptNumber: `ETR-${now}-${payload.documentNumber}`,
+      rawResponse: { receiptNumber: `ETR-${now}` },
+    });
   }
 }

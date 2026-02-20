@@ -35,6 +35,15 @@ export class CatalogItemOrmEntity {
   @Column()
   unitCode!: string;
 
+  @Column({ type: 'varchar', default: 'NT' })
+  packagingUnitCode!: string;
+
+  @Column({ type: 'varchar', default: 'B' })
+  taxTyCd!: string;
+
+  @Column({ type: 'varchar', default: '2' })
+  productTypeCode!: string;
+
   @Column({ type: 'varchar', default: 'PENDING' })
   registrationStatus!: 'PENDING' | 'REGISTERED' | 'FAILED';
 

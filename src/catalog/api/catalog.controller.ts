@@ -19,6 +19,10 @@ export class CatalogController {
       taxCategory: TaxCategory;
       classificationCode?: string;
       unitCode?: string;
+      internalUnit?: string;
+      packagingUnitCode?: string;
+      taxTyCd?: string;
+      productTypeCode?: string;
     },
   ) {
     return this.catalogService.registerItem(body);

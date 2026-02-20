@@ -13,6 +13,10 @@ export interface RegisterItemInput {
   taxCategory: TaxCategory;
   classificationCode?: string;
   unitCode?: string;
+  internalUnit?: string;
+  packagingUnitCode?: string;
+  taxTyCd?: string;
+  productTypeCode?: string;
 }
 
 export interface RegisterItemResult {
@@ -39,11 +43,30 @@ export async function registerItem(
     itemType: input.itemType,
     itemName: input.name,
     sku: input.sku ?? undefined,
+    externalId: input.externalId,
+    classificationCode: input.classificationCode,
+    unitCode: input.unitCode,
+    packagingUnitCode: input.packagingUnitCode,
+    taxTyCd: input.taxTyCd,
+    productTypeCode: input.productTypeCode,
+    internalTaxCategory: input.taxCategory,
+    internalUnit: input.internalUnit,
   });
 
-  const classificationCode =
-    input.classificationCode ?? resolution.classificationCode;
-  const unitCode = input.unitCode ?? resolution.unitCode;
+  const classificationCode = ensureNonEmptyString(
+    resolution.classificationCode,
+    'classificationCode',
+  );
+  const unitCode = ensureNonEmptyString(resolution.unitCode, 'unitCode');
+  const packagingUnitCode = ensureNonEmptyString(
+    resolution.packagingUnitCode,
+    'packagingUnitCode',
+  );
+  const taxTyCd = ensureNonEmptyString(resolution.taxTyCd, 'taxTyCd');
+  const productTypeCode = ensureNonEmptyString(
+    resolution.productTypeCode,
+    'productTypeCode',
+  );
   const now = new Date();
 
   if (existing) {
@@ -55,6 +78,9 @@ export async function registerItem(
       taxCategory: input.taxCategory,
       classificationCode,
       unitCode,
+      packagingUnitCode,
+      taxTyCd,
+      productTypeCode,
       version: existing.version + 1,
       updatedAt: now,
     };
@@ -72,6 +98,9 @@ export async function registerItem(
     taxCategory: input.taxCategory,
     classificationCode,
     unitCode,
+    packagingUnitCode,
+    taxTyCd,
+    productTypeCode,
     registrationStatus: 'PENDING',
     version: 1,
     lastSyncedAt: null,
@@ -80,4 +109,11 @@ export async function registerItem(
   };
   const saved = await itemRepo.save(newItem);
   return { item: saved, created: true };
+}
+
+function ensureNonEmptyString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`Invalid ${field} from classification resolver`);
+  }
+  return value;
 }

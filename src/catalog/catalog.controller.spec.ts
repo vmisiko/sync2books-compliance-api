@@ -5,7 +5,6 @@ import { CatalogController } from './api/catalog.controller';
 import { CatalogService } from './api/catalog.service';
 import { ItemType } from '../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../shared/domain/enums/tax-category.enum';
-import { CatalogItemOrmEntity } from './infrastructure/persistence/catalog-item.orm-entity';
 
 describe('CatalogController', () => {
   let controller: CatalogController;
@@ -17,13 +16,15 @@ describe('CatalogController', () => {
         TypeOrmModule.forRoot({
           type: 'sqljs',
           autoSave: false,
-          entities: [CatalogItemOrmEntity],
+          autoLoadEntities: true,
           synchronize: true,
           logging: false,
         }),
         CatalogModule,
       ],
     }).compile();
+
+    await module.init();
 
     controller = module.get<CatalogController>(CatalogController);
     service = module.get<CatalogService>(CatalogService);
@@ -40,6 +41,8 @@ describe('CatalogController', () => {
       name: 'Widget',
       itemType: ItemType.GOODS,
       taxCategory: TaxCategory.VAT_STANDARD,
+      internalUnit: 'EA',
+      classificationCode: '14111400',
     });
     expect(registered.created).toBe(true);
     expect(registered.item.name).toBe('Widget');

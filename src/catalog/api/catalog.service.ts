@@ -28,6 +28,10 @@ export class CatalogService {
     taxCategory: TaxCategory;
     classificationCode?: string;
     unitCode?: string;
+    internalUnit?: string;
+    packagingUnitCode?: string;
+    taxTyCd?: string;
+    productTypeCode?: string;
   }) {
     return registerItem(params, this.itemRepo, this.classificationResolver);
   }

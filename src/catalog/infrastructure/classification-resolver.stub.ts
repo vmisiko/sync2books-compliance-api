@@ -12,6 +12,9 @@ export class ClassificationResolverStub implements IClassificationResolver {
     return Promise.resolve({
       classificationCode: '1234567890',
       unitCode: 'EA',
+      packagingUnitCode: 'NT',
+      taxTyCd: 'B',
+      productTypeCode: '2',
       source: 'default',
     });
   }

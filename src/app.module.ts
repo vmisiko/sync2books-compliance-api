@@ -4,6 +4,8 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CatalogModule } from './catalog/catalog.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { OscuMappingModule } from './regulatory/oscu/oscu-mapping.module';
+import { OscuReferenceModule } from './regulatory/oscu/oscu-reference.module';
 import { SalesModule } from './sales/sales.module';
 
 @Module({
@@ -19,6 +21,8 @@ import { SalesModule } from './sales/sales.module';
       synchronize: process.env.NODE_ENV !== 'production',
       logging: process.env.NODE_ENV === 'development',
     }),
+    OscuReferenceModule,
+    OscuMappingModule,
     CatalogModule,
     InventoryModule,
     SalesModule,
