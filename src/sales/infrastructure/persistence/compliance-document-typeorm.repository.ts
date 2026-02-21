@@ -19,9 +19,11 @@ function lineOrmToDomain(row: ComplianceLineOrmEntity): ComplianceLine {
     taxAmount: row.taxAmount,
     classificationCodeSnapshot: row.classificationCodeSnapshot,
     unitCodeSnapshot: row.unitCodeSnapshot,
-    packagingUnitCodeSnapshot: row.packagingUnitCodeSnapshot,
-    taxTyCdSnapshot: row.taxTyCdSnapshot,
-    productTypeCodeSnapshot: row.productTypeCodeSnapshot,
+    packagingUnitCodeSnapshot: ensureNullableString(
+      row.packagingUnitCodeSnapshot,
+    ),
+    taxTyCdSnapshot: ensureNullableString(row.taxTyCdSnapshot),
+    productTypeCodeSnapshot: ensureNullableString(row.productTypeCodeSnapshot),
     createdAt: row.createdAt,
   };
 }
@@ -188,4 +190,98 @@ export class ComplianceDocumentTypeOrmRepository implements IComplianceDocumentR
       docOrmToDomain(row, linesByDocId.get(row.id) ?? []),
     );
   }
+
+  /**
+   * Optimized page fetch (keyset pagination) for report/list endpoints.
+   * - Fetches only one page of docs, then fetches all lines with a single IN query.
+   *
+   * Cursor semantics:
+   * - `cursorId` is the last seen document id from the previous page.
+   * - Ordering is (createdAt DESC, id DESC) to ensure stable pagination.
+   */
+  async findPageByMerchantWithLines(params: {
+    merchantId: string;
+    beforeId?: string;
+    afterId?: string;
+    startDate?: string;
+    endDate?: string;
+    take: number;
+  }): Promise<ComplianceDocument[]> {
+    const { merchantId, beforeId, afterId, startDate, endDate, take } = params;
+    const qb = this.documentRepo
+      .createQueryBuilder('doc')
+      .where('doc.merchantId = :merchantId', { merchantId });
+
+    // Date filters (Digitax-like): uses `saleDate` (YYYY-MM-DD) which sorts lexicographically.
+    if (startDate) {
+      qb.andWhere('doc.saleDate >= :startDate', { startDate });
+    }
+    if (endDate) {
+      qb.andWhere('doc.saleDate <= :endDate', { endDate });
+    }
+
+    if (beforeId && afterId) {
+      throw new Error('Cannot use both beforeId and afterId');
+    }
+
+    if (beforeId) {
+      const cursorRow = await this.documentRepo.findOne({
+        where: { id: beforeId },
+      });
+      if (cursorRow) {
+        qb.andWhere(
+          '(doc.createdAt < :cursorCreatedAt OR (doc.createdAt = :cursorCreatedAt AND doc.id < :cursorId))',
+          {
+            cursorCreatedAt: cursorRow.createdAt,
+            cursorId: cursorRow.id,
+          },
+        );
+      }
+    }
+
+    if (afterId) {
+      const cursorRow = await this.documentRepo.findOne({
+        where: { id: afterId },
+      });
+      if (cursorRow) {
+        qb.andWhere(
+          '(doc.createdAt > :cursorCreatedAt OR (doc.createdAt = :cursorCreatedAt AND doc.id > :cursorId))',
+          {
+            cursorCreatedAt: cursorRow.createdAt,
+            cursorId: cursorRow.id,
+          },
+        );
+      }
+    }
+
+    const rows = await qb
+      .orderBy('doc.createdAt', 'DESC')
+      .addOrderBy('doc.id', 'DESC')
+      .take(take)
+      .getMany();
+
+    if (rows.length === 0) return [];
+
+    const ids = rows.map((r) => r.id);
+    const allLines = await this.lineRepo.find({
+      where: { documentId: In(ids) },
+      order: { createdAt: 'ASC' },
+    });
+
+    const linesByDocId = new Map<string, ComplianceLineOrmEntity[]>();
+    for (const line of allLines) {
+      const list = linesByDocId.get(line.documentId) ?? [];
+      list.push(line);
+      linesByDocId.set(line.documentId, list);
+    }
+
+    return rows.map((row) =>
+      docOrmToDomain(row, linesByDocId.get(row.id) ?? []),
+    );
+  }
+}
+
+function ensureNullableString(value: unknown): string | null {
+  if (value == null) return null;
+  return typeof value === 'string' ? value : null;
 }

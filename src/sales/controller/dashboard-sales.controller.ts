@@ -43,12 +43,19 @@ export class DashboardSalesController {
   })
   async listSales(
     @Query('merchantId') merchantId: string,
-    @Query('cursor') cursor?: string,
+    @Query('before') before?: string,
+    @Query('after') after?: string,
+    // Back-compat
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
     @Query('pageSize') pageSize?: string,
   ): Promise<SalesReportListResponseDto> {
     return this.salesService.listNormalizedSaleReports({
       merchantId,
-      cursor,
+      startDate,
+      endDate,
+      before,
+      after,
       pageSize: pageSize ? Number(pageSize) : undefined,
     });
   }

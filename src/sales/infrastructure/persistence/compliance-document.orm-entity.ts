@@ -5,7 +5,6 @@ import {
   Index,
   PrimaryColumn,
 } from 'typeorm';
-
 @Entity('compliance_documents')
 export class ComplianceDocumentOrmEntity {
   @PrimaryColumn('varchar')

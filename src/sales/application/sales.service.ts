@@ -15,6 +15,7 @@ import type { ComplianceEvent } from '../domain/entities/compliance-event.entity
 import type { ComplianceItem } from '../../shared/domain/entities/compliance-item.entity';
 import { ItemType } from '../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
+import type { ComplianceConnection } from '../../shared/domain/entities/compliance-connection.entity';
 import type {
   IComplianceConnectionRepository,
   IComplianceDocumentRepository,
@@ -242,32 +243,102 @@ export class SalesService {
 
   async listNormalizedSaleReports(params: {
     merchantId: string;
-    cursor?: string;
+    before?: string;
+    after?: string;
+    startDate?: string;
+    endDate?: string;
     pageSize?: number;
   }): Promise<
     import('../controller/dto/sales-report.dto').SalesReportListResponseDto
   > {
-    const all = await this.documentRepo.findByMerchant(params.merchantId);
-    const pageSize = clampPageSize(params.pageSize ?? 20);
+    if (params.before && params.after) {
+      throw new Error('Use either before or after, not both');
+    }
 
-    const startIdx = params.cursor
-      ? Math.max(0, all.findIndex((d) => d.id === params.cursor) + 1)
-      : 0;
+    const pageSize = clampReportPageSize(params.pageSize ?? 20);
+    const take = pageSize + 1;
 
-    const page = all.slice(startIdx, startIdx + pageSize);
+    // Optimized path (TypeORM repo) - keyset pagination + batched line fetch
+    const docRepo = this.documentRepo as unknown as {
+      findPageByMerchantWithLines?: (args: {
+        merchantId: string;
+        beforeId?: string;
+        afterId?: string;
+        startDate?: string;
+        endDate?: string;
+        take: number;
+      }) => Promise<ComplianceDocument[]>;
+    };
+
+    const docs: ComplianceDocument[] = docRepo.findPageByMerchantWithLines
+      ? await docRepo.findPageByMerchantWithLines({
+          merchantId: params.merchantId,
+          beforeId: params.before,
+          afterId: params.after,
+          startDate: params.startDate,
+          endDate: params.endDate,
+          take,
+        })
+      : await this.documentRepo.findByMerchant(params.merchantId);
+
+    const hasMore = docs.length > pageSize;
+    const pageDocs = hasMore ? docs.slice(0, pageSize) : docs;
     const next =
-      startIdx + pageSize < all.length && page.length > 0
-        ? page[page.length - 1].id
-        : null;
+      hasMore && pageDocs.length > 0 ? pageDocs[pageDocs.length - 1].id : null;
+    const previous = pageDocs.length > 0 ? pageDocs[0].id : null;
+
+    // Batch fetch: latest ACCEPTED response per document
+    const eventRepo = this.eventRepo as unknown as {
+      findLatestAcceptedByDocumentIds?: (
+        ids: string[],
+      ) => Promise<Map<string, Record<string, unknown> | null>>;
+    };
+    const docIds = pageDocs.map((d) => d.id);
+    const kraByDocId = eventRepo.findLatestAcceptedByDocumentIds
+      ? await eventRepo.findLatestAcceptedByDocumentIds(docIds)
+      : new Map<string, Record<string, unknown> | null>();
+
+    // Batch fetch: all items referenced by this page
+    const itemIds = [
+      ...new Set(pageDocs.flatMap((d) => d.lines.map((l) => l.itemId))),
+    ];
+    const items: ComplianceItem[] =
+      itemIds.length > 0 ? await this.itemRepo.findByIds(itemIds) : [];
+    const itemsById = new Map(items.map((i) => [i.id, i]));
+
+    // Cache connections within page (merchantId/branchId pairs)
+    const connByKey = new Map<string, ComplianceConnection | null>();
+    const getConn = async (
+      merchantId: string,
+      branchId: string,
+    ): Promise<ComplianceConnection | null> => {
+      const key = `${merchantId}:${branchId}`;
+      if (connByKey.has(key)) return connByKey.get(key) ?? null;
+      const c = await this.connectionRepo.findByMerchantAndBranch(
+        merchantId,
+        branchId,
+      );
+      connByKey.set(key, c);
+      return c;
+    };
 
     const data = await Promise.all(
-      page.map((d) => this.getNormalizedSaleReport(d.id)),
+      pageDocs.map(async (d) => {
+        const kra = kraByDocId.get(d.id) ?? null;
+        const conn = await getConn(d.merchantId, d.branchId);
+        return buildNormalizedSaleReport({
+          document: d,
+          kraRaw: kra,
+          connection: conn,
+          itemsById,
+        });
+      }),
     );
 
     return {
       pagination: {
         next,
-        previous: null,
+        previous,
         pageSize,
       },
       data,
@@ -324,9 +395,10 @@ export class SalesService {
     }
   }
 }
-function clampPageSize(n: number): number {
+function clampReportPageSize(n: number): number {
+  // Digitax UI shows 1..20; keep the same default/max for report endpoints.
   if (!Number.isFinite(n)) return 20;
-  return Math.max(1, Math.min(100, Math.floor(n)));
+  return Math.max(1, Math.min(20, Math.floor(n)));
 }
 
 function safeString(value: unknown): string {
@@ -482,5 +554,100 @@ function computeTaxBuckets(document: ComplianceDocument): {
     taxRateC: TAX_RATE_BY_TAX_TY_CD.C,
     taxRateD: TAX_RATE_BY_TAX_TY_CD.D,
     taxRateE: TAX_RATE_BY_TAX_TY_CD.E,
+  };
+}
+
+function buildNormalizedSaleReport(input: {
+  document: ComplianceDocument;
+  kraRaw: Record<string, unknown> | null;
+  connection: ComplianceConnection | null;
+  itemsById: Map<string, ComplianceItem>;
+}): import('../controller/dto/sales-report.dto').SaleReportDto {
+  const { document, kraRaw, connection, itemsById } = input;
+  const kraData = (kraRaw?.data as Record<string, unknown> | null) ?? null;
+  const curRcptNoRaw =
+    kraData?.curRcptNo ?? (kraData as Record<string, unknown>)?.['curRcptNo '];
+  const receiptNumber = safeNumber(curRcptNoRaw);
+
+  const saleDate = document.saleDate ?? null;
+  const date = saleDate ? formatDdMmYyyy(saleDate) : null;
+  const time = formatTimeAmPm(document.createdAt);
+
+  const rcptSign = safeString(kraData?.rcptSign);
+  const intrlData = safeString(kraData?.intrlData);
+
+  const etimsUrl =
+    connection?.kraPin && rcptSign
+      ? `https://etims.kra.go.ke/common/link/etims/receipt/indexEtimsReceptData?{${connection.kraPin}+${document.branchId}+${rcptSign}}`
+      : null;
+
+  const taxBuckets = computeTaxBuckets(document);
+
+  return {
+    id: document.id,
+    date,
+    time,
+    traderInvoiceNumber: document.documentNumber,
+    receiptTypeCode: document.receiptTypeCode,
+    saleDetailUrl: `/api/sales/${document.id}`,
+    serialNumber: connection?.deviceId ?? null,
+    receiptNumber,
+    invoiceNumber: safeNumber(document.documentNumber),
+    customerId: null,
+    customerName: null,
+    customerTin: document.customerPin,
+    customerPhoneNumber: null,
+    customerEmail: null,
+    internalData: intrlData || null,
+    receiptSignature: rcptSign || null,
+    etimsUrl,
+    originalSaleId: null,
+    offlineUrl: null,
+    status: mapComplianceStatusToDigitax(document.complianceStatus),
+    salesTaxSummary: {
+      taxableAmountA: taxBuckets.taxableAmountA,
+      taxableAmountB: taxBuckets.taxableAmountB,
+      taxableAmountC: taxBuckets.taxableAmountC,
+      taxableAmountD: taxBuckets.taxableAmountD,
+      taxableAmountE: taxBuckets.taxableAmountE,
+      taxRateA: taxBuckets.taxRateA,
+      taxRateB: taxBuckets.taxRateB,
+      taxRateC: taxBuckets.taxRateC,
+      taxRateD: taxBuckets.taxRateD,
+      taxRateE: taxBuckets.taxRateE,
+      cateringLevyRate: 0,
+      serviceChargeRate: 0,
+      taxAmountA: taxBuckets.taxAmountA,
+      taxAmountB: taxBuckets.taxAmountB,
+      taxAmountC: taxBuckets.taxAmountC,
+      taxAmountD: taxBuckets.taxAmountD,
+      taxAmountE: taxBuckets.taxAmountE,
+      cateringLevyAmount: 0,
+      serviceChargeAmount: 0,
+    },
+    itemList: document.lines.map((l) => {
+      const splyAmt = round2(l.quantity * l.unitPrice);
+      const taxAmt = round2(l.taxAmount);
+      const totAmt = round2(splyAmt + taxAmt);
+      const taxTyCd = resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory);
+      const taxRate = taxRateByTaxTypeCode(taxTyCd);
+      const item = itemsById.get(l.itemId);
+
+      return {
+        id: l.id,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        totalAmount: totAmt,
+        taxableAmount: splyAmt,
+        taxAmount: taxAmt,
+        taxRate,
+        taxTypeCode: taxTyCd,
+        discountRate: 0,
+        discountAmount: 0,
+        etimsItemCode: null,
+        isStockable: item ? item.itemType === ItemType.GOODS : null,
+        itemId: l.itemId,
+      };
+    }),
   };
 }

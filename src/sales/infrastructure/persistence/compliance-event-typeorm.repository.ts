@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import type { ComplianceEvent } from '../../domain/entities/compliance-event.entity';
 import type { IComplianceEventRepository } from '../../../shared/ports/repository.port';
 import { ComplianceEventOrmEntity } from './compliance-event.orm-entity';
@@ -45,5 +45,29 @@ export class ComplianceEventTypeOrmRepository implements IComplianceEventReposit
       order: { createdAt: 'ASC' },
     });
     return rows.map(ormToDomain);
+  }
+
+  /**
+   * Returns latest ACCEPTED `responseSnapshot` for each document.
+   * Used by list/report endpoints to avoid N+1 event reads.
+   */
+  async findLatestAcceptedByDocumentIds(
+    documentIds: string[],
+  ): Promise<Map<string, Record<string, unknown> | null>> {
+    const map = new Map<string, Record<string, unknown> | null>();
+    if (documentIds.length === 0) return map;
+
+    const rows = await this.repo.find({
+      where: { documentId: In(documentIds), eventType: 'ACCEPTED' },
+      order: { createdAt: 'DESC' },
+    });
+
+    for (const row of rows) {
+      if (!map.has(row.documentId)) {
+        map.set(row.documentId, row.responseSnapshot);
+      }
+    }
+
+    return map;
   }
 }
