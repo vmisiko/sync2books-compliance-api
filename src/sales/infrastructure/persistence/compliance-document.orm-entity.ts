@@ -30,6 +30,12 @@ export class ComplianceDocumentOrmEntity {
   documentNumber!: string;
 
   @Column('varchar', { nullable: true })
+  originalDocumentNumber!: string | null;
+
+  @Column('varchar', { nullable: true })
+  originalSaleId!: string | null;
+
+  @Column('varchar', { nullable: true })
   saleDate!: string | null;
 
   @Column('varchar', { nullable: true })

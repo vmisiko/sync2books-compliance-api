@@ -57,6 +57,7 @@ describe('OscuSalesRequestBuilder', () => {
       payload: {
         documentNumber: 'CN-1',
         documentType: 'CREDIT_NOTE',
+        originalDocumentNumber: 'INV-123',
         branchId: '00',
         deviceId: 'dev',
         currency: 'KES',
@@ -82,5 +83,6 @@ describe('OscuSalesRequestBuilder', () => {
     });
 
     expect(req.rcptTyCd).toBe('R');
+    expect(req.orgInvcNo).toBe(123);
   });
 });

@@ -190,7 +190,7 @@ export class SalesService {
       internalData: intrlData || null,
       receiptSignature: rcptSign || null,
       etimsUrl,
-      originalSaleId: null,
+      originalSaleId: document.originalSaleId,
       offlineUrl: null,
       status: mapComplianceStatusToDigitax(document.complianceStatus),
       salesTaxSummary: {
@@ -601,7 +601,7 @@ function buildNormalizedSaleReport(input: {
     internalData: intrlData || null,
     receiptSignature: rcptSign || null,
     etimsUrl,
-    originalSaleId: null,
+    originalSaleId: document.originalSaleId,
     offlineUrl: null,
     status: mapComplianceStatusToDigitax(document.complianceStatus),
     salesTaxSummary: {

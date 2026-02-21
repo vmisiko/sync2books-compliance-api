@@ -17,6 +17,10 @@ export interface CreateDocumentInput {
   sourceDocumentId: string;
   documentType: DocumentType;
   documentNumber: string;
+  /** For CREDIT_NOTE: original sale's trader invoice number */
+  originalDocumentNumber?: string | null;
+  /** For CREDIT_NOTE created from an internal sale: original sale document id */
+  originalSaleId?: string | null;
   saleDate?: string | null;
   receiptTypeCode?: string | null;
   paymentTypeCode?: string | null;
@@ -114,6 +118,8 @@ export async function createDocument(
     sourceDocumentId: input.sourceDocumentId,
     documentType: input.documentType,
     documentNumber: input.documentNumber,
+    originalDocumentNumber: input.originalDocumentNumber ?? null,
+    originalSaleId: input.originalSaleId ?? null,
     saleDate: input.saleDate ?? null,
     receiptTypeCode: input.receiptTypeCode ?? null,
     paymentTypeCode: input.paymentTypeCode ?? null,

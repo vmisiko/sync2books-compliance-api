@@ -65,7 +65,10 @@ export class OscuSalesRequestBuilder {
       cmcKey: params.cmcKey,
       trdInvcNo: params.payload.documentNumber,
       invcNo: safeParseInt(params.payload.documentNumber) ?? 1,
-      orgInvcNo: 0,
+      orgInvcNo:
+        params.payload.documentType === 'CREDIT_NOTE'
+          ? (safeParseInt(params.payload.originalDocumentNumber ?? '') ?? 0)
+          : 0,
       custTin: params.payload.customerPin ?? null,
       custNm: null,
       rcptTyCd,

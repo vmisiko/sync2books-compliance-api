@@ -45,6 +45,13 @@ export class CreateSaleDto {
   @ApiProperty()
   traderInvoiceNumber!: string;
 
+  @ApiProperty({
+    required: false,
+    description:
+      'For credit notes (receiptTypeCode=R): original sale trader invoice number',
+  })
+  originalTraderInvoiceNumber?: string;
+
   @ApiProperty({ required: false })
   customerTin?: string;
 

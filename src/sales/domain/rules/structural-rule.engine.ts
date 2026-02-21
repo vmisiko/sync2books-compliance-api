@@ -1,4 +1,5 @@
 import { ComplianceDocument } from '../entities/compliance-document.entity';
+import { DocumentType } from '../../../shared/domain/enums/document-type.enum';
 import type {
   ComplianceError,
   ComplianceWarning,
@@ -13,6 +14,17 @@ export function runStructuralRules(
 ): ValidationResult {
   const errors: ComplianceError[] = [];
   const warnings: ComplianceWarning[] = [];
+
+  if (document.documentType === DocumentType.CREDIT_NOTE) {
+    if (!document.originalDocumentNumber?.trim()) {
+      errors.push({
+        code: 'STRUCTURAL_CREDIT_NOTE_MISSING_ORIGINAL_DOCUMENT',
+        message:
+          'Credit note must include originalDocumentNumber (original trader invoice number)',
+        field: 'originalDocumentNumber',
+      });
+    }
+  }
 
   // Must have at least 1 line
   if (!document.lines || document.lines.length === 0) {

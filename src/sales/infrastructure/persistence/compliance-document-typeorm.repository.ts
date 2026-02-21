@@ -40,6 +40,8 @@ function docOrmToDomain(
     sourceDocumentId: row.sourceDocumentId,
     documentType: row.documentType as ComplianceDocument['documentType'],
     documentNumber: row.documentNumber,
+    originalDocumentNumber: row.originalDocumentNumber,
+    originalSaleId: row.originalSaleId,
     saleDate: row.saleDate,
     receiptTypeCode: row.receiptTypeCode,
     paymentTypeCode: row.paymentTypeCode,
@@ -72,6 +74,8 @@ function docDomainToOrm(
   e.sourceDocumentId = document.sourceDocumentId;
   e.documentType = document.documentType;
   e.documentNumber = document.documentNumber;
+  e.originalDocumentNumber = document.originalDocumentNumber;
+  e.originalSaleId = document.originalSaleId;
   e.saleDate = document.saleDate;
   e.receiptTypeCode = document.receiptTypeCode;
   e.paymentTypeCode = document.paymentTypeCode;

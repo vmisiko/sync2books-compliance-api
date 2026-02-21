@@ -21,6 +21,8 @@ import {
   SalesReportDetailResponseDto,
   SalesReportListResponseDto,
 } from './dto/sales-report.dto';
+import { CreateExpressCreditNoteDto } from './dto/create-express-credit-note.dto';
+import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 
 @Controller('dashboard-api/sales')
 @ApiTags('Dashboard Sales')
@@ -71,6 +73,15 @@ export class DashboardSalesController {
         ? DocumentType.CREDIT_NOTE
         : DocumentType.SALE;
 
+    const normalizeForCreditNote = docType === DocumentType.CREDIT_NOTE;
+    const items = normalizeForCreditNote
+      ? body.items.map((i) => ({
+          ...i,
+          quantity: Math.abs(i.quantity),
+          taxAmount: Math.abs(i.taxAmount),
+        }))
+      : body.items;
+
     const createResult = await this.salesService.createDocument(
       {
         merchantId: body.merchantId,
@@ -79,23 +90,25 @@ export class DashboardSalesController {
         sourceDocumentId: body.traderInvoiceNumber,
         documentType: docType,
         documentNumber: body.traderInvoiceNumber,
+        originalDocumentNumber: body.originalTraderInvoiceNumber ?? null,
+        originalSaleId: null,
         saleDate: body.saleDate,
         receiptTypeCode: body.receiptTypeCode,
         paymentTypeCode: body.paymentTypeCode,
         invoiceStatusCode: body.invoiceStatusCode,
         currency: 'KES',
         exchangeRate: 1,
-        subtotalAmount: body.items.reduce(
+        subtotalAmount: items.reduce(
           (sum, i) => sum + i.quantity * i.unitPrice,
           0,
         ),
-        totalTax: body.items.reduce((sum, i) => sum + i.taxAmount, 0),
-        totalAmount: body.items.reduce(
+        totalTax: items.reduce((sum, i) => sum + i.taxAmount, 0),
+        totalAmount: items.reduce(
           (sum, i) => sum + i.quantity * i.unitPrice + i.taxAmount,
           0,
         ),
         customerPin: body.customerTin ?? null,
-        lines: body.items.map((i) => ({
+        lines: items.map((i) => ({
           itemId: i.id,
           description: i.itemDescription ?? '',
           quantity: i.quantity,
@@ -115,6 +128,102 @@ export class DashboardSalesController {
       if (!validation.validation.isValid) {
         throw new BadRequestException({
           message: 'Sale validation failed',
+          errors: validation.validation.errors,
+        });
+      }
+
+      await this.salesService.prepareDocument(documentId);
+      await this.salesService.submitDocument(documentId);
+    }
+
+    const data = await this.salesService.getNormalizedSaleReport(documentId);
+    return { data };
+  }
+
+  @Post('credit-notes/express')
+  @ApiOperation({
+    summary: 'Create an express credit note from an existing sale',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Credit note created',
+    type: SalesReportDetailResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'Validation failed' })
+  async createExpressCreditNote(
+    @Body() body: CreateExpressCreditNoteDto,
+    @Query('submit') submit?: string,
+  ): Promise<SalesReportDetailResponseDto> {
+    const shouldSubmit = submit === undefined ? true : submit !== 'false';
+
+    const original = (await this.salesService.getDocument(body.saleId))
+      .document;
+    if (original.merchantId !== body.merchantId) {
+      throw new BadRequestException({
+        message: 'saleId does not belong to merchantId',
+      });
+    }
+    if (original.branchId !== body.branchId) {
+      throw new BadRequestException({
+        message: 'saleId does not belong to branchId',
+      });
+    }
+    if (original.complianceStatus !== ComplianceStatus.ACCEPTED) {
+      throw new BadRequestException({
+        message: 'Sale must be ACCEPTED to create an express credit note',
+        status: original.complianceStatus,
+      });
+    }
+
+    const items = original.lines.map((l) => ({
+      itemId: l.itemId,
+      description: l.description,
+      quantity: Math.abs(l.quantity),
+      unitPrice: l.unitPrice,
+      taxCategory: l.taxCategory,
+      taxAmount: Math.abs(l.taxAmount),
+    }));
+
+    const createResult = await this.salesService.createDocument(
+      {
+        merchantId: body.merchantId,
+        branchId: body.branchId,
+        sourceSystem: SourceSystem.API,
+        sourceDocumentId: body.traderInvoiceNumber,
+        documentType: DocumentType.CREDIT_NOTE,
+        documentNumber: body.traderInvoiceNumber,
+        originalDocumentNumber: original.documentNumber,
+        originalSaleId: body.saleId,
+        saleDate: body.returnDate,
+        receiptTypeCode: 'R',
+        paymentTypeCode:
+          body.paymentTypeCode ?? original.paymentTypeCode ?? '01',
+        invoiceStatusCode:
+          body.invoiceStatusCode ?? original.invoiceStatusCode ?? '02',
+        currency: original.currency,
+        exchangeRate: original.exchangeRate,
+        subtotalAmount: items.reduce(
+          (sum, i) => sum + i.quantity * i.unitPrice,
+          0,
+        ),
+        totalTax: items.reduce((sum, i) => sum + i.taxAmount, 0),
+        totalAmount: items.reduce(
+          (sum, i) => sum + i.quantity * i.unitPrice + i.taxAmount,
+          0,
+        ),
+        customerPin: original.customerPin,
+        lines: items,
+      },
+      { enqueueProcessing: false },
+    );
+
+    const documentId = createResult.document.id;
+
+    if (createResult.created && shouldSubmit) {
+      const validation = await this.salesService.validateDocument(documentId);
+      if (!validation.validation.isValid) {
+        throw new BadRequestException({
+          message: 'Credit note validation failed',
           errors: validation.validation.errors,
         });
       }

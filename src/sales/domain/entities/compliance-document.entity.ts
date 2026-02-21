@@ -19,6 +19,16 @@ export interface ComplianceDocument {
   sourceDocumentId: string;
   documentType: DocumentType;
   documentNumber: string;
+  /**
+   * For CREDIT_NOTE: the original sale's trader invoice number (trdInvcNo).
+   * Used to populate OSCU `orgInvcNo` (parsed numeric portion).
+   */
+  originalDocumentNumber: string | null;
+  /**
+   * For CREDIT_NOTE created from an internal sale: the original sale document id.
+   * Used for reporting/UI linkage (not sent to OSCU).
+   */
+  originalSaleId: string | null;
   /** Optional sales metadata for OSCU */
   saleDate: string | null;
   receiptTypeCode: string | null;

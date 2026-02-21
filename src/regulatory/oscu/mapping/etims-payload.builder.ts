@@ -26,6 +26,7 @@ export class EtimsPayloadBuilder {
     const payload: EtimsInvoicePayload = {
       documentNumber: document.documentNumber,
       documentType: document.documentType,
+      originalDocumentNumber: document.originalDocumentNumber ?? undefined,
       saleDate: document.saleDate ?? undefined,
       receiptTypeCode: document.receiptTypeCode ?? undefined,
       paymentTypeCode: document.paymentTypeCode ?? undefined,

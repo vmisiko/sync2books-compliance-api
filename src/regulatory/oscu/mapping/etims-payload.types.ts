@@ -29,6 +29,8 @@ export interface EtimsInvoicePayload {
   receiptTypeCode?: string;
   paymentTypeCode?: string;
   invoiceStatusCode?: string;
+  /** For CREDIT_NOTE: original sale's trader invoice number */
+  originalDocumentNumber?: string;
   /** Branch/device for submission */
   branchId: string;
   deviceId: string;
