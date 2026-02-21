@@ -161,7 +161,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Document details"
+            "description": "Document details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSaleResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Get document details",
@@ -267,6 +274,51 @@
       }
     },
     "/api/sales": {
+      "get": {
+        "operationId": "ApiSalesController_listSales",
+        "parameters": [
+          {
+            "name": "merchantId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sales report list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SalesReportListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List sales (Digitax-like report)",
+        "tags": [
+          "API Sales"
+        ]
+      },
       "post": {
         "operationId": "ApiSalesController_createSale",
         "parameters": [],
@@ -282,7 +334,17 @@
         },
         "responses": {
           "201": {
-            "description": "Sale created"
+            "description": "Sale created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaleCreateResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed"
           }
         },
         "summary": "Create a sale (Digitax-like)",
@@ -306,7 +368,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Sale details"
+            "description": "Sale details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSaleResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Get sale status/details",
@@ -315,7 +384,83 @@
         ]
       }
     },
+    "/api/sales/{id}/report": {
+      "get": {
+        "operationId": "ApiSalesController_getSaleReport",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sale report detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SalesReportDetailResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get sale (Digitax-like report)",
+        "tags": [
+          "API Sales"
+        ]
+      }
+    },
     "/dashboard-api/sales": {
+      "get": {
+        "operationId": "DashboardSalesController_listSales",
+        "parameters": [
+          {
+            "name": "merchantId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sales report list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SalesReportListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List sales (Digitax-like report)",
+        "tags": [
+          "Dashboard Sales"
+        ]
+      },
       "post": {
         "operationId": "DashboardSalesController_createSale",
         "parameters": [],
@@ -331,7 +476,17 @@
         },
         "responses": {
           "201": {
-            "description": "Sale created"
+            "description": "Sale created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaleCreateResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed"
           }
         },
         "summary": "Create a sale (dashboard)",
@@ -355,10 +510,48 @@
         ],
         "responses": {
           "200": {
-            "description": "Sale details"
+            "description": "Sale details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSaleResponseDto"
+                }
+              }
+            }
           }
         },
         "summary": "Get sale status/details",
+        "tags": [
+          "Dashboard Sales"
+        ]
+      }
+    },
+    "/dashboard-api/sales/{id}/report": {
+      "get": {
+        "operationId": "DashboardSalesController_getSaleReport",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sale report detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SalesReportDetailResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get sale (Digitax-like report)",
         "tags": [
           "Dashboard Sales"
         ]
@@ -587,6 +780,592 @@
           "lines"
         ]
       },
+      "SaleLineResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "unitPrice": {
+            "type": "number"
+          },
+          "taxCategory": {
+            "type": "string",
+            "enum": [
+              "VAT_STANDARD",
+              "VAT_ZERO",
+              "EXEMPT",
+              "OTHER"
+            ]
+          },
+          "taxAmount": {
+            "type": "number"
+          },
+          "classificationCodeSnapshot": {
+            "type": "string"
+          },
+          "unitCodeSnapshot": {
+            "type": "string"
+          },
+          "packagingUnitCodeSnapshot": {
+            "type": "object",
+            "nullable": true
+          },
+          "taxTyCdSnapshot": {
+            "type": "object",
+            "nullable": true
+          },
+          "productTypeCodeSnapshot": {
+            "type": "object",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "itemId",
+          "description",
+          "quantity",
+          "unitPrice",
+          "taxCategory",
+          "taxAmount",
+          "classificationCodeSnapshot",
+          "unitCodeSnapshot",
+          "packagingUnitCodeSnapshot",
+          "taxTyCdSnapshot",
+          "productTypeCodeSnapshot",
+          "createdAt"
+        ]
+      },
+      "SaleDocumentResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "merchantId": {
+            "type": "string"
+          },
+          "branchId": {
+            "type": "string"
+          },
+          "sourceSystem": {
+            "type": "string",
+            "enum": [
+              "QUICKBOOKS",
+              "XERO",
+              "API"
+            ]
+          },
+          "sourceDocumentId": {
+            "type": "string"
+          },
+          "documentType": {
+            "type": "string",
+            "enum": [
+              "SALE",
+              "SALE_INVOICE",
+              "CREDIT_NOTE",
+              "PURCHASE",
+              "EXPORT",
+              "REVERSE_INVOICE"
+            ]
+          },
+          "documentNumber": {
+            "type": "string"
+          },
+          "saleDate": {
+            "type": "object",
+            "nullable": true,
+            "description": "YYYY-MM-DD"
+          },
+          "receiptTypeCode": {
+            "type": "object",
+            "nullable": true
+          },
+          "paymentTypeCode": {
+            "type": "object",
+            "nullable": true
+          },
+          "invoiceStatusCode": {
+            "type": "object",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string"
+          },
+          "exchangeRate": {
+            "type": "number"
+          },
+          "subtotalAmount": {
+            "type": "number"
+          },
+          "totalAmount": {
+            "type": "number"
+          },
+          "totalTax": {
+            "type": "number"
+          },
+          "customerPin": {
+            "type": "object",
+            "nullable": true
+          },
+          "complianceStatus": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "VALIDATED",
+              "READY_FOR_SUBMISSION",
+              "SUBMITTED",
+              "ACCEPTED",
+              "REJECTED",
+              "RETRYING",
+              "FAILED",
+              "CANCELLED"
+            ]
+          },
+          "submissionAttempts": {
+            "type": "number"
+          },
+          "etimsReceiptNumber": {
+            "type": "object",
+            "nullable": true
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SaleLineResponseDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "merchantId",
+          "branchId",
+          "sourceSystem",
+          "sourceDocumentId",
+          "documentType",
+          "documentNumber",
+          "saleDate",
+          "receiptTypeCode",
+          "paymentTypeCode",
+          "invoiceStatusCode",
+          "currency",
+          "exchangeRate",
+          "subtotalAmount",
+          "totalAmount",
+          "totalTax",
+          "customerPin",
+          "complianceStatus",
+          "submissionAttempts",
+          "etimsReceiptNumber",
+          "idempotencyKey",
+          "createdAt",
+          "submittedAt",
+          "lines"
+        ]
+      },
+      "KraSalesSaveResponseDataDto": {
+        "type": "object",
+        "properties": {
+          "curRcptNo": {
+            "type": "string"
+          },
+          "totRcptNo": {
+            "type": "string"
+          },
+          "intrlData": {
+            "type": "string"
+          },
+          "rcptSign": {
+            "type": "string"
+          },
+          "sdcDateTime": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "curRcptNo",
+          "totRcptNo",
+          "intrlData",
+          "rcptSign",
+          "sdcDateTime"
+        ]
+      },
+      "KraSalesSaveResponseDto": {
+        "type": "object",
+        "properties": {
+          "resultCd": {
+            "type": "string"
+          },
+          "resultMsg": {
+            "type": "string"
+          },
+          "resultDt": {
+            "type": "string"
+          },
+          "data": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KraSalesSaveResponseDataDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "resultCd",
+          "resultMsg",
+          "resultDt",
+          "data"
+        ]
+      },
+      "GetSaleResponseDto": {
+        "type": "object",
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/SaleDocumentResponseDto"
+          },
+          "kraResponse": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KraSalesSaveResponseDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "document",
+          "kraResponse"
+        ]
+      },
+      "CursorPaginationDto": {
+        "type": "object",
+        "properties": {
+          "next": {
+            "type": "object",
+            "nullable": true
+          },
+          "previous": {
+            "type": "object",
+            "nullable": true
+          },
+          "pageSize": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "next",
+          "previous",
+          "pageSize"
+        ]
+      },
+      "SalesTaxSummaryDto": {
+        "type": "object",
+        "properties": {
+          "taxableAmountA": {
+            "type": "number"
+          },
+          "taxableAmountB": {
+            "type": "number"
+          },
+          "taxableAmountC": {
+            "type": "number"
+          },
+          "taxableAmountD": {
+            "type": "number"
+          },
+          "taxableAmountE": {
+            "type": "number"
+          },
+          "taxRateA": {
+            "type": "number"
+          },
+          "taxRateB": {
+            "type": "number"
+          },
+          "taxRateC": {
+            "type": "number"
+          },
+          "taxRateD": {
+            "type": "number"
+          },
+          "taxRateE": {
+            "type": "number"
+          },
+          "taxAmountA": {
+            "type": "number"
+          },
+          "taxAmountB": {
+            "type": "number"
+          },
+          "taxAmountC": {
+            "type": "number"
+          },
+          "taxAmountD": {
+            "type": "number"
+          },
+          "taxAmountE": {
+            "type": "number"
+          },
+          "cateringLevyRate": {
+            "type": "number"
+          },
+          "serviceChargeRate": {
+            "type": "number"
+          },
+          "cateringLevyAmount": {
+            "type": "number"
+          },
+          "serviceChargeAmount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "taxableAmountA",
+          "taxableAmountB",
+          "taxableAmountC",
+          "taxableAmountD",
+          "taxableAmountE",
+          "taxRateA",
+          "taxRateB",
+          "taxRateC",
+          "taxRateD",
+          "taxRateE",
+          "taxAmountA",
+          "taxAmountB",
+          "taxAmountC",
+          "taxAmountD",
+          "taxAmountE",
+          "cateringLevyRate",
+          "serviceChargeRate",
+          "cateringLevyAmount",
+          "serviceChargeAmount"
+        ]
+      },
+      "SaleItemReportDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "unitPrice": {
+            "type": "number"
+          },
+          "totalAmount": {
+            "type": "number"
+          },
+          "taxableAmount": {
+            "type": "number"
+          },
+          "taxAmount": {
+            "type": "number"
+          },
+          "taxRate": {
+            "type": "number"
+          },
+          "taxTypeCode": {
+            "type": "object",
+            "nullable": true
+          },
+          "discountRate": {
+            "type": "number"
+          },
+          "discountAmount": {
+            "type": "number"
+          },
+          "etimsItemCode": {
+            "type": "object",
+            "nullable": true
+          },
+          "isStockable": {
+            "type": "object",
+            "nullable": true
+          },
+          "itemId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "quantity",
+          "unitPrice",
+          "totalAmount",
+          "taxableAmount",
+          "taxAmount",
+          "taxRate",
+          "taxTypeCode",
+          "discountRate",
+          "discountAmount",
+          "etimsItemCode",
+          "isStockable",
+          "itemId"
+        ]
+      },
+      "SaleReportDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "date": {
+            "type": "object",
+            "description": "DD/MM/YYYY",
+            "nullable": true
+          },
+          "time": {
+            "type": "object",
+            "description": "hh:mm:ss am/pm",
+            "nullable": true
+          },
+          "traderInvoiceNumber": {
+            "type": "string"
+          },
+          "receiptTypeCode": {
+            "type": "object",
+            "nullable": true
+          },
+          "saleDetailUrl": {
+            "type": "object",
+            "nullable": true
+          },
+          "serialNumber": {
+            "type": "object",
+            "nullable": true
+          },
+          "receiptNumber": {
+            "type": "object",
+            "nullable": true
+          },
+          "invoiceNumber": {
+            "type": "object",
+            "nullable": true
+          },
+          "customerId": {
+            "type": "object",
+            "nullable": true
+          },
+          "customerName": {
+            "type": "object",
+            "nullable": true
+          },
+          "customerTin": {
+            "type": "object",
+            "nullable": true
+          },
+          "customerPhoneNumber": {
+            "type": "object",
+            "nullable": true
+          },
+          "customerEmail": {
+            "type": "object",
+            "nullable": true
+          },
+          "internalData": {
+            "type": "object",
+            "nullable": true
+          },
+          "receiptSignature": {
+            "type": "object",
+            "nullable": true
+          },
+          "etimsUrl": {
+            "type": "object",
+            "nullable": true
+          },
+          "originalSaleId": {
+            "type": "object",
+            "nullable": true
+          },
+          "offlineUrl": {
+            "type": "object",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "description": "Digitax-like status: completed|pending|failed|retrying|cancelled"
+          },
+          "salesTaxSummary": {
+            "$ref": "#/components/schemas/SalesTaxSummaryDto"
+          },
+          "itemList": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SaleItemReportDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "date",
+          "time",
+          "traderInvoiceNumber",
+          "receiptTypeCode",
+          "saleDetailUrl",
+          "serialNumber",
+          "receiptNumber",
+          "invoiceNumber",
+          "customerId",
+          "customerName",
+          "customerTin",
+          "customerPhoneNumber",
+          "customerEmail",
+          "internalData",
+          "receiptSignature",
+          "etimsUrl",
+          "originalSaleId",
+          "offlineUrl",
+          "status",
+          "salesTaxSummary",
+          "itemList"
+        ]
+      },
+      "SalesReportListResponseDto": {
+        "type": "object",
+        "properties": {
+          "pagination": {
+            "$ref": "#/components/schemas/CursorPaginationDto"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SaleReportDto"
+            }
+          }
+        },
+        "required": [
+          "pagination",
+          "data"
+        ]
+      },
       "CreateSaleItemDto": {
         "type": "object",
         "properties": {
@@ -676,6 +1455,57 @@
           "paymentTypeCode",
           "invoiceStatusCode",
           "items"
+        ]
+      },
+      "SaleCreateResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "VALIDATED",
+              "READY_FOR_SUBMISSION",
+              "SUBMITTED",
+              "ACCEPTED",
+              "REJECTED",
+              "RETRYING",
+              "FAILED",
+              "CANCELLED"
+            ]
+          },
+          "receiptNumber": {
+            "type": "object",
+            "nullable": true
+          },
+          "kraResponse": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KraSalesSaveResponseDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "receiptNumber",
+          "kraResponse"
+        ]
+      },
+      "SalesReportDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SaleReportDto"
+          }
+        },
+        "required": [
+          "data"
         ]
       }
     }

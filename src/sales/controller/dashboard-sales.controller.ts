@@ -5,22 +5,65 @@ import {
   Get,
   Param,
   Post,
+  Query,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBadRequestResponse,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { SalesService } from '../application/sales.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { DocumentType } from '../../shared/domain/enums/document-type.enum';
 import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
+import {
+  GetSaleResponseDto,
+  SaleCreateResponseDto,
+  SaleDocumentResponseDto,
+} from './dto/sale-response.dto';
+import type { ComplianceDocument } from '../domain/entities/compliance-document.entity';
+import { toKraSalesSaveResponseDto } from './kra-sales-save-response.mapper';
+import {
+  SalesReportDetailResponseDto,
+  SalesReportListResponseDto,
+} from './dto/sales-report.dto';
 
 @Controller('dashboard-api/sales')
 @ApiTags('Dashboard Sales')
 export class DashboardSalesController {
   constructor(private readonly salesService: SalesService) {}
 
+  @Get()
+  @ApiOperation({ summary: 'List sales (Digitax-like report)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Sales report list',
+    type: SalesReportListResponseDto,
+  })
+  async listSales(
+    @Query('merchantId') merchantId: string,
+    @Query('cursor') cursor?: string,
+    @Query('pageSize') pageSize?: string,
+  ): Promise<SalesReportListResponseDto> {
+    return this.salesService.listNormalizedSaleReports({
+      merchantId,
+      cursor,
+      pageSize: pageSize ? Number(pageSize) : undefined,
+    });
+  }
+
   @Post()
   @ApiOperation({ summary: 'Create a sale (dashboard)' })
-  @ApiResponse({ status: 201, description: 'Sale created' })
-  async createSale(@Body() body: CreateSaleDto) {
+  @ApiResponse({
+    status: 201,
+    description: 'Sale created',
+    type: SaleCreateResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'Validation failed' })
+  async createSale(
+    @Body() body: CreateSaleDto,
+  ): Promise<SaleCreateResponseDto> {
     const docType =
       body.receiptTypeCode === 'R'
         ? DocumentType.CREDIT_NOTE
@@ -63,10 +106,16 @@ export class DashboardSalesController {
     );
 
     if (!createResult.created) {
+      const kraResponse = toKraSalesSaveResponseDto(
+        await this.salesService.getKraSalesSaveResponse(
+          createResult.document.id,
+        ),
+      );
       return {
         id: createResult.document.id,
         status: createResult.document.complianceStatus,
         receiptNumber: createResult.document.etimsReceiptNumber ?? null,
+        kraResponse,
       };
     }
 
@@ -85,18 +134,91 @@ export class DashboardSalesController {
     const submitResult = await this.salesService.submitDocument(
       createResult.document.id,
     );
+    const kraResponse = toKraSalesSaveResponseDto(
+      await this.salesService.getKraSalesSaveResponse(submitResult.document.id),
+    );
 
     return {
       id: submitResult.document.id,
       status: submitResult.document.complianceStatus,
       receiptNumber: submitResult.receiptNumber ?? null,
+      kraResponse,
     };
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get sale status/details' })
-  @ApiResponse({ status: 200, description: 'Sale details' })
-  async getSale(@Param('id') id: string) {
-    return this.salesService.getDocument(id);
+  @ApiResponse({
+    status: 200,
+    description: 'Sale details',
+    type: GetSaleResponseDto,
+  })
+  async getSale(@Param('id') id: string): Promise<GetSaleResponseDto> {
+    const result = await this.salesService.getDocument(id);
+    const kraResponse = toKraSalesSaveResponseDto(
+      await this.salesService.getKraSalesSaveResponse(id),
+    );
+    return { document: this.toSaleDocumentDto(result.document), kraResponse };
   }
+
+  @Get(':id/report')
+  @ApiOperation({ summary: 'Get sale (Digitax-like report)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Sale report detail',
+    type: SalesReportDetailResponseDto,
+  })
+  async getSaleReport(
+    @Param('id') id: string,
+  ): Promise<SalesReportDetailResponseDto> {
+    const data = await this.salesService.getNormalizedSaleReport(id);
+    return { data };
+  }
+
+  private toSaleDocumentDto(
+    document: ComplianceDocument,
+  ): SaleDocumentResponseDto {
+    return {
+      id: document.id,
+      merchantId: document.merchantId,
+      branchId: document.branchId,
+      sourceSystem: document.sourceSystem,
+      sourceDocumentId: document.sourceDocumentId,
+      documentType: document.documentType,
+      documentNumber: document.documentNumber,
+      saleDate: document.saleDate,
+      receiptTypeCode: document.receiptTypeCode,
+      paymentTypeCode: document.paymentTypeCode,
+      invoiceStatusCode: document.invoiceStatusCode,
+      currency: document.currency,
+      exchangeRate: document.exchangeRate,
+      subtotalAmount: document.subtotalAmount,
+      totalAmount: document.totalAmount,
+      totalTax: document.totalTax,
+      customerPin: document.customerPin,
+      complianceStatus: document.complianceStatus,
+      submissionAttempts: document.submissionAttempts,
+      etimsReceiptNumber: document.etimsReceiptNumber,
+      idempotencyKey: document.idempotencyKey,
+      createdAt: document.createdAt,
+      submittedAt: document.submittedAt,
+      lines: document.lines.map((l) => ({
+        id: l.id,
+        itemId: l.itemId,
+        description: l.description,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        taxCategory: l.taxCategory,
+        taxAmount: l.taxAmount,
+        classificationCodeSnapshot: l.classificationCodeSnapshot,
+        unitCodeSnapshot: l.unitCodeSnapshot,
+        packagingUnitCodeSnapshot: l.packagingUnitCodeSnapshot,
+        taxTyCdSnapshot: l.taxTyCdSnapshot,
+        productTypeCodeSnapshot: l.productTypeCodeSnapshot,
+        createdAt: l.createdAt,
+      })),
+    };
+  }
+
+  // KRA response mapping lives in `kra-sales-save-response.mapper.ts`
 }

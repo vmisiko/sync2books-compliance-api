@@ -2,6 +2,12 @@ import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { SalesService } from '../application/sales.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
+import {
+  GetSaleResponseDto,
+  SaleDocumentResponseDto,
+} from './dto/sale-response.dto';
+import type { ComplianceDocument } from '../domain/entities/compliance-document.entity';
+import { toKraSalesSaveResponseDto } from './kra-sales-save-response.mapper';
 
 /**
  * Internal document engine endpoints.
@@ -23,9 +29,17 @@ export class DocumentsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get document details' })
-  @ApiResponse({ status: 200, description: 'Document details' })
-  async getDocument(@Param('id') id: string) {
-    return this.salesService.getDocument(id);
+  @ApiResponse({
+    status: 200,
+    description: 'Document details',
+    type: GetSaleResponseDto,
+  })
+  async getDocument(@Param('id') id: string): Promise<GetSaleResponseDto> {
+    const result = await this.salesService.getDocument(id);
+    const kraResponse = toKraSalesSaveResponseDto(
+      await this.salesService.getKraSalesSaveResponse(id),
+    );
+    return { document: this.toSaleDocumentDto(result.document), kraResponse };
   }
 
   @Get('merchants/:merchantId')
@@ -55,4 +69,51 @@ export class DocumentsController {
   async submitDocument(@Param('id') id: string) {
     return this.salesService.submitDocument(id);
   }
+
+  private toSaleDocumentDto(
+    document: ComplianceDocument,
+  ): SaleDocumentResponseDto {
+    return {
+      id: document.id,
+      merchantId: document.merchantId,
+      branchId: document.branchId,
+      sourceSystem: document.sourceSystem,
+      sourceDocumentId: document.sourceDocumentId,
+      documentType: document.documentType,
+      documentNumber: document.documentNumber,
+      saleDate: document.saleDate,
+      receiptTypeCode: document.receiptTypeCode,
+      paymentTypeCode: document.paymentTypeCode,
+      invoiceStatusCode: document.invoiceStatusCode,
+      currency: document.currency,
+      exchangeRate: document.exchangeRate,
+      subtotalAmount: document.subtotalAmount,
+      totalAmount: document.totalAmount,
+      totalTax: document.totalTax,
+      customerPin: document.customerPin,
+      complianceStatus: document.complianceStatus,
+      submissionAttempts: document.submissionAttempts,
+      etimsReceiptNumber: document.etimsReceiptNumber,
+      idempotencyKey: document.idempotencyKey,
+      createdAt: document.createdAt,
+      submittedAt: document.submittedAt,
+      lines: document.lines.map((l) => ({
+        id: l.id,
+        itemId: l.itemId,
+        description: l.description,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        taxCategory: l.taxCategory,
+        taxAmount: l.taxAmount,
+        classificationCodeSnapshot: l.classificationCodeSnapshot,
+        unitCodeSnapshot: l.unitCodeSnapshot,
+        packagingUnitCodeSnapshot: l.packagingUnitCodeSnapshot,
+        taxTyCdSnapshot: l.taxTyCdSnapshot,
+        productTypeCodeSnapshot: l.productTypeCodeSnapshot,
+        createdAt: l.createdAt,
+      })),
+    };
+  }
+
+  // KRA response mapping lives in `kra-sales-save-response.mapper.ts`
 }

@@ -11,6 +11,10 @@ import type { IEtimsAdapter } from '../../regulatory/oscu/ports/etims-adapter.po
 import { canTransition } from '../domain/state-machine/compliance-state-machine';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import type { ComplianceDocument } from '../domain/entities/compliance-document.entity';
+import type { ComplianceEvent } from '../domain/entities/compliance-event.entity';
+import type { ComplianceItem } from '../../shared/domain/entities/compliance-item.entity';
+import { ItemType } from '../../shared/domain/enums/item-type.enum';
+import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
 import type {
   IComplianceConnectionRepository,
   IComplianceDocumentRepository,
@@ -114,6 +118,162 @@ export class SalesService {
     );
   }
 
+  /**
+   * Returns the persisted KRA (OSCU) response for `/saveTrnsSalesOsdc`,
+   * sourced from the latest ACCEPTED event `responseSnapshot`.
+   */
+  async getKraSalesSaveResponse(
+    documentId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const events: ComplianceEvent[] =
+      await this.eventRepo.findByDocumentId(documentId);
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.eventType === 'ACCEPTED') {
+        return e.responseSnapshot ?? null;
+      }
+    }
+    return null;
+  }
+
+  async getNormalizedSaleReport(
+    documentId: string,
+  ): Promise<import('../controller/dto/sales-report.dto').SaleReportDto> {
+    const { document } = await this.getDocument(documentId);
+    const kraRaw = await this.getKraSalesSaveResponse(documentId);
+
+    const itemIds = [...new Set(document.lines.map((l) => l.itemId))];
+    const items: ComplianceItem[] = await this.itemRepo.findByIds(itemIds);
+    const itemsById = new Map(items.map((i) => [i.id, i]));
+
+    const connection = await this.connectionRepo.findByMerchantAndBranch(
+      document.merchantId,
+      document.branchId,
+    );
+
+    const saleDate = document.saleDate ?? null;
+    const date = saleDate ? formatDdMmYyyy(saleDate) : null;
+    const time = formatTimeAmPm(document.createdAt);
+
+    const kraData = (kraRaw?.data as Record<string, unknown> | null) ?? null;
+    const curRcptNoRaw =
+      kraData?.curRcptNo ??
+      (kraData as Record<string, unknown>)?.['curRcptNo '];
+    const receiptNumber = safeNumber(curRcptNoRaw);
+
+    const rcptSign = safeString(kraData?.rcptSign);
+    const intrlData = safeString(kraData?.intrlData);
+
+    const etimsUrl =
+      connection?.kraPin && rcptSign
+        ? `https://etims.kra.go.ke/common/link/etims/receipt/indexEtimsReceptData?{${connection.kraPin}+${document.branchId}+${rcptSign}}`
+        : null;
+
+    const taxBuckets = computeTaxBuckets(document);
+
+    return {
+      id: document.id,
+      date,
+      time,
+      traderInvoiceNumber: document.documentNumber,
+      receiptTypeCode: document.receiptTypeCode,
+      saleDetailUrl: `/api/sales/${document.id}`,
+      serialNumber: connection?.deviceId ?? null,
+      receiptNumber,
+      invoiceNumber: safeNumber(document.documentNumber),
+      customerId: null,
+      customerName: null,
+      customerTin: document.customerPin,
+      customerPhoneNumber: null,
+      customerEmail: null,
+      internalData: intrlData || null,
+      receiptSignature: rcptSign || null,
+      etimsUrl,
+      originalSaleId: null,
+      offlineUrl: null,
+      status: mapComplianceStatusToDigitax(document.complianceStatus),
+      salesTaxSummary: {
+        taxableAmountA: taxBuckets.taxableAmountA,
+        taxableAmountB: taxBuckets.taxableAmountB,
+        taxableAmountC: taxBuckets.taxableAmountC,
+        taxableAmountD: taxBuckets.taxableAmountD,
+        taxableAmountE: taxBuckets.taxableAmountE,
+        taxRateA: taxBuckets.taxRateA,
+        taxRateB: taxBuckets.taxRateB,
+        taxRateC: taxBuckets.taxRateC,
+        taxRateD: taxBuckets.taxRateD,
+        taxRateE: taxBuckets.taxRateE,
+        taxAmountA: taxBuckets.taxAmountA,
+        taxAmountB: taxBuckets.taxAmountB,
+        taxAmountC: taxBuckets.taxAmountC,
+        taxAmountD: taxBuckets.taxAmountD,
+        taxAmountE: taxBuckets.taxAmountE,
+        cateringLevyRate: 0,
+        serviceChargeRate: 0,
+        cateringLevyAmount: 0,
+        serviceChargeAmount: 0,
+      },
+      itemList: document.lines.map((l) => {
+        const splyAmt = round2(l.quantity * l.unitPrice);
+        const taxAmt = round2(l.taxAmount);
+        const totAmt = round2(splyAmt + taxAmt);
+        const taxTyCd = resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory);
+        const taxRate = taxRateByTaxTypeCode(taxTyCd);
+        const item = itemsById.get(l.itemId);
+
+        return {
+          id: l.id,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          totalAmount: totAmt,
+          taxableAmount: splyAmt,
+          taxAmount: taxAmt,
+          taxRate,
+          taxTypeCode: taxTyCd,
+          discountRate: 0,
+          discountAmount: 0,
+          etimsItemCode: null,
+          isStockable: item ? item.itemType === ItemType.GOODS : null,
+          itemId: l.itemId,
+        };
+      }),
+    };
+  }
+
+  async listNormalizedSaleReports(params: {
+    merchantId: string;
+    cursor?: string;
+    pageSize?: number;
+  }): Promise<
+    import('../controller/dto/sales-report.dto').SalesReportListResponseDto
+  > {
+    const all = await this.documentRepo.findByMerchant(params.merchantId);
+    const pageSize = clampPageSize(params.pageSize ?? 20);
+
+    const startIdx = params.cursor
+      ? Math.max(0, all.findIndex((d) => d.id === params.cursor) + 1)
+      : 0;
+
+    const page = all.slice(startIdx, startIdx + pageSize);
+    const next =
+      startIdx + pageSize < all.length && page.length > 0
+        ? page[page.length - 1].id
+        : null;
+
+    const data = await Promise.all(
+      page.map((d) => this.getNormalizedSaleReport(d.id)),
+    );
+
+    return {
+      pagination: {
+        next,
+        previous: null,
+        pageSize,
+      },
+      data,
+    };
+  }
+
   private enqueueDocumentProcessing(documentId: string): void {
     setImmediate(() => {
       void this.processDocumentInBackground(documentId);
@@ -163,4 +323,164 @@ export class SalesService {
       }
     }
   }
+}
+function clampPageSize(n: number): number {
+  if (!Number.isFinite(n)) return 20;
+  return Math.max(1, Math.min(100, Math.floor(n)));
+}
+
+function safeString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  return '';
+}
+
+function safeNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function formatDdMmYyyy(yyyyMmDd: string): string {
+  const [y, m, d] = yyyyMmDd.split('-');
+  if (!y || !m || !d) return yyyyMmDd;
+  return `${d}/${m}/${y}`;
+}
+
+function formatTimeAmPm(date: Date): string {
+  const hours = date.getHours();
+  const h12 = hours % 12 === 0 ? 12 : hours % 12;
+  const ampm = hours >= 12 ? 'pm' : 'am';
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  return `${pad2(h12)}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())} ${ampm}`;
+}
+
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+function mapComplianceStatusToDigitax(status: ComplianceStatus): string {
+  switch (status) {
+    case ComplianceStatus.ACCEPTED:
+      return 'completed';
+    case ComplianceStatus.REJECTED:
+    case ComplianceStatus.FAILED:
+      return 'failed';
+    case ComplianceStatus.RETRYING:
+      return 'retrying';
+    case ComplianceStatus.CANCELLED:
+      return 'cancelled';
+    default:
+      return 'pending';
+  }
+}
+
+const TAX_RATE_BY_TAX_TY_CD: Record<string, number> = {
+  A: 0,
+  B: 16,
+  C: 0,
+  D: 0,
+  E: 8,
+};
+
+function taxRateByTaxTypeCode(code: string | null): number {
+  if (!code) return 0;
+  return TAX_RATE_BY_TAX_TY_CD[code] ?? 0;
+}
+
+function resolveTaxTypeCode(
+  snapshot: string | null,
+  taxCategory: TaxCategory,
+): string | null {
+  if (snapshot && snapshot.trim() !== '') return snapshot;
+  switch (taxCategory) {
+    case TaxCategory.VAT_STANDARD:
+      return 'B';
+    case TaxCategory.VAT_ZERO:
+      return 'A';
+    case TaxCategory.EXEMPT:
+      return 'C';
+    default:
+      return null;
+  }
+}
+
+function computeTaxBuckets(document: ComplianceDocument): {
+  taxableAmountA: number;
+  taxableAmountB: number;
+  taxableAmountC: number;
+  taxableAmountD: number;
+  taxableAmountE: number;
+  taxAmountA: number;
+  taxAmountB: number;
+  taxAmountC: number;
+  taxAmountD: number;
+  taxAmountE: number;
+  taxRateA: number;
+  taxRateB: number;
+  taxRateC: number;
+  taxRateD: number;
+  taxRateE: number;
+} {
+  const buckets = {
+    taxableAmountA: 0,
+    taxableAmountB: 0,
+    taxableAmountC: 0,
+    taxableAmountD: 0,
+    taxableAmountE: 0,
+    taxAmountA: 0,
+    taxAmountB: 0,
+    taxAmountC: 0,
+    taxAmountD: 0,
+    taxAmountE: 0,
+  };
+
+  for (const l of document.lines) {
+    const code = resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory);
+    const taxable = round2(l.quantity * l.unitPrice);
+    const taxAmt = round2(l.taxAmount);
+    switch (code) {
+      case 'A':
+        buckets.taxableAmountA += taxable;
+        buckets.taxAmountA += taxAmt;
+        break;
+      case 'B':
+        buckets.taxableAmountB += taxable;
+        buckets.taxAmountB += taxAmt;
+        break;
+      case 'C':
+        buckets.taxableAmountC += taxable;
+        buckets.taxAmountC += taxAmt;
+        break;
+      case 'D':
+        buckets.taxableAmountD += taxable;
+        buckets.taxAmountD += taxAmt;
+        break;
+      case 'E':
+        buckets.taxableAmountE += taxable;
+        buckets.taxAmountE += taxAmt;
+        break;
+    }
+  }
+
+  return {
+    taxableAmountA: round2(buckets.taxableAmountA),
+    taxableAmountB: round2(buckets.taxableAmountB),
+    taxableAmountC: round2(buckets.taxableAmountC),
+    taxableAmountD: round2(buckets.taxableAmountD),
+    taxableAmountE: round2(buckets.taxableAmountE),
+    taxAmountA: round2(buckets.taxAmountA),
+    taxAmountB: round2(buckets.taxAmountB),
+    taxAmountC: round2(buckets.taxAmountC),
+    taxAmountD: round2(buckets.taxAmountD),
+    taxAmountE: round2(buckets.taxAmountE),
+    taxRateA: TAX_RATE_BY_TAX_TY_CD.A,
+    taxRateB: TAX_RATE_BY_TAX_TY_CD.B,
+    taxRateC: TAX_RATE_BY_TAX_TY_CD.C,
+    taxRateD: TAX_RATE_BY_TAX_TY_CD.D,
+    taxRateE: TAX_RATE_BY_TAX_TY_CD.E,
+  };
 }
