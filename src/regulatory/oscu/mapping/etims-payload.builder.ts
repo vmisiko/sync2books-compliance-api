@@ -18,11 +18,18 @@ export class EtimsPayloadBuilder {
       taxAmount: line.taxAmount,
       classificationCode: line.classificationCodeSnapshot,
       unitCode: line.unitCodeSnapshot,
+      packagingUnitCode: line.packagingUnitCodeSnapshot ?? 'NT',
+      taxTyCd: line.taxTyCdSnapshot ?? 'D',
+      productTypeCode: line.productTypeCodeSnapshot ?? '2',
     }));
 
     const payload: EtimsInvoicePayload = {
       documentNumber: document.documentNumber,
       documentType: document.documentType,
+      saleDate: document.saleDate ?? undefined,
+      receiptTypeCode: document.receiptTypeCode ?? undefined,
+      paymentTypeCode: document.paymentTypeCode ?? undefined,
+      invoiceStatusCode: document.invoiceStatusCode ?? undefined,
       branchId: document.branchId,
       deviceId: '', // Filled by adapter from connection
       currency: document.currency,

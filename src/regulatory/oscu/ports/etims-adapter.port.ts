@@ -13,6 +13,8 @@ export interface IEtimsAdapter {
     connectionContext: {
       merchantId: string;
       branchId: string;
+      kraPin: string;
+      environment: 'SANDBOX' | 'PRODUCTION';
       cmcKey: string;
       deviceId: string;
     },

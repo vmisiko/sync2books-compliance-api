@@ -64,6 +64,8 @@ export async function submitDocument(
   const result = await etimsAdapter.submitInvoice(payload, {
     merchantId: document.merchantId,
     branchId: document.branchId,
+    kraPin: connection.kraPin,
+    environment: connection.environment,
     cmcKey: connection.cmcKey,
     deviceId: connection.deviceId,
   });

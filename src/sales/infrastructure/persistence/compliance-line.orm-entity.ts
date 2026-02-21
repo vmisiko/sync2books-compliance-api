@@ -42,6 +42,15 @@ export class ComplianceLineOrmEntity {
   @Column('varchar')
   unitCodeSnapshot!: string;
 
+  @Column('varchar', { nullable: true })
+  packagingUnitCodeSnapshot!: string | null;
+
+  @Column('varchar', { nullable: true })
+  taxTyCdSnapshot!: string | null;
+
+  @Column('varchar', { nullable: true })
+  productTypeCodeSnapshot!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 }

@@ -30,6 +30,18 @@ export class ComplianceDocumentOrmEntity {
   @Column('varchar')
   documentNumber!: string;
 
+  @Column('varchar', { nullable: true })
+  saleDate!: string | null;
+
+  @Column('varchar', { nullable: true })
+  receiptTypeCode!: string | null;
+
+  @Column('varchar', { nullable: true })
+  paymentTypeCode!: string | null;
+
+  @Column('varchar', { nullable: true })
+  invoiceStatusCode!: string | null;
+
   @Column('varchar')
   currency!: string;
 

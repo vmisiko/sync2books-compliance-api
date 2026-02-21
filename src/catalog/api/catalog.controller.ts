@@ -1,34 +1,26 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CatalogService } from './catalog.service';
-import { ItemType } from '../../shared/domain/enums/item-type.enum';
-import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
+import { RegisterCatalogItemDto } from './dto/register-catalog-item.dto';
 
 @Controller('catalog')
+@ApiTags('Catalog')
 export class CatalogController {
   constructor(private readonly catalogService: CatalogService) {}
 
   @Post('items')
+  @ApiOperation({ summary: 'Create or update compliance item' })
+  @ApiResponse({ status: 201, description: 'Item created or updated' })
   async registerItem(
     @Body()
-    body: {
-      merchantId: string;
-      externalId: string;
-      name: string;
-      sku?: string | null;
-      itemType: ItemType;
-      taxCategory: TaxCategory;
-      classificationCode?: string;
-      unitCode?: string;
-      internalUnit?: string;
-      packagingUnitCode?: string;
-      taxTyCd?: string;
-      productTypeCode?: string;
-    },
+    body: RegisterCatalogItemDto,
   ) {
     return this.catalogService.registerItem(body);
   }
 
   @Get('merchants/:merchantId/items')
+  @ApiOperation({ summary: 'List compliance items' })
+  @ApiResponse({ status: 200, description: 'Item list' })
   async listItems(@Param('merchantId') merchantId: string) {
     return this.catalogService.listItems(merchantId);
   }

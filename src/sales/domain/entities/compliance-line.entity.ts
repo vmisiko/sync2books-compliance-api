@@ -15,5 +15,8 @@ export interface ComplianceLine {
   taxAmount: number;
   classificationCodeSnapshot: string;
   unitCodeSnapshot: string;
+  packagingUnitCodeSnapshot: string | null;
+  taxTyCdSnapshot: string | null;
+  productTypeCodeSnapshot: string | null;
   createdAt: Date;
 }

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TaxCategory } from '../../../../shared/domain/enums/tax-category.enum';
+import { PaymentTypeMappingOrmEntity } from './payment-type-mapping.orm-entity';
 import { TaxMappingOrmEntity } from './tax-mapping.orm-entity';
 import { UnitMappingOrmEntity } from './unit-mapping.orm-entity';
 
@@ -12,12 +13,15 @@ export class OscuMappingSeed {
     private readonly taxRepo: Repository<TaxMappingOrmEntity>,
     @InjectRepository(UnitMappingOrmEntity)
     private readonly unitRepo: Repository<UnitMappingOrmEntity>,
+    @InjectRepository(PaymentTypeMappingOrmEntity)
+    private readonly paymentRepo: Repository<PaymentTypeMappingOrmEntity>,
   ) {}
 
   async runIfEmpty(): Promise<void> {
     const taxCount = await this.taxRepo.count();
     const unitCount = await this.unitRepo.count();
-    if (taxCount > 0 && unitCount > 0) return;
+    const paymentCount = await this.paymentRepo.count();
+    if (taxCount > 0 && unitCount > 0 && paymentCount > 0) return;
 
     if (taxCount === 0) {
       await this.taxRepo.save(
@@ -61,6 +65,31 @@ export class OscuMappingSeed {
             internalUnit: m.internalUnit,
             qtyUnitCd: m.qtyUnitCd,
             pkgUnitCd: m.pkgUnitCd,
+            version: 1,
+            active: true,
+          }),
+        ),
+      );
+    }
+
+    if (paymentCount === 0) {
+      await this.paymentRepo.save(
+        [
+          // Global defaults (merchantId = null). OSCU cdCls=07.
+          { internalPaymentMethod: 'CASH', pmtTyCd: '01' },
+          { internalPaymentMethod: 'CREDIT', pmtTyCd: '02' },
+          { internalPaymentMethod: 'CASH_CREDIT', pmtTyCd: '03' },
+          { internalPaymentMethod: 'BANK_CHECK', pmtTyCd: '04' },
+          { internalPaymentMethod: 'DEBIT_CREDIT', pmtTyCd: '05' },
+          { internalPaymentMethod: 'CARD', pmtTyCd: '06' },
+          { internalPaymentMethod: 'MOBILE_MONEY', pmtTyCd: '07' },
+          { internalPaymentMethod: 'OTHER', pmtTyCd: '08' },
+        ].map((m) =>
+          this.paymentRepo.create({
+            id: `paymap-global-${m.internalPaymentMethod}`,
+            merchantId: null,
+            internalPaymentMethod: m.internalPaymentMethod,
+            pmtTyCd: m.pmtTyCd,
             version: 1,
             active: true,
           }),

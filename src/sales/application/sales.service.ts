@@ -48,16 +48,18 @@ export class SalesService {
 
   async createDocument(
     params: CreateDocumentInput,
+    options?: { enqueueProcessing?: boolean },
   ): Promise<CreateDocumentResult> {
     const result: CreateDocumentResult = await createDocumentUseCase(
       params,
       this.documentRepo,
+      this.itemRepo,
       this.eventRepo,
     );
 
     // Fire-and-forget processing: validate → prepare → submit
     // Client can poll `GET /documents/:id` to see status.
-    if (result.created) {
+    if (result.created && options?.enqueueProcessing !== false) {
       const documentId: string = (result.document as { id: string }).id;
       this.enqueueDocumentProcessing(documentId);
     }
@@ -97,6 +99,7 @@ export class SalesService {
     return prepareDocumentUseCase(
       documentId,
       this.documentRepo,
+      this.itemRepo,
       this.eventRepo,
     );
   }

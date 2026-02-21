@@ -13,22 +13,19 @@ function stockKey(itemId: string, branchId: string): string {
 }
 
 export class StockRepositoryStub implements IStockRepository {
-  async getStock(
-    itemId: string,
-    branchId: string,
-  ): Promise<InventoryStock | null> {
-    return stockByKey.get(stockKey(itemId, branchId)) ?? null;
+  getStock(itemId: string, branchId: string): Promise<InventoryStock | null> {
+    return Promise.resolve(stockByKey.get(stockKey(itemId, branchId)) ?? null);
   }
 
-  async upsertStock(stock: InventoryStock): Promise<InventoryStock> {
+  upsertStock(stock: InventoryStock): Promise<InventoryStock> {
     stockByKey.set(stockKey(stock.itemId, stock.branchId), { ...stock });
-    return stock;
+    return Promise.resolve(stock);
   }
 }
 
 export class StockMovementRepositoryStub implements IStockMovementRepository {
-  async append(movement: StockMovement): Promise<StockMovement> {
+  append(movement: StockMovement): Promise<StockMovement> {
     movements.push({ ...movement });
-    return movement;
+    return Promise.resolve(movement);
   }
 }

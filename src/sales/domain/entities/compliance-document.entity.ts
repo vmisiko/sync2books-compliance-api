@@ -19,6 +19,11 @@ export interface ComplianceDocument {
   sourceDocumentId: string;
   documentType: DocumentType;
   documentNumber: string;
+  /** Optional sales metadata for OSCU */
+  saleDate: string | null;
+  receiptTypeCode: string | null;
+  paymentTypeCode: string | null;
+  invoiceStatusCode: string | null;
   currency: string;
   exchangeRate: number;
   subtotalAmount: number;

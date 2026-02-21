@@ -19,6 +19,9 @@ function lineOrmToDomain(row: ComplianceLineOrmEntity): ComplianceLine {
     taxAmount: row.taxAmount,
     classificationCodeSnapshot: row.classificationCodeSnapshot,
     unitCodeSnapshot: row.unitCodeSnapshot,
+    packagingUnitCodeSnapshot: row.packagingUnitCodeSnapshot,
+    taxTyCdSnapshot: row.taxTyCdSnapshot,
+    productTypeCodeSnapshot: row.productTypeCodeSnapshot,
     createdAt: row.createdAt,
   };
 }
@@ -35,6 +38,10 @@ function docOrmToDomain(
     sourceDocumentId: row.sourceDocumentId,
     documentType: row.documentType as ComplianceDocument['documentType'],
     documentNumber: row.documentNumber,
+    saleDate: row.saleDate,
+    receiptTypeCode: row.receiptTypeCode,
+    paymentTypeCode: row.paymentTypeCode,
+    invoiceStatusCode: row.invoiceStatusCode,
     currency: row.currency,
     exchangeRate: row.exchangeRate,
     subtotalAmount: row.subtotalAmount,
@@ -63,6 +70,10 @@ function docDomainToOrm(
   e.sourceDocumentId = document.sourceDocumentId;
   e.documentType = document.documentType;
   e.documentNumber = document.documentNumber;
+  e.saleDate = document.saleDate;
+  e.receiptTypeCode = document.receiptTypeCode;
+  e.paymentTypeCode = document.paymentTypeCode;
+  e.invoiceStatusCode = document.invoiceStatusCode;
   e.currency = document.currency;
   e.exchangeRate = document.exchangeRate;
   e.subtotalAmount = document.subtotalAmount;
@@ -102,6 +113,9 @@ export class ComplianceDocumentTypeOrmRepository implements IComplianceDocumentR
       le.taxAmount = l.taxAmount;
       le.classificationCodeSnapshot = l.classificationCodeSnapshot;
       le.unitCodeSnapshot = l.unitCodeSnapshot;
+      le.packagingUnitCodeSnapshot = l.packagingUnitCodeSnapshot ?? null;
+      le.taxTyCdSnapshot = l.taxTyCdSnapshot ?? null;
+      le.productTypeCodeSnapshot = l.productTypeCodeSnapshot ?? null;
       le.createdAt = l.createdAt;
       le.document = entity;
       return le;

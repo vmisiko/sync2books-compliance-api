@@ -1,0 +1,683 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "AppController_getHello",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "App"
+        ]
+      }
+    },
+    "/catalog/items": {
+      "post": {
+        "operationId": "CatalogController_registerItem",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterCatalogItemDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Item created or updated"
+          }
+        },
+        "summary": "Create or update compliance item",
+        "tags": [
+          "Catalog"
+        ]
+      }
+    },
+    "/catalog/merchants/{merchantId}/items": {
+      "get": {
+        "operationId": "CatalogController_listItems",
+        "parameters": [
+          {
+            "name": "merchantId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Item list"
+          }
+        },
+        "summary": "List compliance items",
+        "tags": [
+          "Catalog"
+        ]
+      }
+    },
+    "/inventory/movements": {
+      "post": {
+        "operationId": "InventoryController_recordMovement",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordMovementDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stock movement recorded"
+          }
+        },
+        "summary": "Create stock movement",
+        "tags": [
+          "Inventory"
+        ]
+      }
+    },
+    "/inventory/branches/{branchId}/items/{itemId}": {
+      "get": {
+        "operationId": "InventoryController_getStockLevel",
+        "parameters": [
+          {
+            "name": "branchId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "itemId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stock level"
+          }
+        },
+        "summary": "Get stock level for item in branch",
+        "tags": [
+          "Inventory"
+        ]
+      }
+    },
+    "/documents": {
+      "post": {
+        "operationId": "DocumentsController_createDocument",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocumentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Document created"
+          }
+        },
+        "summary": "Create compliance document (DRAFT)",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}": {
+      "get": {
+        "operationId": "DocumentsController_getDocument",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document details"
+          }
+        },
+        "summary": "Get document details",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/merchants/{merchantId}": {
+      "get": {
+        "operationId": "DocumentsController_listDocuments",
+        "parameters": [
+          {
+            "name": "merchantId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document list"
+          }
+        },
+        "summary": "List documents by merchant",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/validate": {
+      "post": {
+        "operationId": "DocumentsController_validateDocument",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Validation result"
+          }
+        },
+        "summary": "Validate document before submission",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/prepare": {
+      "post": {
+        "operationId": "DocumentsController_prepareDocument",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Prepared"
+          }
+        },
+        "summary": "Prepare document for submission",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/submit": {
+      "post": {
+        "operationId": "DocumentsController_submitDocument",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Submission result"
+          }
+        },
+        "summary": "Submit document to eTIMS",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/sales": {
+      "post": {
+        "operationId": "ApiSalesController_createSale",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSaleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sale created"
+          }
+        },
+        "summary": "Create a sale (Digitax-like)",
+        "tags": [
+          "API Sales"
+        ]
+      }
+    },
+    "/api/sales/{id}": {
+      "get": {
+        "operationId": "ApiSalesController_getSale",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sale details"
+          }
+        },
+        "summary": "Get sale status/details",
+        "tags": [
+          "API Sales"
+        ]
+      }
+    },
+    "/dashboard-api/sales": {
+      "post": {
+        "operationId": "DashboardSalesController_createSale",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSaleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sale created"
+          }
+        },
+        "summary": "Create a sale (dashboard)",
+        "tags": [
+          "Dashboard Sales"
+        ]
+      }
+    },
+    "/dashboard-api/sales/{id}": {
+      "get": {
+        "operationId": "DashboardSalesController_getSale",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sale details"
+          }
+        },
+        "summary": "Get sale status/details",
+        "tags": [
+          "Dashboard Sales"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Sync2Books Compliance API",
+    "description": "Unified compliance abstraction layer for eTIMS (OSCU).",
+    "version": "1.0.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "schemas": {
+      "RegisterCatalogItemDto": {
+        "type": "object",
+        "properties": {
+          "merchantId": {
+            "type": "string"
+          },
+          "externalId": {
+            "type": "string",
+            "description": "ERP/external item id (e.g. QuickBooks Item.Id)"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sku": {
+            "type": "object",
+            "nullable": true
+          },
+          "itemType": {
+            "type": "string",
+            "enum": [
+              "GOODS",
+              "SERVICE"
+            ]
+          },
+          "taxCategory": {
+            "type": "string",
+            "enum": [
+              "VAT_STANDARD",
+              "VAT_ZERO",
+              "EXEMPT",
+              "OTHER"
+            ]
+          },
+          "classificationCode": {
+            "type": "string",
+            "description": "OSCU item classification code (itemClsCd) override"
+          },
+          "unitCode": {
+            "type": "string",
+            "description": "OSCU unit of quantity code (qtyUnitCd) override"
+          },
+          "internalUnit": {
+            "type": "string",
+            "description": "Internal/ERP unit identifier (EA, PCS, EACH...)"
+          },
+          "packagingUnitCode": {
+            "type": "string",
+            "description": "OSCU packaging unit code (pkgUnitCd) override"
+          },
+          "taxTyCd": {
+            "type": "string",
+            "description": "OSCU tax type code (taxTyCd) override"
+          },
+          "productTypeCode": {
+            "type": "string",
+            "description": "OSCU product type code (itemTyCd) override"
+          }
+        },
+        "required": [
+          "merchantId",
+          "externalId",
+          "name",
+          "itemType",
+          "taxCategory"
+        ]
+      },
+      "RecordMovementDto": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string"
+          },
+          "branchId": {
+            "type": "string"
+          },
+          "movementType": {
+            "type": "string",
+            "enum": [
+              "SALE",
+              "PURCHASE",
+              "TRANSFER_OUT",
+              "TRANSFER_IN",
+              "ADJUSTMENT",
+              "RETURN"
+            ]
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "referenceType": {
+            "type": "object",
+            "nullable": true
+          },
+          "referenceId": {
+            "type": "object",
+            "nullable": true
+          }
+        },
+        "required": [
+          "itemId",
+          "branchId",
+          "movementType",
+          "quantity"
+        ]
+      },
+      "CreateDocumentLineDto": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "unitPrice": {
+            "type": "number"
+          },
+          "taxCategory": {
+            "type": "string",
+            "description": "Internal tax category (mapped to OSCU tax type internally). e.g. VAT_STANDARD"
+          },
+          "taxAmount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "itemId",
+          "description",
+          "quantity",
+          "unitPrice",
+          "taxCategory",
+          "taxAmount"
+        ]
+      },
+      "CreateDocumentDto": {
+        "type": "object",
+        "properties": {
+          "merchantId": {
+            "type": "string"
+          },
+          "branchId": {
+            "type": "string"
+          },
+          "sourceSystem": {
+            "type": "string",
+            "enum": [
+              "QUICKBOOKS",
+              "XERO",
+              "API"
+            ]
+          },
+          "sourceDocumentId": {
+            "type": "string"
+          },
+          "documentType": {
+            "type": "string",
+            "enum": [
+              "SALE",
+              "SALE_INVOICE",
+              "CREDIT_NOTE",
+              "PURCHASE",
+              "EXPORT",
+              "REVERSE_INVOICE"
+            ]
+          },
+          "documentNumber": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "exchangeRate": {
+            "type": "number"
+          },
+          "subtotalAmount": {
+            "type": "number"
+          },
+          "totalTax": {
+            "type": "number"
+          },
+          "totalAmount": {
+            "type": "number"
+          },
+          "customerPin": {
+            "type": "object",
+            "nullable": true
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CreateDocumentLineDto"
+            }
+          }
+        },
+        "required": [
+          "merchantId",
+          "branchId",
+          "sourceSystem",
+          "sourceDocumentId",
+          "documentType",
+          "documentNumber",
+          "currency",
+          "exchangeRate",
+          "subtotalAmount",
+          "totalTax",
+          "totalAmount",
+          "lines"
+        ]
+      },
+      "CreateSaleItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Catalog item id (stable)"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "unitPrice": {
+            "type": "number"
+          },
+          "taxCategory": {
+            "type": "string",
+            "description": "Internal tax category string (e.g. VAT_STANDARD). Required for MVP until tax engine is added."
+          },
+          "taxAmount": {
+            "type": "number",
+            "description": "Tax amount for this line. Required for MVP until tax engine is added."
+          },
+          "discountRate": {
+            "type": "number"
+          },
+          "discountAmount": {
+            "type": "number"
+          },
+          "itemDescription": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "quantity",
+          "unitPrice",
+          "taxCategory",
+          "taxAmount"
+        ]
+      },
+      "CreateSaleDto": {
+        "type": "object",
+        "properties": {
+          "merchantId": {
+            "type": "string"
+          },
+          "branchId": {
+            "type": "string"
+          },
+          "saleDate": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "traderInvoiceNumber": {
+            "type": "string"
+          },
+          "customerTin": {
+            "type": "string"
+          },
+          "customerName": {
+            "type": "string"
+          },
+          "receiptTypeCode": {
+            "type": "string",
+            "description": "Receipt type code, e.g. S or R"
+          },
+          "paymentTypeCode": {
+            "type": "string",
+            "description": "Payment type code, e.g. 01..08"
+          },
+          "invoiceStatusCode": {
+            "type": "string",
+            "description": "Invoice status code (OSCU salesSttsCd)"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CreateSaleItemDto"
+            }
+          }
+        },
+        "required": [
+          "merchantId",
+          "branchId",
+          "saleDate",
+          "traderInvoiceNumber",
+          "receiptTypeCode",
+          "paymentTypeCode",
+          "invoiceStatusCode",
+          "items"
+        ]
+      }
+    }
+  }
+}

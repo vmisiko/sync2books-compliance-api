@@ -10,13 +10,25 @@ export interface EtimsInvoiceLine {
   unitPrice: number;
   taxAmount: number;
   classificationCode: string;
+  /** OSCU qtyUnitCd */
   unitCode: string;
+  /** OSCU pkgUnitCd */
+  packagingUnitCode: string;
+  /** OSCU taxTyCd */
+  taxTyCd: string;
+  /** OSCU itemTyCd */
+  productTypeCode: string;
 }
 
 export interface EtimsInvoicePayload {
   /** Document reference */
   documentNumber: string;
   documentType: string;
+  /** Sales metadata */
+  saleDate?: string;
+  receiptTypeCode?: string;
+  paymentTypeCode?: string;
+  invoiceStatusCode?: string;
   /** Branch/device for submission */
   branchId: string;
   deviceId: string;

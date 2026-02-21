@@ -81,8 +81,6 @@ describe('DocumentsController', () => {
             unitPrice: 100,
             taxCategory: 'VAT_STANDARD',
             taxAmount: 16,
-            classificationCodeSnapshot: '1234567890',
-            unitCodeSnapshot: 'EA',
           },
         ],
       });

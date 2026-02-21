@@ -89,7 +89,8 @@ export async function registerItem(
   }
 
   const newItem: CatalogItem = {
-    id: `item-${input.merchantId}-${input.externalId}-${now.getTime()}`,
+    // Stable id so other systems (sales, ERP sync) can reference it reliably.
+    id: `item-${input.merchantId}-${input.externalId}`,
     merchantId: input.merchantId,
     externalId: input.externalId,
     name: input.name,
