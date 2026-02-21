@@ -14,7 +14,6 @@ import {
 } from '../shared/tokens';
 import { ApiSalesController } from './controller/api-sales.controller';
 import { DashboardSalesController } from './controller/dashboard-sales.controller';
-import { DocumentsController } from './controller/documents.controller';
 import { SalesService } from './application/sales.service';
 import { ComplianceDocumentOrmEntity } from './infrastructure/persistence/compliance-document.orm-entity';
 import { ComplianceLineOrmEntity } from './infrastructure/persistence/compliance-line.orm-entity';
@@ -31,11 +30,7 @@ import { ComplianceEventTypeOrmRepository } from './infrastructure/persistence/c
       ComplianceEventOrmEntity,
     ]),
   ],
-  controllers: [
-    DocumentsController,
-    ApiSalesController,
-    DashboardSalesController,
-  ],
+  controllers: [ApiSalesController, DashboardSalesController],
   providers: [
     { provide: DOCUMENT_REPO, useClass: ComplianceDocumentTypeOrmRepository },
     { provide: EVENT_REPO, useClass: ComplianceEventTypeOrmRepository },

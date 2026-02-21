@@ -3,14 +3,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
 import { SalesModule } from '../sales/sales.module';
-import { DocumentsController } from '../sales/controller/documents.controller';
 import { SalesService } from '../sales/application/sales.service';
 import { DocumentType } from '../shared/domain/enums/document-type.enum';
 import { SourceSystem } from '../shared/domain/enums/source-system.enum';
 import { CatalogItemOrmEntity } from '../catalog/infrastructure/persistence/catalog-item.orm-entity';
 
-describe('DocumentsController', () => {
-  let controller: DocumentsController;
+describe('SalesService', () => {
   let service: SalesService;
 
   beforeEach(async () => {
@@ -27,7 +25,6 @@ describe('DocumentsController', () => {
       ],
     }).compile();
 
-    controller = module.get<DocumentsController>(DocumentsController);
     service = module.get<SalesService>(SalesService);
 
     // Seed the catalog for validation (document lines reference itemId = "item-1")
@@ -56,7 +53,7 @@ describe('DocumentsController', () => {
   });
 
   it('should be defined', () => {
-    expect(controller).toBeDefined();
+    expect(service).toBeDefined();
   });
 
   describe('create and validate flow', () => {

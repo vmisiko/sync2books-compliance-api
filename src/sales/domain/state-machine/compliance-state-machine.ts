@@ -16,6 +16,7 @@ export type StateTransition =
     }
   | { from: ComplianceStatus.SUBMITTED; to: ComplianceStatus.ACCEPTED }
   | { from: ComplianceStatus.SUBMITTED; to: ComplianceStatus.REJECTED }
+  | { from: ComplianceStatus.SUBMITTED; to: ComplianceStatus.RETRYING }
   | { from: ComplianceStatus.REJECTED; to: ComplianceStatus.RETRYING }
   | { from: ComplianceStatus.RETRYING; to: ComplianceStatus.SUBMITTED }
   | { from: ComplianceStatus.DRAFT; to: ComplianceStatus.CANCELLED }
@@ -34,6 +35,7 @@ const VALID_TRANSITIONS: Map<ComplianceStatus, ComplianceStatus[]> = new Map([
     [
       ComplianceStatus.ACCEPTED,
       ComplianceStatus.REJECTED,
+      ComplianceStatus.RETRYING,
       ComplianceStatus.FAILED,
     ],
   ],

@@ -18,13 +18,6 @@ import { CreateSaleDto } from './dto/create-sale.dto';
 import { DocumentType } from '../../shared/domain/enums/document-type.enum';
 import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
 import {
-  GetSaleResponseDto,
-  SaleCreateResponseDto,
-  SaleDocumentResponseDto,
-} from './dto/sale-response.dto';
-import type { ComplianceDocument } from '../domain/entities/compliance-document.entity';
-import { toKraSalesSaveResponseDto } from './kra-sales-save-response.mapper';
-import {
   SalesReportDetailResponseDto,
   SalesReportListResponseDto,
 } from './dto/sales-report.dto';
@@ -65,12 +58,14 @@ export class DashboardSalesController {
   @ApiResponse({
     status: 201,
     description: 'Sale created',
-    type: SaleCreateResponseDto,
+    type: SalesReportDetailResponseDto,
   })
   @ApiBadRequestResponse({ description: 'Validation failed' })
   async createSale(
     @Body() body: CreateSaleDto,
-  ): Promise<SaleCreateResponseDto> {
+    @Query('submit') submit?: string,
+  ): Promise<SalesReportDetailResponseDto> {
+    const shouldSubmit = submit === undefined ? true : submit !== 'false';
     const docType =
       body.receiptTypeCode === 'R'
         ? DocumentType.CREDIT_NOTE
@@ -112,64 +107,43 @@ export class DashboardSalesController {
       { enqueueProcessing: false },
     );
 
-    if (!createResult.created) {
-      const kraResponse = toKraSalesSaveResponseDto(
-        await this.salesService.getKraSalesSaveResponse(
-          createResult.document.id,
-        ),
-      );
-      return {
-        id: createResult.document.id,
-        status: createResult.document.complianceStatus,
-        receiptNumber: createResult.document.etimsReceiptNumber ?? null,
-        kraResponse,
-      };
-    }
+    const documentId = createResult.document.id;
 
     // Dashboard can still be synchronous for MVP; later make async + polling.
-    const validation = await this.salesService.validateDocument(
-      createResult.document.id,
-    );
-    if (!validation.validation.isValid) {
-      throw new BadRequestException({
-        message: 'Sale validation failed',
-        errors: validation.validation.errors,
-      });
+    if (createResult.created && shouldSubmit) {
+      const validation = await this.salesService.validateDocument(documentId);
+      if (!validation.validation.isValid) {
+        throw new BadRequestException({
+          message: 'Sale validation failed',
+          errors: validation.validation.errors,
+        });
+      }
+
+      await this.salesService.prepareDocument(documentId);
+      await this.salesService.submitDocument(documentId);
     }
 
-    await this.salesService.prepareDocument(createResult.document.id);
-    const submitResult = await this.salesService.submitDocument(
-      createResult.document.id,
-    );
-    const kraResponse = toKraSalesSaveResponseDto(
-      await this.salesService.getKraSalesSaveResponse(submitResult.document.id),
-    );
-
-    return {
-      id: submitResult.document.id,
-      status: submitResult.document.complianceStatus,
-      receiptNumber: submitResult.receiptNumber ?? null,
-      kraResponse,
-    };
+    const data = await this.salesService.getNormalizedSaleReport(documentId);
+    return { data };
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Get sale status/details' })
-  @ApiResponse({
-    status: 200,
-    description: 'Sale details',
-    type: GetSaleResponseDto,
-  })
-  async getSale(@Param('id') id: string): Promise<GetSaleResponseDto> {
-    const result = await this.salesService.getDocument(id);
-    const kraResponse = toKraSalesSaveResponseDto(
-      await this.salesService.getKraSalesSaveResponse(id),
-    );
-    return { document: this.toSaleDocumentDto(result.document), kraResponse };
-  }
+  // @Get(':id')
+  // @ApiOperation({ summary: 'Get sale status/details' })
+  // @ApiResponse({
+  //   status: 200,
+  //   description: 'Sale details',
+  //   type: GetSaleResponseDto,
+  // })
+  // async getSale(@Param('id') id: string): Promise<GetSaleResponseDto> {
+  //   const result = await this.salesService.getDocument(id);
+  //   const kraResponse = toKraSalesSaveResponseDto(
+  //     await this.salesService.getKraSalesSaveResponse(id),
+  //   );
+  //   return { document: this.toSaleDocumentDto(result.document), kraResponse };
+  // }
 
-  @Get(':id/report')
-  @ApiOperation({ summary: 'Get sale (Digitax-like report)' })
+  @Get(':id/')
+  @ApiOperation({ summary: 'Get sale  by sale id' })
   @ApiResponse({
     status: 200,
     description: 'Sale report detail',
@@ -182,50 +156,50 @@ export class DashboardSalesController {
     return { data };
   }
 
-  private toSaleDocumentDto(
-    document: ComplianceDocument,
-  ): SaleDocumentResponseDto {
-    return {
-      id: document.id,
-      merchantId: document.merchantId,
-      branchId: document.branchId,
-      sourceSystem: document.sourceSystem,
-      sourceDocumentId: document.sourceDocumentId,
-      documentType: document.documentType,
-      documentNumber: document.documentNumber,
-      saleDate: document.saleDate,
-      receiptTypeCode: document.receiptTypeCode,
-      paymentTypeCode: document.paymentTypeCode,
-      invoiceStatusCode: document.invoiceStatusCode,
-      currency: document.currency,
-      exchangeRate: document.exchangeRate,
-      subtotalAmount: document.subtotalAmount,
-      totalAmount: document.totalAmount,
-      totalTax: document.totalTax,
-      customerPin: document.customerPin,
-      complianceStatus: document.complianceStatus,
-      submissionAttempts: document.submissionAttempts,
-      etimsReceiptNumber: document.etimsReceiptNumber,
-      idempotencyKey: document.idempotencyKey,
-      createdAt: document.createdAt,
-      submittedAt: document.submittedAt,
-      lines: document.lines.map((l) => ({
-        id: l.id,
-        itemId: l.itemId,
-        description: l.description,
-        quantity: l.quantity,
-        unitPrice: l.unitPrice,
-        taxCategory: l.taxCategory,
-        taxAmount: l.taxAmount,
-        classificationCodeSnapshot: l.classificationCodeSnapshot,
-        unitCodeSnapshot: l.unitCodeSnapshot,
-        packagingUnitCodeSnapshot: l.packagingUnitCodeSnapshot,
-        taxTyCdSnapshot: l.taxTyCdSnapshot,
-        productTypeCodeSnapshot: l.productTypeCodeSnapshot,
-        createdAt: l.createdAt,
-      })),
-    };
-  }
+  // private toSaleDocumentDto(
+  //   document: ComplianceDocument,
+  // ): SaleDocumentResponseDto {
+  //   return {
+  //     id: document.id,
+  //     merchantId: document.merchantId,
+  //     branchId: document.branchId,
+  //     sourceSystem: document.sourceSystem,
+  //     sourceDocumentId: document.sourceDocumentId,
+  //     documentType: document.documentType,
+  //     documentNumber: document.documentNumber,
+  //     saleDate: document.saleDate,
+  //     receiptTypeCode: document.receiptTypeCode,
+  //     paymentTypeCode: document.paymentTypeCode,
+  //     invoiceStatusCode: document.invoiceStatusCode,
+  //     currency: document.currency,
+  //     exchangeRate: document.exchangeRate,
+  //     subtotalAmount: document.subtotalAmount,
+  //     totalAmount: document.totalAmount,
+  //     totalTax: document.totalTax,
+  //     customerPin: document.customerPin,
+  //     complianceStatus: document.complianceStatus,
+  //     submissionAttempts: document.submissionAttempts,
+  //     etimsReceiptNumber: document.etimsReceiptNumber,
+  //     idempotencyKey: document.idempotencyKey,
+  //     createdAt: document.createdAt,
+  //     submittedAt: document.submittedAt,
+  //     lines: document.lines.map((l) => ({
+  //       id: l.id,
+  //       itemId: l.itemId,
+  //       description: l.description,
+  //       quantity: l.quantity,
+  //       unitPrice: l.unitPrice,
+  //       taxCategory: l.taxCategory,
+  //       taxAmount: l.taxAmount,
+  //       classificationCodeSnapshot: l.classificationCodeSnapshot,
+  //       unitCodeSnapshot: l.unitCodeSnapshot,
+  //       packagingUnitCodeSnapshot: l.packagingUnitCodeSnapshot,
+  //       taxTyCdSnapshot: l.taxTyCdSnapshot,
+  //       productTypeCodeSnapshot: l.productTypeCodeSnapshot,
+  //       createdAt: l.createdAt,
+  //     })),
+  //   };
+  // }
 
   // KRA response mapping lives in `kra-sales-save-response.mapper.ts`
 }
