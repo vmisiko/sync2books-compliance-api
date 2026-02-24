@@ -90,8 +90,8 @@ export class ApiSalesController {
         documentType: docType,
         documentNumber: body.traderInvoiceNumber,
         originalDocumentNumber: body.originalTraderInvoiceNumber ?? null,
-        creditNoteDate: body.creditNoteDate ?? null,
-        creditNoteReasonCode: body.creditNoteReasonCode ?? null,
+        creditNoteDate: asNullableString(body.creditNoteDate),
+        creditNoteReasonCode: asNullableString(body.creditNoteReasonCode),
         originalSaleId: null,
         saleDate: body.saleDate,
         receiptTypeCode: body.receiptTypeCode,
@@ -127,6 +127,8 @@ export class ApiSalesController {
     // synchronously for dev API ergonomics. Otherwise (idempotent replay or
     // submit=false), just return the normalized document view.
     if (createResult.created && shouldSubmit) {
+      await this.salesService.applyInventoryMovements(documentId);
+
       const validation = await this.salesService.validateDocument(documentId);
       if (!validation.validation.isValid) {
         throw new BadRequestException({
@@ -314,4 +316,10 @@ export class ApiSalesController {
   // }
 
   // KRA response mapping lives in `kra-sales-save-response.mapper.ts`
+}
+
+function asNullableString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  return v === '' ? null : v;
 }

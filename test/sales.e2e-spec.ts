@@ -82,10 +82,25 @@ describe('Sales API (e2e)', () => {
       classificationCode: '14111400',
     });
 
+    const itemId = `item-${merchantId}-${externalId}`;
+
+    // Seed stock so sales can deduct without 500s.
+    await request(httpServer)
+      .put('/api/stock/adjust')
+      .send({
+        itemId,
+        branchId: 'branch-1',
+        quantity: 1000,
+        action: 'ADD',
+        movementTypeCode: '02',
+        referenceId: `seed-${Date.now()}`,
+      })
+      .expect(200);
+
     return {
       merchantId,
       externalId,
-      itemId: `item-${merchantId}-${externalId}`,
+      itemId,
     };
   }
 

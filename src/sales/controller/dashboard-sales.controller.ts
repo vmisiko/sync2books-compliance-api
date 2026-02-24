@@ -91,8 +91,8 @@ export class DashboardSalesController {
         documentType: docType,
         documentNumber: body.traderInvoiceNumber,
         originalDocumentNumber: body.originalTraderInvoiceNumber ?? null,
-        creditNoteDate: body.creditNoteDate ?? null,
-        creditNoteReasonCode: body.creditNoteReasonCode ?? null,
+        creditNoteDate: asNullableString(body.creditNoteDate),
+        creditNoteReasonCode: asNullableString(body.creditNoteReasonCode),
         originalSaleId: null,
         saleDate: body.saleDate,
         receiptTypeCode: body.receiptTypeCode,
@@ -126,6 +126,8 @@ export class DashboardSalesController {
 
     // Dashboard can still be synchronous for MVP; later make async + polling.
     if (createResult.created && shouldSubmit) {
+      await this.salesService.applyInventoryMovements(documentId);
+
       const validation = await this.salesService.validateDocument(documentId);
       if (!validation.validation.isValid) {
         throw new BadRequestException({
@@ -313,4 +315,10 @@ export class DashboardSalesController {
   // }
 
   // KRA response mapping lives in `kra-sales-save-response.mapper.ts`
+}
+
+function asNullableString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  return v === '' ? null : v;
 }

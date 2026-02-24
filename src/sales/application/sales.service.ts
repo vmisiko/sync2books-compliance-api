@@ -16,6 +16,9 @@ import type { ComplianceItem } from '../../shared/domain/entities/compliance-ite
 import { ItemType } from '../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
 import type { ComplianceConnection } from '../../shared/domain/entities/compliance-connection.entity';
+import { InventoryService } from '../../inventory/api/inventory.service';
+import { MovementType } from '../../inventory/domain/enums/movement-type.enum';
+import { DocumentType } from '../../shared/domain/enums/document-type.enum';
 import type {
   IComplianceConnectionRepository,
   IComplianceDocumentRepository,
@@ -49,6 +52,7 @@ export class SalesService {
     private readonly connectionRepo: IComplianceConnectionRepository,
     @Inject(ETIMS_ADAPTER)
     private readonly etimsAdapter: IEtimsAdapter,
+    private readonly inventoryService: InventoryService,
   ) {}
 
   async createDocument(
@@ -117,6 +121,43 @@ export class SalesService {
       this.eventRepo,
       this.etimsAdapter,
     );
+  }
+
+  /**
+   * Internal stock accounting.
+   *
+   * - Only applies to stockable items (GOODS).
+   * - SALE decreases stock, CREDIT_NOTE increases stock.
+   *
+   * This is intentionally independent of KRA acceptance: it tracks business
+   * activity, not regulator submission success.
+   */
+  async applyInventoryMovements(documentId: string): Promise<void> {
+    const { document } = await this.getDocument(documentId);
+
+    const movementType =
+      document.documentType === DocumentType.CREDIT_NOTE
+        ? MovementType.RETURN
+        : MovementType.SALE;
+
+    const itemIds = [...new Set(document.lines.map((l) => l.itemId))];
+    const items: ComplianceItem[] = await this.itemRepo.findByIds(itemIds);
+    const itemsById = new Map(items.map((i) => [i.id, i]));
+
+    for (const line of document.lines) {
+      const item = itemsById.get(line.itemId);
+      const isStockable = item ? item.itemType === ItemType.GOODS : false;
+      if (!isStockable) continue;
+
+      await this.inventoryService.recordMovement({
+        itemId: line.itemId,
+        branchId: document.branchId,
+        movementType,
+        quantity: line.quantity,
+        referenceType: 'COMPLIANCE_DOCUMENT',
+        referenceId: document.id,
+      });
+    }
   }
 
   /**

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogModule } from '../catalog/catalog.module';
+import { InventoryModule } from '../inventory/inventory.module';
 import { EtimsAdapterStub } from '../regulatory/oscu/adapters/etims-adapter.stub';
 import { EtimsAdapterHttp } from '../regulatory/oscu/adapters/etims-adapter.http';
 import {
@@ -25,6 +26,7 @@ import { ComplianceEventTypeOrmRepository } from './infrastructure/persistence/c
 @Module({
   imports: [
     CatalogModule,
+    InventoryModule,
     TypeOrmModule.forFeature([
       ComplianceDocumentOrmEntity,
       ComplianceLineOrmEntity,

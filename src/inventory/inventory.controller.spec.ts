@@ -1,11 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { InventoryModule } from './inventory.module';
-import { InventoryController } from './api/inventory.controller';
+import { StockController } from './api/stock.controller';
 import { InventoryService } from './api/inventory.service';
 import { MovementType } from './domain/enums/movement-type.enum';
 
-describe('InventoryController', () => {
-  let controller: InventoryController;
+describe('StockController', () => {
+  let controller: StockController;
   let service: InventoryService;
 
   beforeEach(async () => {
@@ -13,7 +13,7 @@ describe('InventoryController', () => {
       imports: [InventoryModule],
     }).compile();
 
-    controller = module.get<InventoryController>(InventoryController);
+    controller = module.get<StockController>(StockController);
     service = module.get<InventoryService>(InventoryService);
   });
 
@@ -21,17 +21,24 @@ describe('InventoryController', () => {
     expect(controller).toBeDefined();
   });
 
-  it('should record movement and get stock level', async () => {
-    const record = await service.recordMovement({
+  it('should adjust stock (ADD then DEDUCT)', async () => {
+    const add = await controller.adjustStock({
       itemId: 'item-1',
       branchId: 'branch-1',
-      movementType: MovementType.PURCHASE,
       quantity: 10,
+      action: 'ADD',
+      movementTypeCode: '05',
     });
-    expect(record.stock.quantityOnHand).toBe(10);
+    expect(add.stock.quantityOnHand).toBe(10);
 
-    const level = await service.getStockLevel('item-1', 'branch-1');
-    expect(level.quantityOnHand).toBe(10);
+    const deduct = await controller.adjustStock({
+      itemId: 'item-1',
+      branchId: 'branch-1',
+      quantity: 4,
+      action: 'DEDUCT',
+      movementTypeCode: '11',
+    });
+    expect(deduct.stock.quantityOnHand).toBe(6);
   });
 
   it('should reject sale when insufficient stock', async () => {
@@ -50,5 +57,26 @@ describe('InventoryController', () => {
         quantity: 10,
       }),
     ).rejects.toThrow('Insufficient stock');
+  });
+
+  it('should transfer stock between branches', async () => {
+    await service.recordMovement({
+      itemId: 'item-3',
+      branchId: 'branch-a',
+      movementType: MovementType.PURCHASE,
+      quantity: 7,
+    });
+
+    const res = await controller.transferStock({
+      itemId: 'item-3',
+      fromBranchId: 'branch-a',
+      receivingItemId: 'item-3',
+      toBranchId: 'branch-b',
+      quantity: 5,
+      referenceId: 'xfer-1',
+    });
+
+    expect(res.from.quantityOnHand).toBe(2);
+    expect(res.to.quantityOnHand).toBe(5);
   });
 });

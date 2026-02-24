@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { InventoryService } from './api/inventory.service';
-import { InventoryController } from './api/inventory.controller';
+import { StockController } from './api/stock.controller';
 import {
   StockMovementRepositoryStub,
   StockRepositoryStub,
@@ -8,7 +8,7 @@ import {
 import { STOCK_MOVEMENT_REPO, STOCK_REPO } from '../shared/tokens';
 
 @Module({
-  controllers: [InventoryController],
+  controllers: [StockController],
   providers: [
     { provide: STOCK_REPO, useClass: StockRepositoryStub },
     { provide: STOCK_MOVEMENT_REPO, useClass: StockMovementRepositoryStub },
