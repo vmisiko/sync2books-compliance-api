@@ -8,6 +8,8 @@ export interface ComplianceLine {
   id: string;
   documentId: string;
   itemId: string;
+  /** eTIMS/OSCU item code (`itemCd`) snapshot used for submission. */
+  etimsItemCodeSnapshot: string | null;
   description: string;
   quantity: number;
   unitPrice: number;

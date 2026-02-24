@@ -21,6 +21,8 @@ export interface ComplianceItem {
   taxTyCd: string;
   /** OSCU product type code (itemTyCd) */
   productTypeCode: string;
+  /** eTIMS/OSCU item code (`itemCd`) used for submissions. */
+  etimsItemCode?: string | null;
   version: number;
   createdAt: Date;
   updatedAt: Date;

@@ -88,6 +88,7 @@ export async function createDocument(
       id: lineIds[i],
       documentId: '',
       itemId: l.itemId,
+      etimsItemCodeSnapshot: item.etimsItemCode ?? null,
       description: l.description,
       quantity: l.quantity,
       unitPrice: l.unitPrice,

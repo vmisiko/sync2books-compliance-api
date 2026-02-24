@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CatalogService } from './catalog.service';
 import { RegisterCatalogItemDto } from './dto/register-catalog-item.dto';
+import { SyncCatalogItemsDto } from './dto/sync-catalog-items.dto';
 
 @Controller('catalog')
 @ApiTags('Catalog')
@@ -23,5 +24,15 @@ export class CatalogController {
   @ApiResponse({ status: 200, description: 'Item list' })
   async listItems(@Param('merchantId') merchantId: string) {
     return this.catalogService.listItems(merchantId);
+  }
+
+  @Post('items/sync')
+  @ApiOperation({ summary: 'Sync catalog items to eTIMS (register/update)' })
+  @ApiResponse({ status: 201, description: 'Items synced' })
+  async syncItems(
+    @Body()
+    body: SyncCatalogItemsDto,
+  ) {
+    return this.catalogService.syncItems(body);
   }
 }

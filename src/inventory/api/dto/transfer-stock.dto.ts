@@ -19,4 +19,3 @@ export class TransferStockDto {
   @ApiProperty({ required: false, description: 'Optional correlation id' })
   referenceId?: string;
 }
-

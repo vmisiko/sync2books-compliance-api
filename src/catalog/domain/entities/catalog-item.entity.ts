@@ -24,6 +24,16 @@ export interface CatalogItem {
   /** OSCU product type code (itemTyCd) */
   productTypeCode: string;
   registrationStatus: 'PENDING' | 'REGISTERED' | 'FAILED';
+  /**
+   * The eTIMS/OSCU item code (`itemCd`) assigned/managed by this system.
+   * This is what must be used for sales and stock payloads.
+   */
+  etimsItemCode: string | null;
+  /** Last attempt result code/message from OSCU, if available. */
+  lastSyncResultCd: string | null;
+  lastSyncResultMsg: string | null;
+  /** Last sync attempt timestamp (success or failure). */
+  lastSyncAttemptAt: Date | null;
   version: number;
   lastSyncedAt: Date | null;
   createdAt: Date;

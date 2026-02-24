@@ -42,6 +42,20 @@ export async function prepareDocument(
       throw new Error(`Item ${l.itemId} not found while preparing document`);
     }
 
+    const itemCd =
+      typeof l.etimsItemCodeSnapshot === 'string' &&
+      l.etimsItemCodeSnapshot.trim() !== ''
+        ? l.etimsItemCodeSnapshot
+        : typeof item.etimsItemCode === 'string' &&
+            item.etimsItemCode.trim() !== ''
+          ? item.etimsItemCode
+          : null;
+    if (!itemCd) {
+      throw new Error(
+        `Item ${l.itemId} has not been synced to eTIMS (missing etimsItemCode)`,
+      );
+    }
+
     const packagingUnitCodeSnapshot: string =
       l.packagingUnitCodeSnapshot ?? item.packagingUnitCode;
 
@@ -52,6 +66,7 @@ export async function prepareDocument(
 
     return {
       ...l,
+      etimsItemCodeSnapshot: itemCd,
       classificationCodeSnapshot:
         l.classificationCodeSnapshot?.trim() !== ''
           ? l.classificationCodeSnapshot

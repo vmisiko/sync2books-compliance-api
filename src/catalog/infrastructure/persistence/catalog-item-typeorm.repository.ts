@@ -21,6 +21,10 @@ function ormToDomain(row: CatalogItemOrmEntity): CatalogItem {
     taxTyCd: row.taxTyCd,
     productTypeCode: row.productTypeCode,
     registrationStatus: row.registrationStatus,
+    etimsItemCode: row.etimsItemCode,
+    lastSyncResultCd: row.lastSyncResultCd,
+    lastSyncResultMsg: row.lastSyncResultMsg,
+    lastSyncAttemptAt: row.lastSyncAttemptAt,
     version: row.version,
     lastSyncedAt: row.lastSyncedAt,
     createdAt: row.createdAt,
@@ -43,6 +47,10 @@ function domainToOrm(item: CatalogItem): CatalogItemOrmEntity {
   e.taxTyCd = item.taxTyCd;
   e.productTypeCode = item.productTypeCode;
   e.registrationStatus = item.registrationStatus;
+  e.etimsItemCode = item.etimsItemCode;
+  e.lastSyncResultCd = item.lastSyncResultCd;
+  e.lastSyncResultMsg = item.lastSyncResultMsg;
+  e.lastSyncAttemptAt = item.lastSyncAttemptAt;
   e.version = item.version;
   e.lastSyncedAt = item.lastSyncedAt;
   e.createdAt = item.createdAt;

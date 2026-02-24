@@ -81,6 +81,12 @@ export async function registerItem(
       packagingUnitCode,
       taxTyCd,
       productTypeCode,
+      // Any change requires a resync to eTIMS (same itemCd can be reused).
+      registrationStatus: 'PENDING',
+      lastSyncedAt: null,
+      lastSyncResultCd: null,
+      lastSyncResultMsg: null,
+      lastSyncAttemptAt: null,
       version: existing.version + 1,
       updatedAt: now,
     };
@@ -103,6 +109,10 @@ export async function registerItem(
     taxTyCd,
     productTypeCode,
     registrationStatus: 'PENDING',
+    etimsItemCode: null,
+    lastSyncResultCd: null,
+    lastSyncResultMsg: null,
+    lastSyncAttemptAt: null,
     version: 1,
     lastSyncedAt: null,
     createdAt: now,

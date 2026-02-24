@@ -6,6 +6,10 @@ import type { EtimsInvoicePayload } from '../mapping/etims-payload.types';
 import { OscuSalesRequestBuilder } from '../mapping/oscu-sales-request.builder';
 import type { OscuTrnsSalesSaveWrRes } from '../transport/endpoints/trns-sales-save.dto';
 import type {
+  OscuItemSaveReq,
+  OscuItemSaveRes,
+} from '../transport/endpoints/item-save.dto';
+import type {
   OscuStockIOSaveReq,
   OscuStockIOSaveRes,
 } from '../transport/endpoints/stock-io-save.dto';
@@ -175,6 +179,72 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         error: retryable ? `retryable: ${msg}` : msg,
         rawResponse: { request },
       };
+    }
+  }
+
+  async saveItem(
+    request: OscuItemSaveReq,
+    connectionContext: {
+      merchantId: string;
+      branchId: string;
+      kraPin: string;
+      environment: 'SANDBOX' | 'PRODUCTION';
+      cmcKey: string;
+      deviceId: string;
+    },
+  ): Promise<{
+    success: boolean;
+    rawResponse?: OscuItemSaveRes;
+    error?: string;
+  }> {
+    try {
+      const { ok, status, raw } = await this.postOscu(
+        '/saveItem',
+        request as unknown as Record<string, unknown>,
+        connectionContext.environment,
+      );
+      const rawResponse: OscuItemSaveRes = {
+        resultCd: safeString(raw['resultCd']),
+        resultMsg: safeString(raw['resultMsg']),
+        resultDt: safeString(raw['resultDt']),
+        data: null,
+      };
+      const resultCd = rawResponse.resultCd;
+      const resultMsg = rawResponse.resultMsg;
+
+      if (!ok) {
+        const retryable = isRetryableStatus(status);
+        return {
+          success: false,
+          error: retryable
+            ? `retryable: HTTP ${status} calling OSCU`
+            : `HTTP ${status} calling OSCU`,
+          rawResponse,
+        };
+      }
+
+      if (resultCd === '000') {
+        return {
+          success: true,
+          rawResponse,
+        };
+      }
+
+      const retryable = resultCd.startsWith('9');
+      return {
+        success: false,
+        error: retryable
+          ? `retryable: OSCU ${resultCd} ${resultMsg}`.trim()
+          : `OSCU ${resultCd} ${resultMsg}`.trim(),
+        rawResponse,
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : safeString(e);
+      const retryable =
+        msg.includes('aborted') ||
+        msg.toLowerCase().includes('timeout') ||
+        msg.toLowerCase().includes('fetch');
+      return { success: false, error: retryable ? `retryable: ${msg}` : msg };
     }
   }
 

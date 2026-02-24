@@ -12,6 +12,7 @@ function lineOrmToDomain(row: ComplianceLineOrmEntity): ComplianceLine {
     id: row.id,
     documentId: row.documentId,
     itemId: row.itemId,
+    etimsItemCodeSnapshot: ensureNullableString(row.etimsItemCodeSnapshot),
     description: row.description,
     quantity: row.quantity,
     unitPrice: row.unitPrice,
@@ -116,6 +117,7 @@ export class ComplianceDocumentTypeOrmRepository implements IComplianceDocumentR
       le.id = l.id;
       le.documentId = document.id;
       le.itemId = l.itemId;
+      le.etimsItemCodeSnapshot = l.etimsItemCodeSnapshot ?? null;
       le.description = l.description;
       le.quantity = l.quantity;
       le.unitPrice = l.unitPrice;

@@ -28,6 +28,10 @@ export class CatalogSeed {
       taxTyCd: 'B',
       productTypeCode: '2',
       registrationStatus: 'REGISTERED',
+      etimsItemCode: 'ITSEED000001',
+      lastSyncResultCd: '000',
+      lastSyncResultMsg: 'OK',
+      lastSyncAttemptAt: new Date(),
       version: 1,
       lastSyncedAt: new Date(),
     });

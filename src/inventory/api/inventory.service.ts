@@ -63,9 +63,7 @@ export class InventoryService {
         tin: connection.kraPin,
         bhfId: stock.branchId,
         cmcKey: connection.cmcKey,
-        // NOTE: OSCU expects KRA itemCd. We use internal id as fallback until
-        // item registration stores the assigned KRA item code.
-        itemCd: stock.itemId,
+        itemCd: item.etimsItemCode ?? stock.itemId,
         rsdQty: stock.quantityOnHand,
         regrId: 'sync2books',
         regrNm: 'sync2books',

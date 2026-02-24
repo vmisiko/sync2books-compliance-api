@@ -1,5 +1,7 @@
 import type { EtimsInvoicePayload } from '../mapping/etims-payload.types';
 import type {
+  OscuItemSaveReq,
+  OscuItemSaveRes,
   OscuStockIOSaveReq,
   OscuStockIOSaveRes,
   OscuStockMasterSaveReq,
@@ -27,6 +29,26 @@ export interface IEtimsAdapter {
       deviceId: string;
     },
   ): Promise<EtimsSubmissionResult>;
+
+  /**
+   * Item save (`/saveItem`)
+   * Transport-level call.
+   */
+  saveItem(
+    request: OscuItemSaveReq,
+    connectionContext: {
+      merchantId: string;
+      branchId: string;
+      kraPin: string;
+      environment: 'SANDBOX' | 'PRODUCTION';
+      cmcKey: string;
+      deviceId: string;
+    },
+  ): Promise<{
+    success: boolean;
+    rawResponse?: OscuItemSaveRes;
+    error?: string;
+  }>;
 
   /**
    * Stock In/Out save (`/insertStockIO`)

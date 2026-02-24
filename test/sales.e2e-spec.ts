@@ -84,6 +84,16 @@ describe('Sales API (e2e)', () => {
 
     const itemId = `item-${merchantId}-${externalId}`;
 
+    // Sync item to eTIMS so sales/stock submissions have an itemCd.
+    await request(httpServer)
+      .post('/catalog/items/sync')
+      .send({
+        merchantId,
+        branchId: 'branch-1',
+        itemIds: [itemId],
+      })
+      .expect(201);
+
     // Seed stock so sales can deduct without 500s.
     await request(httpServer)
       .put('/api/stock/adjust')
@@ -383,6 +393,16 @@ describe('Sales API (e2e)', () => {
           success: false,
           error: 'rejected by gateway',
         }),
+      saveItem: () =>
+        Promise.resolve({
+          success: true,
+          rawResponse: {
+            resultCd: '000',
+            resultMsg: 'OK',
+            resultDt: '20260221103000',
+            data: null,
+          },
+        }),
       insertStockIO: () => Promise.resolve({ success: true }),
       saveStockMaster: () => Promise.resolve({ success: true }),
       selectStockMoveList: () => Promise.resolve({ success: true }),
@@ -432,6 +452,16 @@ describe('Sales API (e2e)', () => {
         Promise.resolve({
           success: false,
           error: 'retryable: upstream timeout',
+        }),
+      saveItem: () =>
+        Promise.resolve({
+          success: true,
+          rawResponse: {
+            resultCd: '000',
+            resultMsg: 'OK',
+            resultDt: '20260221103000',
+            data: null,
+          },
         }),
       insertStockIO: () => Promise.resolve({ success: true }),
       saveStockMaster: () => Promise.resolve({ success: true }),

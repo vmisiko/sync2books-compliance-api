@@ -47,6 +47,18 @@ export class CatalogItemOrmEntity {
   @Column({ type: 'varchar', default: 'PENDING' })
   registrationStatus!: 'PENDING' | 'REGISTERED' | 'FAILED';
 
+  @Column({ type: 'varchar', nullable: true })
+  etimsItemCode!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  lastSyncResultCd!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  lastSyncResultMsg!: string | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  lastSyncAttemptAt!: Date | null;
+
   @Column({ type: 'int', default: 1 })
   version!: number;
 

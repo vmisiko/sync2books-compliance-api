@@ -11,7 +11,7 @@ import type {
 export class EtimsPayloadBuilder {
   static buildFromDocument(document: ComplianceDocument): EtimsInvoicePayload {
     const lines: EtimsInvoiceLine[] = document.lines.map((line) => ({
-      itemCode: line.itemId,
+      itemCode: line.etimsItemCodeSnapshot ?? line.itemId,
       description: line.description,
       quantity: line.quantity,
       unitPrice: line.unitPrice,

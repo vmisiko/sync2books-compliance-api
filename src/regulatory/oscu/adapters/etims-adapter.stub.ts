@@ -17,6 +17,10 @@ import type {
   OscuStockMoveReq,
   OscuStockMoveRes,
 } from '../transport/endpoints/stock-move-list.dto';
+import type {
+  OscuItemSaveReq,
+  OscuItemSaveRes,
+} from '../transport/endpoints/item-save.dto';
 
 function formatYyyyMMddhhmmssUtc(date: Date): string {
   const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -96,6 +100,36 @@ export class EtimsAdapterStub implements IEtimsAdapter {
     void _connectionContext;
     const now = new Date();
     const rawResponse: OscuStockIOSaveRes = {
+      resultCd: '000',
+      resultMsg: 'It is succeeded',
+      resultDt: formatYyyyMMddhhmmssUtc(now),
+      data: null,
+    };
+    return Promise.resolve({
+      success: true,
+      rawResponse,
+    });
+  }
+
+  saveItem(
+    _request: OscuItemSaveReq,
+    _connectionContext: {
+      merchantId: string;
+      branchId: string;
+      kraPin: string;
+      environment: 'SANDBOX' | 'PRODUCTION';
+      cmcKey: string;
+      deviceId: string;
+    },
+  ): Promise<{
+    success: boolean;
+    rawResponse?: OscuItemSaveRes;
+    error?: string;
+  }> {
+    void _request;
+    void _connectionContext;
+    const now = new Date();
+    const rawResponse: OscuItemSaveRes = {
       resultCd: '000',
       resultMsg: 'It is succeeded',
       resultDt: formatYyyyMMddhhmmssUtc(now),

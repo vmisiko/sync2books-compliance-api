@@ -21,6 +21,9 @@ export class ComplianceLineOrmEntity {
   @Column('varchar')
   itemId!: string;
 
+  @Column('varchar', { nullable: true })
+  etimsItemCodeSnapshot!: string | null;
+
   @Column('varchar')
   description!: string;
 
