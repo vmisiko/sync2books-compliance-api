@@ -31,6 +31,10 @@ export interface EtimsInvoicePayload {
   invoiceStatusCode?: string;
   /** For CREDIT_NOTE: original sale's trader invoice number */
   originalDocumentNumber?: string;
+  /** For CREDIT_NOTE: credit note datetime (OSCU `rfdDt`) `yyyyMMddhhmmss` */
+  creditNoteDate?: string;
+  /** For CREDIT_NOTE: credit reason code (OSCU `rfdRsnCd`) e.g. "01".."06" */
+  creditNoteReasonCode?: string;
   /** Branch/device for submission */
   branchId: string;
   deviceId: string;

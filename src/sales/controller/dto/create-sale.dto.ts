@@ -52,6 +52,20 @@ export class CreateSaleDto {
   })
   originalTraderInvoiceNumber?: string;
 
+  @ApiProperty({
+    required: false,
+    description:
+      'For credit notes (receiptTypeCode=R): credit note datetime (OSCU rfdDt). Accepts yyyyMMddhhmmss, yyyyMMdd, YYYY-MM-DD, or ISO date-time.',
+  })
+  creditNoteDate?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'For credit notes (receiptTypeCode=R): credit note reason code (OSCU rfdRsnCd). Spec codes: 01 Missing Quantity, 02 Missing data, 03 Damaged, 04 Wasted, 05 Shortage, 06 Refund.',
+  })
+  creditNoteReasonCode?: string;
+
   @ApiProperty({ required: false })
   customerTin?: string;
 

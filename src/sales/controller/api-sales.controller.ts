@@ -90,6 +90,8 @@ export class ApiSalesController {
         documentType: docType,
         documentNumber: body.traderInvoiceNumber,
         originalDocumentNumber: body.originalTraderInvoiceNumber ?? null,
+        creditNoteDate: body.creditNoteDate ?? null,
+        creditNoteReasonCode: body.creditNoteReasonCode ?? null,
         originalSaleId: null,
         saleDate: body.saleDate,
         receiptTypeCode: body.receiptTypeCode,

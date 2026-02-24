@@ -29,6 +29,16 @@ export interface ComplianceDocument {
    * Used for reporting/UI linkage (not sent to OSCU).
    */
   originalSaleId: string | null;
+  /**
+   * For CREDIT_NOTE: credit note datetime (OSCU `rfdDt`) formatted as `yyyyMMddhhmmss`.
+   * Optional per spec.
+   */
+  creditNoteDate: string | null;
+  /**
+   * For CREDIT_NOTE: credit note reason code (OSCU `rfdRsnCd`), e.g. "01".."06".
+   * Optional per spec.
+   */
+  creditNoteReasonCode: string | null;
   /** Optional sales metadata for OSCU */
   saleDate: string | null;
   receiptTypeCode: string | null;

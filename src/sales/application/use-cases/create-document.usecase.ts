@@ -21,6 +21,10 @@ export interface CreateDocumentInput {
   originalDocumentNumber?: string | null;
   /** For CREDIT_NOTE created from an internal sale: original sale document id */
   originalSaleId?: string | null;
+  /** For CREDIT_NOTE: credit note datetime (OSCU `rfdDt`) `yyyyMMddhhmmss` */
+  creditNoteDate?: string | null;
+  /** For CREDIT_NOTE: credit reason code (OSCU `rfdRsnCd`) e.g. "01".."06" */
+  creditNoteReasonCode?: string | null;
   saleDate?: string | null;
   receiptTypeCode?: string | null;
   paymentTypeCode?: string | null;
@@ -120,6 +124,8 @@ export async function createDocument(
     documentNumber: input.documentNumber,
     originalDocumentNumber: input.originalDocumentNumber ?? null,
     originalSaleId: input.originalSaleId ?? null,
+    creditNoteDate: input.creditNoteDate ?? null,
+    creditNoteReasonCode: input.creditNoteReasonCode ?? null,
     saleDate: input.saleDate ?? null,
     receiptTypeCode: input.receiptTypeCode ?? null,
     paymentTypeCode: input.paymentTypeCode ?? null,

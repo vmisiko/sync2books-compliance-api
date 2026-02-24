@@ -36,6 +36,12 @@ export class ComplianceDocumentOrmEntity {
   originalSaleId!: string | null;
 
   @Column('varchar', { nullable: true })
+  creditNoteDate!: string | null;
+
+  @Column('varchar', { nullable: true })
+  creditNoteReasonCode!: string | null;
+
+  @Column('varchar', { nullable: true })
   saleDate!: string | null;
 
   @Column('varchar', { nullable: true })

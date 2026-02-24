@@ -29,10 +29,14 @@ type KraRequestSnapshot = {
   bhfId: string;
   cmcKey: string;
   trdInvcNo: string;
+  invcNo: number;
   salesDt: string;
   rcptTyCd: string;
   pmtTyCd: string;
   salesSttsCd: string;
+  orgInvcNo: number;
+  rfdDt: string | null;
+  rfdRsnCd: string | null;
 };
 
 type SaleValidationErrorBody = {
@@ -157,6 +161,86 @@ describe('Sales API (e2e)', () => {
     expect(kraRequest.rcptTyCd).toBe('S');
     expect(kraRequest.pmtTyCd).toBe('01');
     expect(kraRequest.salesSttsCd).toBe('02');
+  });
+
+  it('POST /api/sales creates a credit note and submits correct OSCU payload fields', async () => {
+    const { app, eventRepo } = await createTestApp();
+    const httpServer: App = app.getHttpServer();
+    const { merchantId, itemId } = await seedCatalogItem(httpServer);
+
+    const originalTraderInvoiceNumber = `INV-123-${Date.now()}`;
+    const creditNoteInvoiceNumber = `CN-456-${Date.now()}`;
+
+    // Create original sale (so the credit note reference is realistic)
+    await request(httpServer)
+      .post('/api/sales')
+      .send({
+        merchantId,
+        branchId: 'branch-1',
+        saleDate: '2026-02-20',
+        traderInvoiceNumber: originalTraderInvoiceNumber,
+        receiptTypeCode: 'S',
+        paymentTypeCode: '01',
+        invoiceStatusCode: '02',
+        items: [
+          {
+            id: itemId,
+            quantity: 1,
+            unitPrice: 100,
+            taxCategory: 'VAT_STANDARD',
+            taxAmount: 16,
+          },
+        ],
+      })
+      .expect(201);
+
+    const creditNoteDate = '20260221103000';
+    const creditNoteReasonCode = '06';
+
+    const res = await request(httpServer)
+      .post('/api/sales')
+      .send({
+        merchantId,
+        branchId: 'branch-1',
+        saleDate: '2026-02-21',
+        traderInvoiceNumber: creditNoteInvoiceNumber,
+        originalTraderInvoiceNumber,
+        creditNoteDate,
+        creditNoteReasonCode,
+        receiptTypeCode: 'R',
+        paymentTypeCode: '01',
+        invoiceStatusCode: '02',
+        items: [
+          {
+            id: itemId,
+            quantity: 1,
+            unitPrice: 100,
+            taxCategory: 'VAT_STANDARD',
+            taxAmount: 16,
+          },
+        ],
+      })
+      .expect(201);
+
+    const body = res.body as SalesReportDetailResponseBody;
+    expect(body.data.status).toBe('completed');
+
+    const creditNoteId = body.data.id;
+    const events = await eventRepo.findByDocumentId(creditNoteId);
+    const accepted = events.find((e) => e.eventType === 'ACCEPTED');
+    if (!accepted) throw new Error('Expected ACCEPTED event');
+
+    const responseSnapshot = accepted.responseSnapshot as unknown as {
+      request: KraRequestSnapshot;
+    };
+    const req = responseSnapshot.request;
+
+    expect(req.rcptTyCd).toBe('R');
+    expect(req.trdInvcNo).toBe(creditNoteInvoiceNumber);
+    expect(req.invcNo).toBe(456);
+    expect(req.orgInvcNo).toBe(123);
+    expect(req.rfdDt).toBe(creditNoteDate);
+    expect(req.rfdRsnCd).toBe(creditNoteReasonCode);
   });
 
   it('POST /api/sales?submit=false creates a DRAFT and GET /api/sales/:id returns the correct draft payload', async () => {

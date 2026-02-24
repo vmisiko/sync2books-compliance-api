@@ -16,6 +16,14 @@ export interface OscuTrnsSalesSaveWrReq extends OscuRequestContext {
   cfmDt: string;
   salesDt: string;
   stockRlsDt: string;
+  /** Cancel requested datetime (optional in spec) */
+  cnclReqDt: string | null;
+  /** Cancel datetime (optional in spec) */
+  cnclDt: string | null;
+  /** Credit note datetime (optional in spec) */
+  rfdDt: string | null;
+  /** Credit note reason code (optional in spec) */
+  rfdRsnCd: string | null;
   totItemCnt: number;
   taxblAmtA: number;
   taxblAmtB: number;

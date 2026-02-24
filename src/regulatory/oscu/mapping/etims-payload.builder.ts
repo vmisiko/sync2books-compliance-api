@@ -27,6 +27,8 @@ export class EtimsPayloadBuilder {
       documentNumber: document.documentNumber,
       documentType: document.documentType,
       originalDocumentNumber: document.originalDocumentNumber ?? undefined,
+      creditNoteDate: document.creditNoteDate ?? undefined,
+      creditNoteReasonCode: document.creditNoteReasonCode ?? undefined,
       saleDate: document.saleDate ?? undefined,
       receiptTypeCode: document.receiptTypeCode ?? undefined,
       paymentTypeCode: document.paymentTypeCode ?? undefined,

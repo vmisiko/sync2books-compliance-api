@@ -24,6 +24,31 @@ export function runStructuralRules(
         field: 'originalDocumentNumber',
       });
     }
+
+    const rsn = document.creditNoteReasonCode?.trim();
+    if (rsn) {
+      const allowed = new Set(['01', '02', '03', '04', '05', '06']);
+      if (!allowed.has(rsn)) {
+        errors.push({
+          code: 'STRUCTURAL_CREDIT_NOTE_INVALID_REASON_CODE',
+          message:
+            'creditNoteReasonCode must be one of: 01, 02, 03, 04, 05, 06',
+          field: 'creditNoteReasonCode',
+        });
+      }
+    }
+
+    const dt = document.creditNoteDate?.trim();
+    if (dt) {
+      if (!isValidCreditNoteDate(dt)) {
+        errors.push({
+          code: 'STRUCTURAL_CREDIT_NOTE_INVALID_DATE',
+          message:
+            'creditNoteDate must be yyyyMMddhhmmss, yyyyMMdd, YYYY-MM-DD, or ISO date-time',
+          field: 'creditNoteDate',
+        });
+      }
+    }
   }
 
   // Must have at least 1 line
@@ -80,4 +105,12 @@ export function runStructuralRules(
     errors,
     warnings,
   };
+}
+
+function isValidCreditNoteDate(value: string): boolean {
+  if (/^\d{14}$/.test(value)) return true;
+  if (/^\d{8}$/.test(value)) return true;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return true;
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.getTime());
 }

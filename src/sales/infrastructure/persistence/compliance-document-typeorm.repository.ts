@@ -42,6 +42,8 @@ function docOrmToDomain(
     documentNumber: row.documentNumber,
     originalDocumentNumber: row.originalDocumentNumber,
     originalSaleId: row.originalSaleId,
+    creditNoteDate: row.creditNoteDate,
+    creditNoteReasonCode: row.creditNoteReasonCode,
     saleDate: row.saleDate,
     receiptTypeCode: row.receiptTypeCode,
     paymentTypeCode: row.paymentTypeCode,
@@ -76,6 +78,8 @@ function docDomainToOrm(
   e.documentNumber = document.documentNumber;
   e.originalDocumentNumber = document.originalDocumentNumber;
   e.originalSaleId = document.originalSaleId;
+  e.creditNoteDate = document.creditNoteDate;
+  e.creditNoteReasonCode = document.creditNoteReasonCode;
   e.saleDate = document.saleDate;
   e.receiptTypeCode = document.receiptTypeCode;
   e.paymentTypeCode = document.paymentTypeCode;

@@ -59,6 +59,16 @@ export class OscuSalesRequestBuilder {
 
     const salesSttsCd: string = params.payload.invoiceStatusCode ?? '02';
 
+    const rfdDt: string | null =
+      params.payload.documentType === 'CREDIT_NOTE'
+        ? normalizeYyyyMMddhhmmss(params.payload.creditNoteDate)
+        : null;
+
+    const rfdRsnCd: string | null =
+      params.payload.documentType === 'CREDIT_NOTE'
+        ? normalizeReasonCode(params.payload.creditNoteReasonCode)
+        : null;
+
     return {
       tin: params.tin,
       bhfId: params.bhfId,
@@ -77,6 +87,10 @@ export class OscuSalesRequestBuilder {
       cfmDt: yyyyMMddhhmmss,
       salesDt: yyyyMMdd,
       stockRlsDt: yyyyMMddhhmmss,
+      cnclReqDt: null,
+      cnclDt: null,
+      rfdDt,
+      rfdRsnCd,
       totItemCnt: itemList.length,
       taxblAmtA: taxBuckets.taxblAmtA,
       taxblAmtB: taxBuckets.taxblAmtB,
@@ -191,6 +205,28 @@ function formatYyyyMMddhhmmss(d: Date): string {
   const mm = String(d.getMinutes()).padStart(2, '0');
   const ss = String(d.getSeconds()).padStart(2, '0');
   return `${yyyyMMdd}${hh}${mm}${ss}`;
+}
+
+function normalizeYyyyMMddhhmmss(value?: string): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  if (/^\d{14}$/.test(trimmed)) return trimmed;
+  if (/^\d{8}$/.test(trimmed)) return `${trimmed}000000`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const [y, m, d] = trimmed.split('-');
+    return `${y}${m}${d}000000`;
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return formatYyyyMMddhhmmss(parsed);
+}
+
+function normalizeReasonCode(value?: string): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  return trimmed;
 }
 
 function safeParseInt(s: string): number | null {
