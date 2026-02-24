@@ -114,6 +114,66 @@ describe('Sales API (e2e)', () => {
     };
   }
 
+  it('POST /api/sales fails when item has not been synced to eTIMS (missing itemCd)', async () => {
+    const { app } = await createTestApp();
+    const httpServer: App = app.getHttpServer();
+
+    const merchantId = 'merchant-1';
+    const externalId = `qb-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const itemId = `item-${merchantId}-${externalId}`;
+
+    // Create item but do not sync it.
+    await request(httpServer).post('/catalog/items').send({
+      merchantId,
+      externalId,
+      name: 'Unsynced Widget',
+      itemType: 'GOODS',
+      taxCategory: 'VAT_STANDARD',
+      internalUnit: 'EA',
+      classificationCode: '14111400',
+    });
+
+    // Seed stock so failure is specifically about item sync, not stock.
+    await request(httpServer)
+      .put('/api/stock/adjust')
+      .send({
+        itemId,
+        branchId: 'branch-1',
+        quantity: 1000,
+        action: 'ADD',
+        movementTypeCode: '02',
+        referenceId: `seed-${Date.now()}`,
+      })
+      .expect(200);
+
+    const res = await request(httpServer)
+      .post('/api/sales')
+      .send({
+        merchantId,
+        branchId: 'branch-1',
+        saleDate: '2026-02-20',
+        traderInvoiceNumber: `INV-NOSYNC-${Date.now()}`,
+        receiptTypeCode: 'S',
+        paymentTypeCode: '01',
+        invoiceStatusCode: '02',
+        items: [
+          {
+            id: itemId,
+            quantity: 1,
+            unitPrice: 100,
+            taxCategory: 'VAT_STANDARD',
+            taxAmount: 16,
+          },
+        ],
+      })
+      .expect(500);
+
+    // Default Nest error response does not expose underlying exception message.
+    const message = (res.body as { message?: unknown }).message;
+    expect(typeof message).toBe('string');
+    expect(message).toBe('Internal server error');
+  });
+
   it('POST /api/sales creates a sale and GET /api/sales/:id returns the accepted payload', async () => {
     const { app, eventRepo } = await createTestApp();
     const httpServer: App = app.getHttpServer();
