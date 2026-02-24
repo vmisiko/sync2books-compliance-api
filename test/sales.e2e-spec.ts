@@ -383,6 +383,9 @@ describe('Sales API (e2e)', () => {
           success: false,
           error: 'rejected by gateway',
         }),
+      insertStockIO: () => Promise.resolve({ success: true }),
+      saveStockMaster: () => Promise.resolve({ success: true }),
+      selectStockMoveList: () => Promise.resolve({ success: true }),
     };
 
     const { app } = await createTestApp({ etimsAdapter: rejectAdapter });
@@ -430,6 +433,9 @@ describe('Sales API (e2e)', () => {
           success: false,
           error: 'retryable: upstream timeout',
         }),
+      insertStockIO: () => Promise.resolve({ success: true }),
+      saveStockMaster: () => Promise.resolve({ success: true }),
+      selectStockMoveList: () => Promise.resolve({ success: true }),
     };
 
     const { app } = await createTestApp({ etimsAdapter: retryingAdapter });

@@ -1,11 +1,24 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { recordMovement } from '../application/use-cases/record-movement.usecase';
 import type {
   IStockMovementRepository,
   IStockRepository,
 } from '../domain/ports/stock-repository.port';
 import { MovementType } from '../domain/enums/movement-type.enum';
-import { STOCK_MOVEMENT_REPO, STOCK_REPO } from '../../shared/tokens';
+import {
+  CONNECTION_REPO,
+  ETIMS_ADAPTER,
+  ITEM_REPO,
+  STOCK_MOVEMENT_REPO,
+  STOCK_REPO,
+} from '../../shared/tokens';
+import type {
+  IComplianceConnectionRepository,
+  IComplianceItemRepository,
+} from '../../shared/ports/repository.port';
+import type { IEtimsAdapter } from '../../regulatory/oscu/ports/etims-adapter.port';
+import type { ComplianceItem } from '../../shared/domain/entities/compliance-item.entity';
+import type { InventoryStock } from '../domain/entities/inventory-stock.entity';
 
 @Injectable()
 export class InventoryService {
@@ -14,7 +27,61 @@ export class InventoryService {
     private readonly stockRepo: IStockRepository,
     @Inject(STOCK_MOVEMENT_REPO)
     private readonly movementRepo: IStockMovementRepository,
+    @Optional()
+    @Inject(ITEM_REPO)
+    private readonly itemRepo?: IComplianceItemRepository,
+    @Optional()
+    @Inject(CONNECTION_REPO)
+    private readonly connectionRepo?: IComplianceConnectionRepository,
+    @Optional()
+    @Inject(ETIMS_ADAPTER)
+    private readonly etimsAdapter?: IEtimsAdapter,
   ) {}
+
+  private shouldSyncToEtims(): boolean {
+    return (process.env.ETIMS_STOCK_SYNC ?? '').toLowerCase() === 'true';
+  }
+
+  private async syncStockMasterToEtims(stock: InventoryStock): Promise<void> {
+    if (!this.shouldSyncToEtims()) return;
+    if (!this.itemRepo || !this.connectionRepo || !this.etimsAdapter) return;
+
+    const adapter = this.etimsAdapter;
+
+    const found = await this.itemRepo.findByIds([stock.itemId]);
+    const item: ComplianceItem | null = found[0] ?? null;
+    if (!item) return;
+
+    const connection = await this.connectionRepo.findByMerchantAndBranch(
+      item.merchantId,
+      stock.branchId,
+    );
+    if (!connection) return;
+
+    await adapter.saveStockMaster(
+      {
+        tin: connection.kraPin,
+        bhfId: stock.branchId,
+        cmcKey: connection.cmcKey,
+        // NOTE: OSCU expects KRA itemCd. We use internal id as fallback until
+        // item registration stores the assigned KRA item code.
+        itemCd: stock.itemId,
+        rsdQty: stock.quantityOnHand,
+        regrId: 'sync2books',
+        regrNm: 'sync2books',
+        modrId: 'sync2books',
+        modrNm: 'sync2books',
+      },
+      {
+        merchantId: item.merchantId,
+        branchId: stock.branchId,
+        kraPin: connection.kraPin,
+        environment: connection.environment,
+        cmcKey: connection.cmcKey,
+        deviceId: connection.deviceId,
+      },
+    );
+  }
 
   async recordMovement(params: {
     itemId: string;
@@ -24,7 +91,13 @@ export class InventoryService {
     referenceType?: string | null;
     referenceId?: string | null;
   }) {
-    return recordMovement(params, this.stockRepo, this.movementRepo);
+    const result = await recordMovement(
+      params,
+      this.stockRepo,
+      this.movementRepo,
+    );
+    await this.syncStockMasterToEtims(result.stock);
+    return result;
   }
 
   async adjustStock(params: {

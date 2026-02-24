@@ -4,12 +4,10 @@ import { CatalogModule } from '../catalog/catalog.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { EtimsAdapterStub } from '../regulatory/oscu/adapters/etims-adapter.stub';
 import { EtimsAdapterHttp } from '../regulatory/oscu/adapters/etims-adapter.http';
+import { ConnectionsModule } from '../shared/connections.module';
 import {
-  ConnectionRepositoryStub,
-  seedStubData,
 } from './infrastructure/persistence/repository.stub';
 import {
-  CONNECTION_REPO,
   DOCUMENT_REPO,
   ETIMS_ADAPTER,
   EVENT_REPO,
@@ -27,6 +25,7 @@ import { ComplianceEventTypeOrmRepository } from './infrastructure/persistence/c
   imports: [
     CatalogModule,
     InventoryModule,
+    ConnectionsModule,
     TypeOrmModule.forFeature([
       ComplianceDocumentOrmEntity,
       ComplianceLineOrmEntity,
@@ -37,7 +36,6 @@ import { ComplianceEventTypeOrmRepository } from './infrastructure/persistence/c
   providers: [
     { provide: DOCUMENT_REPO, useClass: ComplianceDocumentTypeOrmRepository },
     { provide: EVENT_REPO, useClass: ComplianceEventTypeOrmRepository },
-    { provide: CONNECTION_REPO, useClass: ConnectionRepositoryStub },
     {
       provide: ETIMS_ADAPTER,
       useFactory: () => {
@@ -61,8 +59,4 @@ import { ComplianceEventTypeOrmRepository } from './infrastructure/persistence/c
   ],
   exports: [SalesService],
 })
-export class SalesModule {
-  constructor() {
-    seedStubData();
-  }
-}
+export class SalesModule {}
