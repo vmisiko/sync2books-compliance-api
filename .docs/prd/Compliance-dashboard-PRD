@@ -1,0 +1,570 @@
+📘 PRODUCT REQUIREMENTS DOCUMENT
+Product: Sync2Books Compliance Dashboard
+Version: 1.0
+Audience: CFOs, Accountants, Finance Managers, Compliance Officers
+1️⃣ Product Vision
+
+The Compliance Dashboard enables businesses to:
+
+Automatically comply with eTIMS (OSCU)
+
+Sync ERP systems (QuickBooks, Xero, others)
+
+Auto-map tax, classification, and units
+
+Manage branch-level stock
+
+Submit sales & credit notes
+
+Track compliance status in real time
+
+Prevent tax errors before submission
+
+Reconcile automatically with KRA
+
+The system hides OSCU complexity and presents a CFO-friendly interface.
+
+2️⃣ Target Users
+Primary Users
+CFO
+
+Wants visibility
+
+Wants audit protection
+
+Wants compliance risk minimized
+
+Wants reconciliation reports
+
+Wants tax exposure summary
+
+Accountant
+
+Manages daily invoices
+
+Reviews mapping
+
+Resolves validation issues
+
+Handles credit notes
+
+Monitors stock
+
+Finance Manager
+
+Oversees branch compliance
+
+Approves corrections
+
+Manages ERP sync
+
+3️⃣ Core Value Propositions for CFOs
+
+Real-time compliance status dashboard
+
+Compliance risk indicator
+
+Auto-detection of tax mismatches
+
+Branch-level stock visibility
+
+Audit trail & submission history
+
+Reverse invoice protection
+
+Zero manual OSCU entry
+
+ERP-to-KRA sync automation
+
+4️⃣ Core Modules (Frontend)
+
+Onboarding & Profile Setup
+
+ERP Connection Module
+
+Branch Management
+
+Code Sync & Mapping Center
+
+Item Management
+
+Inventory Dashboard
+
+Sales & Credit Notes
+
+Purchase Sync
+
+Compliance Monitor
+
+Reconciliation & Audit Logs
+
+5️⃣ User Journey 1: Account Creation & Profile Setup
+Step 1: Create Company Profile
+
+Fields:
+
+Company Name
+
+KRA PIN
+
+Industry Type
+
+Default Currency
+
+VAT Registered? (Yes/No)
+
+Step 2: Add Branch
+
+Fields:
+
+Branch Name
+
+bhfId
+
+Device Serial
+
+Integration Key
+
+Certificate Upload
+
+System validates branch credentials.
+
+6️⃣ User Journey 2: Connect ERP
+Supported:
+
+QuickBooks
+
+Xero
+
+Custom ERP (via Sync2Books API)
+
+Flow:
+
+Click “Connect ERP”
+
+Choose ERP
+
+OAuth flow
+
+Select company
+
+Map ERP locations to branches
+
+Confirm connection
+
+After connection:
+
+System auto-fetches:
+
+Items
+
+Tax codes
+
+Units
+
+Categories
+
+Customers
+
+Chart of accounts
+
+7️⃣ User Journey 3: Code Sync & Mapping Center
+
+This is critical UX.
+
+Auto-Sync Phase
+
+System pulls from:
+
+KRA Code Registry
+
+ERP tax codes
+
+ERP item categories
+
+Mapping Dashboard
+
+Sections:
+
+A. Tax Mapping
+
+ERP Tax Code → KRA Tax Code
+
+Auto-matching logic:
+
+Match by percentage
+
+Match by name similarity
+
+Highlight confidence score
+
+User can:
+
+Approve mapping
+
+Override mapping
+
+B. Unit Mapping
+
+ERP Unit → KRA Unit Code
+
+Auto-suggest based on:
+
+String similarity
+
+Quantity type
+
+C. Classification Mapping
+
+ERP Category → KRA Classification Code
+
+Auto-mapping rules:
+
+Exact match on keywords
+
+Industry-based suggestion
+
+Historical mapping reuse
+
+Manual override
+
+Show:
+
+Confidence level
+
+Risk level
+
+Missing mappings alert
+
+8️⃣ User Journey 4: Sync Items from ERP
+
+User clicks:
+
+“Sync Items”
+
+System:
+
+Pulls ERP items
+
+Normalizes data
+
+Runs mapping engine
+
+Shows review screen
+
+Columns:
+
+| Item | ERP Category | Suggested Classification | Confidence | Status |
+
+User can:
+
+Accept all high-confidence
+
+Review low-confidence
+
+Bulk edit
+
+After approval:
+
+Items registered with OSCU automatically.
+
+9️⃣ User Journey 5: Inventory & Multi-Branch View
+
+Dashboard shows:
+
+Stock per branch
+
+Low stock alerts
+
+Stock transfer button
+
+Movement history
+
+Compliance sync status
+
+CFO View:
+
+Total stock value
+
+Branch breakdown
+
+Reconciliation alerts
+
+🔟 User Journey 6: Creating Sales Invoice
+
+Option A: Auto-Sync from ERP
+
+System:
+
+Pulls invoice
+
+Validates
+
+Checks stock
+
+Checks mappings
+
+Registers missing items
+
+Submits to eTIMS
+
+Option B: Manual Create
+
+Fields:
+
+Branch
+
+Customer
+
+Items
+
+Quantity
+
+Payment method
+
+Submission flow:
+
+Validate
+
+Show risk summary
+
+Confirm submission
+
+Show receipt number
+
+Status Indicator:
+
+Green = Submitted
+
+Yellow = Pending
+
+Red = Failed
+
+1️⃣1️⃣ User Journey 7: Credit Notes & Reverse Invoice
+
+Flow:
+
+Select original invoice
+
+Select lines to reverse
+
+Adjust quantities
+
+Submit
+
+System ensures:
+
+Cannot exceed original amount
+
+Stock updated correctly
+
+Compliance reference preserved
+
+1️⃣2️⃣ User Journey 8: Purchase Sync
+
+System pulls purchase bills from ERP.
+
+Flow:
+
+Validate supplier PIN (if required)
+
+Check item mapping
+
+Register stock increase
+
+Submit purchase confirmation
+
+CFO Value:
+
+Stock integrity maintained
+
+Tax credits protected
+
+1️⃣3️⃣ Compliance Monitor Dashboard
+
+Main CFO screen:
+
+Widgets:
+
+Total invoices today
+
+Failed submissions
+
+Items not mapped
+
+Stock discrepancies
+
+Tax exposure summary
+
+Branch compliance health
+
+Alerts:
+
+Missing mapping
+
+Classification change
+
+ERP mismatch
+
+Submission failure
+
+1️⃣4️⃣ Auto-Mapping Intelligence Flow
+
+When new ERP item detected:
+
+Run classification engine
+
+Run tax percentage match
+
+Suggest unit mapping
+
+Compute confidence score
+
+If confidence > 85%:
+Auto-approve (optional setting)
+
+If < 85%:
+Flag for review
+
+CFO Setting:
+
+“Allow auto-approval for high confidence mappings”
+
+1️⃣5️⃣ Sync Back to ERP
+
+After successful submission:
+
+System pushes back to ERP:
+
+eTIMS receipt number
+
+Compliance status
+
+Attachment (PDF)
+
+Stock adjustments
+
+This protects accounting records.
+
+1️⃣6️⃣ Attachments & Audit
+
+Each invoice:
+
+Store submission payload
+
+Store response
+
+Store retry attempts
+
+Download receipt
+
+Download submission history
+
+1️⃣7️⃣ Role-Based UI
+CFO
+
+Dashboard
+
+Reconciliation
+
+Risk alerts
+
+Reports
+
+Accountant
+
+Mapping center
+
+Invoice review
+
+Item management
+
+Credit notes
+
+Admin
+
+ERP connections
+
+Branch management
+
+Code sync
+
+API keys
+
+1️⃣8️⃣ Export & Import (Future Phase)
+
+Export compliance report
+
+Bulk upload corrections
+
+Historical reconciliation
+
+1️⃣9️⃣ Non-Functional Requirements
+
+Real-time status updates
+
+Branch isolation
+
+Idempotent submissions
+
+Secure credential storage
+
+Audit logs immutable
+
+Role-based access control
+
+2️⃣0️⃣ UI Screens to Generate (For Stitch AI / v0)
+
+Onboarding Wizard
+
+ERP Connection Page
+
+Mapping Dashboard
+
+Item Sync Review Table
+
+Inventory Dashboard
+
+Create Invoice Screen
+
+Credit Note Flow
+
+Compliance Monitor
+
+Reconciliation Report
+
+Audit Log Viewer
+
+Branch Management
+
+Settings & Code Sync
+
+🎯 Final Outcome
+
+This dashboard:
+
+Converts regulatory complexity into guided workflows
+
+Reduces compliance risk for CFO
+
+Eliminates manual eTIMS entry
+
+Automates ERP ↔ KRA sync
+
+Protects audit integrity
+
+Enables multi-branch stock control
+
+If you want next, I can:
+
+Convert this into user stories (Jira-ready)
+
+Create detailed UI component breakdown
+
+Create wireframe prompts optimized for v0
+
+Create feature prioritization roadmap
+
+Or design pricing model for this compliance product
+
+You are now designing a serious fintech-grade compliance platform.
