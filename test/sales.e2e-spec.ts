@@ -5,6 +5,7 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import type { IComplianceEventRepository } from '../src/shared/ports/repository.port';
 import { ETIMS_ADAPTER, EVENT_REPO } from '../src/shared/tokens';
+import { EtimsAdapterStub } from '../src/regulatory/oscu/adapters/etims-adapter.stub';
 import type { IEtimsAdapter } from '../src/regulatory/oscu/ports/etims-adapter.port';
 
 type SaleReportDtoBody = {
@@ -447,26 +448,13 @@ describe('Sales API (e2e)', () => {
   });
 
   it('POST /api/sales returns REJECTED when submission fails (non-retryable)', async () => {
-    const rejectAdapter: IEtimsAdapter = {
+    const rejectAdapter: IEtimsAdapter = Object.assign(new EtimsAdapterStub(), {
       submitInvoice: () =>
         Promise.resolve({
           success: false,
           error: 'rejected by gateway',
         }),
-      saveItem: () =>
-        Promise.resolve({
-          success: true,
-          rawResponse: {
-            resultCd: '000',
-            resultMsg: 'OK',
-            resultDt: '20260221103000',
-            data: null,
-          },
-        }),
-      insertStockIO: () => Promise.resolve({ success: true }),
-      saveStockMaster: () => Promise.resolve({ success: true }),
-      selectStockMoveList: () => Promise.resolve({ success: true }),
-    };
+    });
 
     const { app } = await createTestApp({ etimsAdapter: rejectAdapter });
     const httpServer: App = app.getHttpServer();
@@ -507,26 +495,16 @@ describe('Sales API (e2e)', () => {
   });
 
   it('POST /api/sales returns RETRYING when submission fails with a retryable error', async () => {
-    const retryingAdapter: IEtimsAdapter = {
-      submitInvoice: () =>
-        Promise.resolve({
-          success: false,
-          error: 'retryable: upstream timeout',
-        }),
-      saveItem: () =>
-        Promise.resolve({
-          success: true,
-          rawResponse: {
-            resultCd: '000',
-            resultMsg: 'OK',
-            resultDt: '20260221103000',
-            data: null,
-          },
-        }),
-      insertStockIO: () => Promise.resolve({ success: true }),
-      saveStockMaster: () => Promise.resolve({ success: true }),
-      selectStockMoveList: () => Promise.resolve({ success: true }),
-    };
+    const retryingAdapter: IEtimsAdapter = Object.assign(
+      new EtimsAdapterStub(),
+      {
+        submitInvoice: () =>
+          Promise.resolve({
+            success: false,
+            error: 'retryable: upstream timeout',
+          }),
+      },
+    );
 
     const { app } = await createTestApp({ etimsAdapter: retryingAdapter });
     const httpServer: App = app.getHttpServer();

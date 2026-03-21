@@ -59,6 +59,8 @@ export class OscuSalesRequestBuilder {
 
     const salesSttsCd: string = params.payload.invoiceStatusCode ?? '02';
 
+    const salesTyCd: string = params.payload.salesTypeCode ?? 'N';
+
     const rfdDt: string | null =
       params.payload.documentType === 'CREDIT_NOTE'
         ? normalizeYyyyMMddhhmmss(params.payload.creditNoteDate)
@@ -80,7 +82,8 @@ export class OscuSalesRequestBuilder {
           ? (safeParseInt(params.payload.originalDocumentNumber ?? '') ?? 0)
           : 0,
       custTin: params.payload.customerPin ?? null,
-      custNm: null,
+      custNm: params.payload.customerName ?? null,
+      salesTyCd,
       rcptTyCd,
       pmtTyCd,
       salesSttsCd,
@@ -110,6 +113,7 @@ export class OscuSalesRequestBuilder {
       totTaxblAmt: taxBuckets.totTaxblAmt,
       totTaxAmt: taxBuckets.totTaxAmt,
       totAmt: round2(params.payload.totalAmount),
+      prchrAcptcYn: params.payload.purchaseAcceptanceYn ?? 'N',
       remark: null,
       regrId: 'sync2books',
       regrNm: 'sync2books',

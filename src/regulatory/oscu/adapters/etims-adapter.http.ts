@@ -1,4 +1,5 @@
 import type {
+  EtimsConnectionContext,
   EtimsSubmissionResult,
   IEtimsAdapter,
 } from '../ports/etims-adapter.port';
@@ -21,11 +22,45 @@ import type {
   OscuStockMoveReq,
   OscuStockMoveRes,
 } from '../transport/endpoints/stock-move-list.dto';
+import type {
+  OscuEndpointKey,
+  OscuPathStyle,
+} from '../transport/oscu-endpoints';
+import { resolveOscuPath } from '../transport/oscu-endpoints';
+import type { OscuEnvelopeResponse } from '../transport/oscu-envelope-result';
+import type { OscuRequestContext } from '../transport/oscu-api.types';
+import type { IApigeeTokenCache } from '../ports/apigee-token-cache.port';
+import {
+  fetchEtimsApigeeAccessToken,
+  resolveApigeeAccessTokenExpiresAtMs,
+  type FetchEtimsApigeeAccessTokenParams,
+  type FetchEtimsApigeeAccessTokenResult,
+} from '../transport/apigee-client-credentials';
+import { createHash } from 'crypto';
 
 type EtimsAdapterHttpConfig = {
   sandboxBaseUrl?: string;
   productionBaseUrl?: string;
   timeoutMs?: number;
+  /** `legacy` = OSCU spec v2.0 paths; `integrator` = Apigee eTIMS-OSCU Postman collection. */
+  pathStyle?: OscuPathStyle;
+  /** Fallback when `connectionContext.apigeeAppId` is unset (integrator). */
+  defaultApigeeAppId?: string;
+  /** Static bearer (skips client-credentials + cache). */
+  defaultBearerAccessToken?: string;
+  /** Client credentials for token URL (used with `apigeeTokenCache`). */
+  apigeeClientId?: string;
+  apigeeClientSecret?: string;
+  /** Host for `GET /v1/token/generate` (no path). */
+  apigeeTokenBaseUrlSandbox?: string;
+  apigeeTokenBaseUrlProduction?: string;
+  /**
+   * Refresh this many ms before computed expiry when setting Redis TTL.
+   * @default 120_000
+   */
+  tokenRefreshBufferMs?: number;
+  /** Redis (or in-memory) cache for OAuth access tokens. */
+  apigeeTokenCache?: IApigeeTokenCache;
 };
 
 function joinUrl(baseUrl: string, path: string): string {
@@ -52,18 +87,127 @@ function safeString(value: unknown): string {
   return '';
 }
 
+function asJsonBody<T extends OscuRequestContext>(
+  pathStyle: OscuPathStyle,
+  req: T,
+): Record<string, unknown> {
+  if (pathStyle === 'integrator') {
+    const { tin, bhfId, cmcKey, ...rest } = req;
+    void tin;
+    void bhfId;
+    void cmcKey;
+    return rest as Record<string, unknown>;
+  }
+  return req as unknown as Record<string, unknown>;
+}
+
 export class EtimsAdapterHttp implements IEtimsAdapter {
   private readonly sandboxBaseUrl: string;
   private readonly productionBaseUrl: string;
   private readonly timeoutMs: number;
+  private readonly pathStyle: OscuPathStyle;
+  private readonly defaultApigeeAppId: string | undefined;
+  private readonly defaultBearerAccessToken: string | undefined;
+  private readonly apigeeClientId: string | undefined;
+  private readonly apigeeClientSecret: string | undefined;
+  private readonly apigeeTokenBaseUrlSandbox: string | undefined;
+  private readonly apigeeTokenBaseUrlProduction: string | undefined;
+  private readonly tokenRefreshBufferMs: number;
+  private readonly apigeeTokenCache: IApigeeTokenCache | undefined;
 
   constructor(config?: EtimsAdapterHttpConfig) {
-    // OSCU spec v2.0 environment base URLs
     this.sandboxBaseUrl =
       config?.sandboxBaseUrl ?? 'https://etims-api-sbx.kra.go.ke/etims-api';
     this.productionBaseUrl =
       config?.productionBaseUrl ?? 'https://etims-api.kra.go.ke/etims-api';
     this.timeoutMs = config?.timeoutMs ?? 30_000;
+    this.pathStyle = config?.pathStyle ?? 'legacy';
+    this.defaultApigeeAppId = config?.defaultApigeeAppId;
+    this.defaultBearerAccessToken = config?.defaultBearerAccessToken;
+    this.apigeeClientId = config?.apigeeClientId;
+    this.apigeeClientSecret = config?.apigeeClientSecret;
+    this.apigeeTokenBaseUrlSandbox = config?.apigeeTokenBaseUrlSandbox;
+    this.apigeeTokenBaseUrlProduction = config?.apigeeTokenBaseUrlProduction;
+    this.tokenRefreshBufferMs = config?.tokenRefreshBufferMs ?? 120_000;
+    this.apigeeTokenCache = config?.apigeeTokenCache;
+  }
+
+  async fetchEtimsApigeeAccessToken(
+    params: FetchEtimsApigeeAccessTokenParams,
+  ): Promise<FetchEtimsApigeeAccessTokenResult> {
+    return fetchEtimsApigeeAccessToken(params);
+  }
+
+  private resolveApigeeTokenBaseUrl(
+    environment: 'SANDBOX' | 'PRODUCTION',
+  ): string {
+    if (environment === 'PRODUCTION') {
+      return this.apigeeTokenBaseUrlProduction ?? 'https://kra.go.ke';
+    }
+    return this.apigeeTokenBaseUrlSandbox ?? 'https://sbx.kra.go.ke';
+  }
+
+  private apigeeTokenCacheKey(environment: 'SANDBOX' | 'PRODUCTION'): string {
+    const base = this.resolveApigeeTokenBaseUrl(environment);
+    const id = this.apigeeClientId ?? '';
+    return createHash('sha256')
+      .update(`${base}|${id}|${environment}`)
+      .digest('hex')
+      .slice(0, 40);
+  }
+
+  private async resolveBearerToken(
+    ctx: EtimsConnectionContext,
+  ): Promise<string | undefined> {
+    if (ctx.bearerAccessToken) return ctx.bearerAccessToken;
+    if (this.defaultBearerAccessToken) return this.defaultBearerAccessToken;
+    if (this.pathStyle !== 'integrator') return undefined;
+    if (
+      !this.apigeeClientId ||
+      !this.apigeeClientSecret ||
+      !this.apigeeTokenCache
+    ) {
+      return undefined;
+    }
+
+    const tokenBase = this.resolveApigeeTokenBaseUrl(ctx.environment);
+    const cacheKey = this.apigeeTokenCacheKey(ctx.environment);
+
+    return this.apigeeTokenCache.getOrSet(cacheKey, async () => {
+      const { accessToken, raw } = await fetchEtimsApigeeAccessToken({
+        tokenBaseUrl: tokenBase,
+        clientId: this.apigeeClientId!,
+        clientSecret: this.apigeeClientSecret!,
+        timeoutMs: this.timeoutMs,
+      });
+      const expiresAtMs = resolveApigeeAccessTokenExpiresAtMs(raw, accessToken);
+      const ttlSec = Math.max(
+        1,
+        Math.floor(
+          (expiresAtMs - Date.now() - this.tokenRefreshBufferMs) / 1000,
+        ),
+      );
+      return { value: accessToken, ttlSeconds: ttlSec };
+    });
+  }
+
+  private async buildHeaders(
+    ctx: EtimsConnectionContext,
+  ): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    };
+    if (this.pathStyle === 'integrator') {
+      headers.tin = ctx.kraPin;
+      headers.bhfId = ctx.branchId;
+      headers.cmcKey = ctx.cmcKey;
+      const appId = ctx.apigeeAppId ?? this.defaultApigeeAppId;
+      if (appId) headers['apigee_app_id'] = appId;
+      const token = await this.resolveBearerToken(ctx);
+      if (token) headers.Authorization = `Bearer ${token}`;
+    }
+    return headers;
   }
 
   private resolveBaseUrl(environment: 'SANDBOX' | 'PRODUCTION'): string {
@@ -73,22 +217,23 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
   }
 
   private async postOscu(
-    path: string,
-    request: Record<string, unknown>,
-    environment: 'SANDBOX' | 'PRODUCTION',
+    pathSegment: string,
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
   ): Promise<{ ok: boolean; status: number; raw: Record<string, unknown> }> {
-    const url = joinUrl(this.resolveBaseUrl(environment), path);
+    const url = joinUrl(
+      this.resolveBaseUrl(connectionContext.environment),
+      pathSegment,
+    );
+    const headers = await this.buildHeaders(connectionContext);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       const res = await fetch(url, {
         method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
+        headers,
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
 
@@ -100,16 +245,61 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
     }
   }
 
+  private async postOscuEnvelope(
+    endpointKey: OscuEndpointKey,
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    const path = resolveOscuPath(this.pathStyle, endpointKey);
+    try {
+      const { ok, status, raw } = await this.postOscu(
+        path,
+        body,
+        connectionContext,
+      );
+      const rawResponse: Record<string, unknown> = { ...raw };
+      const resultCd = safeString(raw['resultCd']);
+      const resultMsg = safeString(raw['resultMsg']);
+
+      if (!ok) {
+        const retryable = isRetryableStatus(status);
+        return {
+          success: false,
+          error: retryable
+            ? `retryable: HTTP ${status} calling OSCU`
+            : `HTTP ${status} calling OSCU`,
+          rawResponse,
+        };
+      }
+
+      if (resultCd === '000') {
+        return { success: true, rawResponse };
+      }
+
+      const retryable = resultCd.startsWith('9');
+      return {
+        success: false,
+        error: retryable
+          ? `retryable: OSCU ${resultCd} ${resultMsg}`.trim()
+          : `OSCU ${resultCd} ${resultMsg}`.trim(),
+        rawResponse,
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : safeString(e);
+      const retryable =
+        msg.includes('aborted') ||
+        msg.toLowerCase().includes('timeout') ||
+        msg.toLowerCase().includes('fetch');
+      return {
+        success: false,
+        error: retryable ? `retryable: ${msg}` : msg,
+      };
+    }
+  }
+
   async submitInvoice(
     payload: EtimsInvoicePayload,
-    connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    connectionContext: EtimsConnectionContext,
   ): Promise<EtimsSubmissionResult> {
     const request = OscuSalesRequestBuilder.build({
       payload,
@@ -118,11 +308,14 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
       cmcKey: connectionContext.cmcKey,
     });
 
+    const path = resolveOscuPath(this.pathStyle, 'submitSales');
+    const body = asJsonBody(this.pathStyle, request);
+
     try {
       const { ok, status, raw } = await this.postOscu(
-        '/saveTrnsSalesOsdc',
-        request as unknown as Record<string, unknown>,
-        connectionContext.environment,
+        path,
+        body,
+        connectionContext,
       );
       const rawResponse: Record<string, unknown> = raw;
 
@@ -159,8 +352,7 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         };
       }
 
-      // Non-success result codes: treat as rejection unless explicitly retryable.
-      const retryable = resultCd.startsWith('9'); // conservative: keep 9xx as transient/system
+      const retryable = resultCd.startsWith('9');
       return {
         success: false,
         error: retryable
@@ -184,24 +376,19 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
 
   async saveItem(
     request: OscuItemSaveReq,
-    connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    connectionContext: EtimsConnectionContext,
   ): Promise<{
     success: boolean;
     rawResponse?: OscuItemSaveRes;
     error?: string;
   }> {
+    const path = resolveOscuPath(this.pathStyle, 'saveItem');
+    const body = asJsonBody(this.pathStyle, request);
     try {
       const { ok, status, raw } = await this.postOscu(
-        '/saveItem',
-        request as unknown as Record<string, unknown>,
-        connectionContext.environment,
+        path,
+        body,
+        connectionContext,
       );
       const rawResponse: OscuItemSaveRes = {
         resultCd: safeString(raw['resultCd']),
@@ -250,24 +437,19 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
 
   async insertStockIO(
     request: OscuStockIOSaveReq,
-    connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    connectionContext: EtimsConnectionContext,
   ): Promise<{
     success: boolean;
     rawResponse?: OscuStockIOSaveRes;
     error?: string;
   }> {
+    const path = resolveOscuPath(this.pathStyle, 'insertStockIO');
+    const body = asJsonBody(this.pathStyle, request);
     try {
       const { ok, status, raw } = await this.postOscu(
-        '/insertStockIO',
-        request as unknown as Record<string, unknown>,
-        connectionContext.environment,
+        path,
+        body,
+        connectionContext,
       );
       const rawResponse: OscuStockIOSaveRes = {
         resultCd: safeString(raw['resultCd']),
@@ -316,24 +498,19 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
 
   async saveStockMaster(
     request: OscuStockMasterSaveReq,
-    connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    connectionContext: EtimsConnectionContext,
   ): Promise<{
     success: boolean;
     rawResponse?: OscuStockMasterSaveRes;
     error?: string;
   }> {
+    const path = resolveOscuPath(this.pathStyle, 'saveStockMaster');
+    const body = asJsonBody(this.pathStyle, request);
     try {
       const { ok, status, raw } = await this.postOscu(
-        '/saveStockMaster',
-        request as unknown as Record<string, unknown>,
-        connectionContext.environment,
+        path,
+        body,
+        connectionContext,
       );
       const rawResponse: OscuStockMasterSaveRes = {
         resultCd: safeString(raw['resultCd']),
@@ -382,24 +559,19 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
 
   async selectStockMoveList(
     request: OscuStockMoveReq,
-    connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    connectionContext: EtimsConnectionContext,
   ): Promise<{
     success: boolean;
     rawResponse?: OscuStockMoveRes;
     error?: string;
   }> {
+    const path = resolveOscuPath(this.pathStyle, 'selectStockMoveList');
+    const body = asJsonBody(this.pathStyle, request);
     try {
       const { ok, status, raw } = await this.postOscu(
-        '/selectStockMoveList',
-        request as unknown as Record<string, unknown>,
-        connectionContext.environment,
+        path,
+        body,
+        connectionContext,
       );
       const dataRaw = asRecord(raw['data']);
       const stockMoveList = Array.isArray(dataRaw?.stockMoveList)
@@ -451,5 +623,163 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         msg.toLowerCase().includes('fetch');
       return { success: false, error: retryable ? `retryable: ${msg}` : msg };
     }
+  }
+
+  branchInsuranceInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope(
+      'branchInsuranceInfo',
+      body,
+      connectionContext,
+    );
+  }
+
+  branchUserAccount(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope('branchUserAccount', body, connectionContext);
+  }
+
+  branchSendCustomerInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope(
+      'branchSendCustomerInfo',
+      body,
+      connectionContext,
+    );
+  }
+
+  branchList(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope('branchList', body, connectionContext);
+  }
+
+  selectCodeList(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope('selectCodeList', body, connectionContext);
+  }
+
+  customerPinInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope('customerPinInfo', body, connectionContext);
+  }
+
+  selectItemClass(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope('selectItemClass', body, connectionContext);
+  }
+
+  selectTaxpayerInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope('selectTaxpayerInfo', body, connectionContext);
+  }
+
+  selectNoticeList(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope('selectNoticeList', body, connectionContext);
+  }
+
+  importedItemInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope('importedItemInfo', body, connectionContext);
+  }
+
+  importedItemConvertedInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope(
+      'importedItemConvertedInfo',
+      body,
+      connectionContext,
+    );
+  }
+
+  initializeOscu(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope('initialize', body, connectionContext);
+  }
+
+  getItemInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope('itemInfo', body, connectionContext);
+  }
+
+  saveItemComposition(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope(
+      'saveItemComposition',
+      body,
+      connectionContext,
+    );
+  }
+
+  getPurchaseTransactionInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope(
+      'getPurchaseTransactionInfo',
+      body,
+      connectionContext,
+    );
+  }
+
+  sendPurchaseTransactionInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope(
+      'sendPurchaseTransactionInfo',
+      body,
+      connectionContext,
+    );
+  }
+
+  selectInvoiceDetail(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope(
+      'selectInvoiceDetail',
+      body,
+      connectionContext,
+    );
+  }
+
+  selectSalesTransactions(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope(
+      'selectSalesTransactions',
+      body,
+      connectionContext,
+    );
   }
 }

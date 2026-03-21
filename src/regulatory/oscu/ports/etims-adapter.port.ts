@@ -1,4 +1,5 @@
 import type { EtimsInvoicePayload } from '../mapping/etims-payload.types';
+import type { OscuEnvelopeResponse } from '../transport';
 import type {
   OscuItemSaveReq,
   OscuItemSaveRes,
@@ -10,6 +11,20 @@ import type {
   OscuStockMoveRes,
 } from '../transport';
 
+/** Passed on every OSCU HTTP call (domain connection + optional Apigee integrator credentials). */
+export type EtimsConnectionContext = {
+  merchantId: string;
+  branchId: string;
+  kraPin: string;
+  environment: 'SANDBOX' | 'PRODUCTION';
+  cmcKey: string;
+  deviceId: string;
+  /** Postman `apigee_app_id` header — required on integrator gateway. */
+  apigeeAppId?: string;
+  /** Bearer token from `https://…/v1/token/generate?grant_type=client_credentials`. */
+  bearerAccessToken?: string;
+};
+
 export interface EtimsSubmissionResult {
   success: boolean;
   receiptNumber?: string;
@@ -17,96 +32,153 @@ export interface EtimsSubmissionResult {
   error?: string;
 }
 
+/**
+ * eTIMS/OSCU adapter — core submission plus Postman “eTIMS-OSCU-Integrator” endpoints.
+ * Raw JSON methods pass bodies through unchanged (Postman often keeps `tin`/`bhfId` in body as well as headers).
+ */
 export interface IEtimsAdapter {
   submitInvoice(
     payload: EtimsInvoicePayload,
-    connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    connectionContext: EtimsConnectionContext,
   ): Promise<EtimsSubmissionResult>;
 
-  /**
-   * Item save (`/saveItem`)
-   * Transport-level call.
-   */
   saveItem(
     request: OscuItemSaveReq,
-    connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    connectionContext: EtimsConnectionContext,
   ): Promise<{
     success: boolean;
     rawResponse?: OscuItemSaveRes;
     error?: string;
   }>;
 
-  /**
-   * Stock In/Out save (`/insertStockIO`)
-   * Transport-level call.
-   */
   insertStockIO(
     request: OscuStockIOSaveReq,
-    connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    connectionContext: EtimsConnectionContext,
   ): Promise<{
     success: boolean;
     rawResponse?: OscuStockIOSaveRes;
     error?: string;
   }>;
 
-  /**
-   * Stock master save (`/saveStockMaster`)
-   * Transport-level call.
-   */
   saveStockMaster(
     request: OscuStockMasterSaveReq,
-    connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    connectionContext: EtimsConnectionContext,
   ): Promise<{
     success: boolean;
     rawResponse?: OscuStockMasterSaveRes;
     error?: string;
   }>;
 
-  /**
-   * Select stock movement list (`/selectStockMoveList`)
-   * Transport-level call.
-   */
   selectStockMoveList(
     request: OscuStockMoveReq,
-    connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    connectionContext: EtimsConnectionContext,
   ): Promise<{
     success: boolean;
     rawResponse?: OscuStockMoveRes;
     error?: string;
   }>;
+
+  // --- Postman: Branch Information Management ---
+
+  branchInsuranceInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  branchUserAccount(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  branchSendCustomerInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  // --- Postman: Data Management ---
+
+  branchList(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  selectCodeList(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  customerPinInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  selectItemClass(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  selectTaxpayerInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  selectNoticeList(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  // --- Postman: Imports ---
+
+  importedItemInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  importedItemConvertedInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  // --- Postman: Initialization ---
+
+  initializeOscu(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  // --- Postman: Item Management (extra) ---
+
+  getItemInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  saveItemComposition(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  // --- Postman: Purchase ---
+
+  getPurchaseTransactionInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  sendPurchaseTransactionInfo(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  // --- Postman: Sales (queries) ---
+
+  selectInvoiceDetail(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
+  selectSalesTransactions(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
 }

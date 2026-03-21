@@ -1,5 +1,8 @@
 export * from './oscu-api.types';
 export * from './oscu-api-response-codes';
+export * from './oscu-endpoints';
+export * from './oscu-envelope-result';
+export * from './apigee-client-credentials';
 
 export * from './endpoints/trns-sales-save.dto';
 export * from './endpoints/item-save.dto';

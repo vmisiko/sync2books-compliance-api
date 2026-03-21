@@ -10,6 +10,8 @@ export interface OscuTrnsSalesSaveWrReq extends OscuRequestContext {
   orgInvcNo: number;
   custTin: string | null;
   custNm: string | null;
+  /** Sales type (spec + Postman samples use `N` for normal). */
+  salesTyCd: string;
   rcptTyCd: string;
   pmtTyCd: string;
   salesSttsCd: string;
@@ -43,6 +45,8 @@ export interface OscuTrnsSalesSaveWrReq extends OscuRequestContext {
   totTaxblAmt: number;
   totTaxAmt: number;
   totAmt: number;
+  /** Root-level purchaser acceptance (spec JSON sample). */
+  prchrAcptcYn: 'Y' | 'N';
   remark: string | null;
   regrId: string;
   regrNm: string;

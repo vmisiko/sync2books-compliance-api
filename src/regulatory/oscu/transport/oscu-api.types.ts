@@ -27,3 +27,14 @@ export interface OscuRequestContext {
   bhfId: string;
   cmcKey: string;
 }
+
+/** Apigee integrator sends `tin` / `bhfId` / `cmcKey` as headers; JSON body omits them. */
+export function stripOscuRequestContext<T extends OscuRequestContext>(
+  req: T,
+): Omit<T, 'tin' | 'bhfId' | 'cmcKey'> {
+  const { tin, bhfId, cmcKey, ...rest } = req;
+  void tin;
+  void bhfId;
+  void cmcKey;
+  return rest;
+}

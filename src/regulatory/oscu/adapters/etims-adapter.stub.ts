@@ -1,7 +1,9 @@
 import type {
+  EtimsConnectionContext,
   EtimsSubmissionResult,
   IEtimsAdapter,
 } from '../ports/etims-adapter.port';
+import type { OscuEnvelopeResponse } from '../transport/oscu-envelope-result';
 import type { EtimsInvoicePayload } from '../mapping/etims-payload.types';
 import { OscuSalesRequestBuilder } from '../mapping/oscu-sales-request.builder';
 import type { OscuTrnsSalesSaveWrRes } from '../transport/endpoints/trns-sales-save.dto';
@@ -22,6 +24,19 @@ import type {
   OscuItemSaveRes,
 } from '../transport/endpoints/item-save.dto';
 
+function stubOscuEnvelope(): OscuEnvelopeResponse {
+  const now = new Date();
+  return {
+    success: true,
+    rawResponse: {
+      resultCd: '000',
+      resultMsg: 'It is succeeded',
+      resultDt: formatYyyyMMddhhmmssUtc(now),
+      data: null,
+    },
+  };
+}
+
 function formatYyyyMMddhhmmssUtc(date: Date): string {
   const pad2 = (n: number) => String(n).padStart(2, '0');
   return (
@@ -41,14 +56,7 @@ function formatYyyyMMddhhmmssUtc(date: Date): string {
 export class EtimsAdapterStub implements IEtimsAdapter {
   submitInvoice(
     payload: EtimsInvoicePayload,
-    connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    connectionContext: EtimsConnectionContext,
   ): Promise<EtimsSubmissionResult> {
     const request = OscuSalesRequestBuilder.build({
       payload,
@@ -83,14 +91,7 @@ export class EtimsAdapterStub implements IEtimsAdapter {
 
   insertStockIO(
     _request: OscuStockIOSaveReq,
-    _connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    _connectionContext: EtimsConnectionContext,
   ): Promise<{
     success: boolean;
     rawResponse?: OscuStockIOSaveRes;
@@ -113,14 +114,7 @@ export class EtimsAdapterStub implements IEtimsAdapter {
 
   saveItem(
     _request: OscuItemSaveReq,
-    _connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    _connectionContext: EtimsConnectionContext,
   ): Promise<{
     success: boolean;
     rawResponse?: OscuItemSaveRes;
@@ -143,14 +137,7 @@ export class EtimsAdapterStub implements IEtimsAdapter {
 
   saveStockMaster(
     _request: OscuStockMasterSaveReq,
-    _connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    _connectionContext: EtimsConnectionContext,
   ): Promise<{
     success: boolean;
     rawResponse?: OscuStockMasterSaveRes;
@@ -173,14 +160,7 @@ export class EtimsAdapterStub implements IEtimsAdapter {
 
   selectStockMoveList(
     _request: OscuStockMoveReq,
-    _connectionContext: {
-      merchantId: string;
-      branchId: string;
-      kraPin: string;
-      environment: 'SANDBOX' | 'PRODUCTION';
-      cmcKey: string;
-      deviceId: string;
-    },
+    _connectionContext: EtimsConnectionContext,
   ): Promise<{
     success: boolean;
     rawResponse?: OscuStockMoveRes;
@@ -199,5 +179,167 @@ export class EtimsAdapterStub implements IEtimsAdapter {
       success: true,
       rawResponse,
     });
+  }
+
+  branchInsuranceInfo(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  branchUserAccount(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  branchSendCustomerInfo(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  branchList(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  selectCodeList(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  customerPinInfo(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  selectItemClass(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  selectTaxpayerInfo(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  selectNoticeList(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  importedItemInfo(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  importedItemConvertedInfo(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  initializeOscu(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  getItemInfo(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  saveItemComposition(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  getPurchaseTransactionInfo(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  sendPurchaseTransactionInfo(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  selectInvoiceDetail(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
+  selectSalesTransactions(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
   }
 }

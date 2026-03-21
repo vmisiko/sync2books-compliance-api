@@ -46,6 +46,11 @@ export interface EtimsInvoicePayload {
   totalAmount: number;
   /** Customer (B2B) */
   customerPin?: string;
+  customerName?: string;
+  /** OSCU `salesTyCd` (default `N`). */
+  salesTypeCode?: string;
+  /** Root-level `prchrAcptcYn` (default `N`). */
+  purchaseAcceptanceYn?: 'Y' | 'N';
   /** Lines */
   lines: EtimsInvoiceLine[];
 }

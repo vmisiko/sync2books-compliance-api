@@ -46,6 +46,8 @@ describe('OscuSalesRequestBuilder', () => {
     expect(req.itemList[0].itemClsCd).toBe('14111400');
     expect(req.itemList[0].qtyUnitCd).toBe('U');
     expect(req.itemList[0].pkgUnitCd).toBe('NT');
+    expect(req.salesTyCd).toBe('N');
+    expect(req.prchrAcptcYn).toBe('N');
   });
 
   it('uses R receipt type for credit note', () => {
