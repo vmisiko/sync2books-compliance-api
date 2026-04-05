@@ -25,6 +25,8 @@ describe('SalesService', () => {
       ],
     }).compile();
 
+    await module.init();
+
     service = module.get<SalesService>(SalesService);
 
     // Seed the catalog for validation (document lines reference itemId = "item-1")

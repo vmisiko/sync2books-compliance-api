@@ -3,6 +3,9 @@ import type { OscuApiResponse } from '../oscu-api.types';
 /**
  * `/selectInitOsdcInfo` response DTOs (device initialization).
  * Source: JSON sample includes `data.info`.
+ *
+ * **Naming:** initialize **request** uses `dvcSrlNo` (device serial). The response exposes
+ * **`dvcId`** (OSCU device id) — persisted in Compliance as `deviceId` on the eTIMS connection.
  */
 export interface OscuInitDeviceInfo {
   tin: string;

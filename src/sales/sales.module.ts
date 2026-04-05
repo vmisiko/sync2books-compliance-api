@@ -3,7 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogModule } from '../catalog/catalog.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { EtimsModule } from '../regulatory/oscu/etims.module';
-import { ConnectionsModule } from '../shared/connections.module';
+import { ComplianceOrganizationModule } from '../compliance-organization/compliance-organization.module';
 import { DOCUMENT_REPO, EVENT_REPO } from '../shared/tokens';
 import { ApiSalesController } from './controller/api-sales.controller';
 import { DashboardSalesController } from './controller/dashboard-sales.controller';
@@ -18,7 +18,7 @@ import { ComplianceEventTypeOrmRepository } from './infrastructure/persistence/c
   imports: [
     CatalogModule,
     InventoryModule,
-    ConnectionsModule,
+    ComplianceOrganizationModule,
     EtimsModule,
     TypeOrmModule.forFeature([
       ComplianceDocumentOrmEntity,

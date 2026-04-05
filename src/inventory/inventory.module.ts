@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ComplianceOrganizationModule } from '../compliance-organization/compliance-organization.module';
 import { InventoryService } from './api/inventory.service';
 import { StockController } from './api/stock.controller';
 import {
@@ -8,6 +9,7 @@ import {
 import { STOCK_MOVEMENT_REPO, STOCK_REPO } from '../shared/tokens';
 
 @Module({
+  imports: [ComplianceOrganizationModule],
   controllers: [StockController],
   providers: [
     { provide: STOCK_REPO, useClass: StockRepositoryStub },

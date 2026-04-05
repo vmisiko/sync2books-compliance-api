@@ -15,13 +15,13 @@ import { ClassificationMappingOrmEntity } from '../regulatory/oscu/infrastructur
 import { OscuMappingModule } from '../regulatory/oscu/oscu-mapping.module';
 import { TaxMappingOrmEntity } from '../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
 import { UnitMappingOrmEntity } from '../regulatory/oscu/infrastructure/persistence/unit-mapping.orm-entity';
-import { ConnectionsModule } from '../shared/connections.module';
+import { ComplianceOrganizationModule } from '../compliance-organization/compliance-organization.module';
 import { EtimsModule } from '../regulatory/oscu/etims.module';
 
 @Module({
   imports: [
     OscuMappingModule,
-    ConnectionsModule,
+    ComplianceOrganizationModule,
     EtimsModule,
     TypeOrmModule.forFeature([
       CatalogItemOrmEntity,

@@ -23,6 +23,7 @@ export function seedStubData(): void {
     kraPin: 'P1234567890',
     branchId: 'branch-1',
     deviceId: 'device-1',
+    dvcSrlNo: null,
     environment: ConnectionEnvironment.SANDBOX,
     status: ConnectionStatus.ACTIVE,
     cmcKey: 'cmc-key-stub',

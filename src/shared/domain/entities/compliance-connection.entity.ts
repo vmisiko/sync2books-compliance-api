@@ -11,6 +11,8 @@ export interface ComplianceConnection {
   kraPin: string;
   branchId: string;
   deviceId: string;
+  /** Serial used in initialize request (`dvcSrlNo`); optional after init. */
+  dvcSrlNo?: string | null;
   environment: ConnectionEnvironment;
   status: ConnectionStatus;
   cmcKey: string;

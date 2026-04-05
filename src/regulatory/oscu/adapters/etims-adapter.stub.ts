@@ -281,12 +281,47 @@ export class EtimsAdapterStub implements IEtimsAdapter {
   }
 
   initializeOscu(
-    _body: Record<string, unknown>,
+    body: Record<string, unknown>,
     _ctx: EtimsConnectionContext,
   ): Promise<OscuEnvelopeResponse> {
-    void _body;
     void _ctx;
-    return Promise.resolve(stubOscuEnvelope());
+    const now = new Date();
+    const resultDt = formatYyyyMMddhhmmssUtc(now);
+    const tin = typeof body.tin === 'string' ? body.tin : '';
+    const bhfId = typeof body.bhfId === 'string' ? body.bhfId : '';
+    const dvcSrlNo =
+      typeof body.dvcSrlNo === 'string' ? body.dvcSrlNo : '';
+    return Promise.resolve({
+      success: true,
+      rawResponse: {
+        resultCd: '000',
+        resultMsg: 'It is succeeded',
+        resultDt,
+        data: {
+          info: {
+            tin,
+            bhfId,
+            dvcSrlNo,
+            dvcId: `stub-dvc-${resultDt}`,
+            cmcKey: 'cmc-key-stub-init',
+            taxprNm: 'Stub Taxpayer',
+            bsnsActv: '',
+            bhfNm: 'Stub Branch',
+            bhfOpenDt: '',
+            prvncNm: '',
+            dstrtNm: '',
+            sctrNm: '',
+            locDesc: '',
+            hqYn: 'Y',
+            mgrNm: '',
+            mgrTelNo: '',
+            mgrEmail: '',
+            sdcId: 'stub-sdc',
+            mrcNo: '',
+          },
+        },
+      },
+    });
   }
 
   getItemInfo(

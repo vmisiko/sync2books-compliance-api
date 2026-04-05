@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { InventoryModule } from './inventory.module';
 import { StockController } from './api/stock.controller';
 import { InventoryService } from './api/inventory.service';
@@ -10,8 +11,19 @@ describe('StockController', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      imports: [InventoryModule],
+      imports: [
+        TypeOrmModule.forRoot({
+          type: 'sqljs',
+          autoSave: false,
+          autoLoadEntities: true,
+          synchronize: true,
+          logging: false,
+        }),
+        InventoryModule,
+      ],
     }).compile();
+
+    await module.init();
 
     controller = module.get<StockController>(StockController);
     service = module.get<InventoryService>(InventoryService);

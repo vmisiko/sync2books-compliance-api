@@ -1,0 +1,137 @@
+import { randomUUID } from 'crypto';
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import type { ComplianceConnection } from '../../../shared/domain/entities/compliance-connection.entity';
+import { ConnectionEnvironment } from '../../../shared/domain/enums/connection-environment.enum';
+import { ConnectionStatus } from '../../../shared/domain/enums/connection-status.enum';
+import type { IComplianceConnectionRepository } from '../../../shared/ports/repository.port';
+import { ComplianceBranchOrmEntity } from './compliance-branch.orm-entity';
+import { ComplianceEtimsConnectionOrmEntity } from './compliance-etims-connection.orm-entity';
+import { ComplianceTenantOrmEntity } from './compliance-tenant.orm-entity';
+
+function toDomain(
+  conn: ComplianceEtimsConnectionOrmEntity,
+  tenant: ComplianceTenantOrmEntity,
+  branch: ComplianceBranchOrmEntity,
+): ComplianceConnection {
+  return {
+    id: conn.id,
+    merchantId: tenant.sync2booksCompanyId ?? tenant.id,
+    branchId: branch.sync2booksBranchId ?? branch.id,
+    kraPin: conn.kraPin,
+    deviceId: conn.deviceId,
+    dvcSrlNo: conn.dvcSrlNo,
+    environment: conn.environment as ConnectionEnvironment,
+    status: conn.status as ConnectionStatus,
+    cmcKey: conn.cmcKey,
+    lastCodeSyncAt: conn.lastCodeSyncAt,
+    createdAt: conn.createdAt,
+    updatedAt: conn.updatedAt,
+  };
+}
+
+export type UpsertEtimsConnectionInput = {
+  complianceBranchId: string;
+  kraPin: string;
+  deviceId: string;
+  cmcKey: string;
+  dvcSrlNo?: string | null;
+  environment: ConnectionEnvironment;
+  status: ConnectionStatus;
+  sync2booksConnectionId?: string | null;
+  lastCodeSyncAt?: Date | null;
+};
+
+@Injectable()
+export class ComplianceOrganizationConnectionTypeOrmRepository implements IComplianceConnectionRepository {
+  constructor(
+    @InjectRepository(ComplianceEtimsConnectionOrmEntity)
+    private readonly connRepo: Repository<ComplianceEtimsConnectionOrmEntity>,
+    @InjectRepository(ComplianceBranchOrmEntity)
+    private readonly branchRepo: Repository<ComplianceBranchOrmEntity>,
+    @InjectRepository(ComplianceTenantOrmEntity)
+    private readonly tenantRepo: Repository<ComplianceTenantOrmEntity>,
+  ) {}
+
+  async findBranchTenantEtimsByBranchId(branchId: string): Promise<{
+    tenant: ComplianceTenantOrmEntity;
+    branch: ComplianceBranchOrmEntity;
+    etims: ComplianceEtimsConnectionOrmEntity | null;
+  } | null> {
+    const branch = await this.branchRepo.findOne({
+      where: { id: branchId },
+      relations: ['tenant', 'etimsConnection'],
+    });
+    if (!branch?.tenant) return null;
+    return {
+      tenant: branch.tenant,
+      branch,
+      etims: branch.etimsConnection ?? null,
+    };
+  }
+
+  async findByMerchantAndBranch(
+    merchantId: string,
+    branchId: string,
+  ): Promise<ComplianceConnection | null> {
+    const tenant = await this.tenantRepo.findOne({
+      where: { sync2booksCompanyId: merchantId },
+    });
+    if (!tenant) return null;
+    const branch = await this.branchRepo.findOne({
+      where: { tenantId: tenant.id, sync2booksBranchId: branchId },
+      relations: ['etimsConnection'],
+    });
+    if (!branch?.etimsConnection) return null;
+    return toDomain(branch.etimsConnection, tenant, branch);
+  }
+
+  async upsertEtimsConnection(
+    input: UpsertEtimsConnectionInput,
+  ): Promise<ComplianceConnection> {
+    const branch = await this.branchRepo.findOne({
+      where: { id: input.complianceBranchId },
+      relations: ['tenant', 'etimsConnection'],
+    });
+    if (!branch?.tenant) {
+      throw new Error(`Branch ${input.complianceBranchId} not found`);
+    }
+    const now = new Date();
+    let row = branch.etimsConnection;
+    if (!row) {
+      const created = this.connRepo.create({
+        id: randomUUID(),
+        kraPin: input.kraPin,
+        deviceId: input.deviceId,
+        dvcSrlNo: input.dvcSrlNo ?? null,
+        cmcKey: input.cmcKey,
+        environment: input.environment,
+        status: input.status,
+        sync2booksConnectionId: input.sync2booksConnectionId ?? null,
+        lastCodeSyncAt: input.lastCodeSyncAt ?? null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      created.branch = branch;
+      row = created;
+    } else {
+      row.kraPin = input.kraPin;
+      row.deviceId = input.deviceId;
+      if (input.dvcSrlNo !== undefined) {
+        row.dvcSrlNo = input.dvcSrlNo;
+      }
+      row.cmcKey = input.cmcKey;
+      row.environment = input.environment;
+      row.status = input.status;
+      row.sync2booksConnectionId =
+        input.sync2booksConnectionId ?? row.sync2booksConnectionId;
+      if (input.lastCodeSyncAt !== undefined) {
+        row.lastCodeSyncAt = input.lastCodeSyncAt;
+      }
+      row.updatedAt = now;
+    }
+    await this.connRepo.save(row);
+    return toDomain(row, branch.tenant, branch);
+  }
+}

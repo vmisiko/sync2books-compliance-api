@@ -4,6 +4,8 @@ This document explains how **Sync2Books API** (`api/`), **Compliance API** (`com
 
 It is **design guidance** for implementation; it does not replace per-service runbooks.
 
+**See also:** [ETIMS_INTEGRATOR_PROVISIONING.md](./ETIMS_INTEGRATOR_PROVISIONING.md) — ETIMS as a Sync2Books integrator, provisioning, and correlation ids.
+
 ---
 
 ## 1. Why this split exists

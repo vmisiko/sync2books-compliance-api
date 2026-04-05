@@ -56,7 +56,7 @@ describe('Sales API (e2e)', () => {
     }
 
     moduleFixture = await builder.compile();
-    app = moduleFixture.createNestApplication();
+    app = moduleFixture.createNestApplication({ logger: false });
     await app.init();
 
     const eventRepo = moduleFixture.get<IComplianceEventRepository>(EVENT_REPO);
