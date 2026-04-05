@@ -63,7 +63,7 @@ export type UpsertEtimsConnectionInput = {
 
 export type InitializeEtimsConnectionInput = {
   complianceBranchId: string;
-  /** Overrides stored `dvcSrlNo` on the connection for this call and persistence. */
+  /** Optional override of stored `dvcSrlNo` (HTTP uses stored value only). */
   dvcSrlNo?: string | null;
 };
 
@@ -232,7 +232,7 @@ export class ComplianceOrganizationApplicationService {
     const dvcSrlNo = input.dvcSrlNo ?? etims.dvcSrlNo;
     if (!dvcSrlNo || dvcSrlNo.trim() === '') {
       throw new BadRequestException(
-        'dvcSrlNo is required (device serial for initialize). Set it on the connection or pass in the request body.',
+        'dvcSrlNo is required (device serial for initialize). Set it on the connection via PUT .../etims-connection first.',
       );
     }
 

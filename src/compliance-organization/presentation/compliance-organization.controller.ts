@@ -12,7 +12,6 @@ import {
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 import { ComplianceOrganizationApplicationService } from '../application/compliance-organization.application.service';
-import { InitializeEtimsDto } from './dto/initialize-etims.dto';
 import { UpsertBranchDto } from './dto/upsert-branch.dto';
 import { UpsertEtimsConnectionDto } from './dto/upsert-etims-connection.dto';
 import { UpsertTenantDto } from './dto/upsert-tenant.dto';
@@ -121,23 +120,19 @@ export class ComplianceOrganizationController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Call OSCU initialize (tin, bhfId, dvcSrlNo) and persist cmcKey + dvcId from response',
+      'Call OSCU initialize using stored connection (kraPin, dvcSrlNo) and branch kraBhfId; persist cmcKey + dvcId from response. No body — branch id in path only.',
   })
   @ApiResponse({
     status: 200,
     description: 'Connection updated after initialize',
   })
-  async initializeEtimsConnection(
-    @Param('branchId') branchId: string,
-    @Body() body: InitializeEtimsDto,
-  ) {
+  async initializeEtimsConnection(@Param('branchId') branchId: string) {
     const branch = await this.organization.getBranchById(branchId);
     if (!branch) {
       throw new NotFoundException(`Branch ${branchId} not found`);
     }
     return this.organization.initializeEtimsConnection({
       complianceBranchId: branchId,
-      dvcSrlNo: body.dvcSrlNo,
     });
   }
 }

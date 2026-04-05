@@ -74,7 +74,6 @@ describe('Compliance organization (e2e)', () => {
 
     const initRes = await request(http)
       .post(`${base}/branches/${branchId}/etims-connection/initialize`)
-      .send({ dvcSrlNo: 'DEVICE-SERIAL-E2E' })
       .expect(200);
 
     const conn = initRes.body as { deviceId: string; cmcKey: string };

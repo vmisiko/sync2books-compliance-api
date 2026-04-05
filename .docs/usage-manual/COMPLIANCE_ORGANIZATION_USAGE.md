@@ -124,22 +124,13 @@ Body (shell before initialize). **Do not send `deviceId` or `cmcKey`** — the s
 **`POST /compliance-organization/branches/:branchId/etims-connection/initialize`**  
 **Status:** `200 OK`
 
-This calls the OSCU **initialize** operation with body:
+**No request body** — only **`branchId`** in the path. The server loads the eTIMS connection row and branch, then calls OSCU initialize with:
 
-`{ "tin": <kraPin>, "bhfId": <branch.kraBhfId>, "dvcSrlNo": <serial> }`
+`{ "tin": <kraPin>, "bhfId": <branch.kraBhfId>, "dvcSrlNo": <stored dvcSrlNo> }`
 
 and persists **`cmcKey`** and **`dvcId`** from **`data.info`**.
 
-Body (optional field):
-
-```json
-{
-  "dvcSrlNo": "YOUR_DEVICE_SERIAL"
-}
-```
-
-- If **`dvcSrlNo`** is omitted, the value stored on the connection from Step 3 is used.
-- If neither the body nor the connection has **`dvcSrlNo`**, the request fails with a **400** validation-style error.
+- **`dvcSrlNo`** must already be set on the connection (Step 3). If it is missing, the request fails with **400**.
 
 **Prerequisites checked by the server:**
 
@@ -176,7 +167,7 @@ Body (optional field):
 | `404` on branch | Wrong internal `branchId` |
 | `400` “kraBhfId is required” | Branch missing **KRA bhfId** — update branch with `PUT`-equivalent upsert including **`kraBhfId`** |
 | `400` “Create an eTIMS connection first” | No row from **PUT** `.../etims-connection` |
-| `400` “dvcSrlNo is required” | Pass **`dvcSrlNo`** in initialize body or on the connection |
+| `400` “dvcSrlNo is required” | Set **`dvcSrlNo`** on the connection (**PUT** `.../etims-connection`) before initialize |
 | `400` initialize / OSCU error | Invalid tin/bhfId/serial, wrong environment, or gateway auth (Apigee) |
 
 ---
@@ -209,10 +200,8 @@ curl -sS -X PUT "$BASE/compliance-organization/branches/BRANCH_ID/etims-connecti
   -H "Content-Type: application/json" \
   -d '{"kraPin":"P012345678X","environment":"SANDBOX","dvcSrlNo":"SERIAL123"}'
 
-# 4) Initialize
-curl -sS -X POST "$BASE/compliance-organization/branches/BRANCH_ID/etims-connection/initialize" \
-  -H "Content-Type: application/json" \
-  -d '{"dvcSrlNo":"SERIAL123"}'
+# 4) Initialize (no body; uses stored connection + branch)
+curl -sS -X POST "$BASE/compliance-organization/branches/BRANCH_ID/etims-connection/initialize"
 ```
 
 ---
