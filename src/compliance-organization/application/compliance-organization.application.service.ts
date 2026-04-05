@@ -48,13 +48,17 @@ export type UpsertBranchInput = {
 export type UpsertEtimsConnectionInput = {
   complianceBranchId: string;
   kraPin: string;
-  deviceId: string;
-  cmcKey: string;
-  /** Device serial for OSCU initialize request; stored separately from OSCU `dvcId` (`deviceId`). */
-  dvcSrlNo?: string | null;
   environment: ConnectionEnvironment;
+  /** Device serial for OSCU initialize; not OSCU `dvcId` (that is set only after initialize). */
+  dvcSrlNo?: string | null;
   status?: ConnectionStatus;
   sync2booksConnectionId?: string | null;
+  /**
+   * OSCU `dvcId` and CMC key are never accepted from the public PUT body.
+   * Optional here for {@link initializeEtimsConnection} and internal seed only.
+   */
+  deviceId?: string;
+  cmcKey?: string;
 };
 
 export type InitializeEtimsConnectionInput = {

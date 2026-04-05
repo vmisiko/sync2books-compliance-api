@@ -67,8 +67,6 @@ describe('Compliance organization (e2e)', () => {
       .put(`${base}/branches/${branchId}/etims-connection`)
       .send({
         kraPin: 'P012345678X',
-        deviceId: 'pending',
-        cmcKey: 'pending',
         dvcSrlNo: 'DEVICE-SERIAL-E2E',
         environment: 'SANDBOX',
       })

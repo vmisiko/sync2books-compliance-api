@@ -101,13 +101,11 @@ Response includes **`id`** (internal branch id). Use it for eTIMS connection rou
 
 **`PUT /compliance-organization/branches/:branchId/etims-connection`**
 
-Body (minimal shell before initialize; placeholders allowed where noted):
+Body (shell before initialize). **Do not send `deviceId` or `cmcKey`** — the server stores placeholders until **`POST .../initialize`** persists OSCU **`dvcId`** and **`cmcKey`** from `data.info`.
 
 ```json
 {
   "kraPin": "P012345678X",
-  "deviceId": "pending",
-  "cmcKey": "pending",
   "dvcSrlNo": "YOUR_DEVICE_SERIAL",
   "environment": "SANDBOX",
   "sync2booksConnectionId": "optional-main-api-etims-connection-id"
@@ -117,7 +115,6 @@ Body (minimal shell before initialize; placeholders allowed where noted):
 - **`kraPin`**: taxpayer PIN (**tin**).
 - **`environment`**: `SANDBOX` or `PRODUCTION`.
 - **`dvcSrlNo`**: optional here if you will pass it only in the initialize call.
-- **`deviceId` / `cmcKey`**: you may use temporary strings until **initialize** completes; the initialize flow will overwrite **`deviceId`** with OSCU **`dvcId`** and **`cmcKey`** from `data.info`.
 - **`sync2booksConnectionId`**: optional link to the ETIMS row in the **main Sync2Books API** (integration catalog).
 
 ---
@@ -210,7 +207,7 @@ curl -sS -X POST "$BASE/compliance-organization/tenants/TENANT_ID/branches" \
 # 3) Connection shell (use branch id as BRANCH_ID)
 curl -sS -X PUT "$BASE/compliance-organization/branches/BRANCH_ID/etims-connection" \
   -H "Content-Type: application/json" \
-  -d '{"kraPin":"P012345678X","deviceId":"pending","cmcKey":"pending","environment":"SANDBOX","dvcSrlNo":"SERIAL123"}'
+  -d '{"kraPin":"P012345678X","environment":"SANDBOX","dvcSrlNo":"SERIAL123"}'
 
 # 4) Initialize
 curl -sS -X POST "$BASE/compliance-organization/branches/BRANCH_ID/etims-connection/initialize" \

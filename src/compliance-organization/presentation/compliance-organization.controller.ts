@@ -95,7 +95,10 @@ export class ComplianceOrganizationController {
   }
 
   @Put('branches/:branchId/etims-connection')
-  @ApiOperation({ summary: 'Create or update eTIMS connection for a branch' })
+  @ApiOperation({
+    summary:
+      'Create or update eTIMS connection shell (kraPin, environment, etc.). OSCU deviceId/cmcKey are set only after initialize, not from this body.',
+  })
   async upsertEtimsConnection(
     @Param('branchId') branchId: string,
     @Body() body: UpsertEtimsConnectionDto,
@@ -107,8 +110,6 @@ export class ComplianceOrganizationController {
     return this.organization.upsertEtimsConnection({
       complianceBranchId: branchId,
       kraPin: body.kraPin,
-      deviceId: body.deviceId,
-      cmcKey: body.cmcKey,
       dvcSrlNo: body.dvcSrlNo,
       environment: body.environment,
       status: body.status,

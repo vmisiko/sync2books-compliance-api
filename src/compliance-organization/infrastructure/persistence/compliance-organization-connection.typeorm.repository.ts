@@ -31,17 +31,21 @@ function toDomain(
   };
 }
 
+/** When `deviceId` / `cmcKey` are omitted, create uses placeholders; update leaves existing OSCU secrets unchanged. */
 export type UpsertEtimsConnectionInput = {
   complianceBranchId: string;
   kraPin: string;
-  deviceId: string;
-  cmcKey: string;
+  deviceId?: string;
+  cmcKey?: string;
   dvcSrlNo?: string | null;
   environment: ConnectionEnvironment;
   status: ConnectionStatus;
   sync2booksConnectionId?: string | null;
   lastCodeSyncAt?: Date | null;
 };
+
+const PENDING_DEVICE_ID = 'pending';
+const PENDING_CMC_KEY = '';
 
 @Injectable()
 export class ComplianceOrganizationConnectionTypeOrmRepository implements IComplianceConnectionRepository {
@@ -103,9 +107,9 @@ export class ComplianceOrganizationConnectionTypeOrmRepository implements ICompl
       const created = this.connRepo.create({
         id: randomUUID(),
         kraPin: input.kraPin,
-        deviceId: input.deviceId,
+        deviceId: input.deviceId ?? PENDING_DEVICE_ID,
         dvcSrlNo: input.dvcSrlNo ?? null,
-        cmcKey: input.cmcKey,
+        cmcKey: input.cmcKey ?? PENDING_CMC_KEY,
         environment: input.environment,
         status: input.status,
         sync2booksConnectionId: input.sync2booksConnectionId ?? null,
@@ -117,11 +121,15 @@ export class ComplianceOrganizationConnectionTypeOrmRepository implements ICompl
       row = created;
     } else {
       row.kraPin = input.kraPin;
-      row.deviceId = input.deviceId;
+      if (input.deviceId !== undefined) {
+        row.deviceId = input.deviceId;
+      }
+      if (input.cmcKey !== undefined) {
+        row.cmcKey = input.cmcKey;
+      }
       if (input.dvcSrlNo !== undefined) {
         row.dvcSrlNo = input.dvcSrlNo;
       }
-      row.cmcKey = input.cmcKey;
       row.environment = input.environment;
       row.status = input.status;
       row.sync2booksConnectionId =

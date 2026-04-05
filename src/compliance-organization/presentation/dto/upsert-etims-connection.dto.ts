@@ -7,21 +7,10 @@ export class UpsertEtimsConnectionDto {
   kraPin!: string;
 
   @ApiProperty({
-    description:
-      'OSCU device id (`dvcId`) after initialize; placeholder until init if needed',
-  })
-  deviceId!: string;
-
-  @ApiProperty({
-    description: 'CMC key from initialize; placeholder until init if needed',
-  })
-  cmcKey!: string;
-
-  @ApiProperty({
     required: false,
     nullable: true,
     description:
-      'Device serial sent in initialize request body (`dvcSrlNo`). Not the same as deviceId (OSCU `dvcId`).',
+      'Device serial sent in initialize request body (`dvcSrlNo`). Not the same as OSCU `dvcId` (stored after initialize).',
   })
   dvcSrlNo?: string | null;
 
