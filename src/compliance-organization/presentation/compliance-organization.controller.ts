@@ -14,6 +14,7 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ComplianceOrganizationApplicationService } from '../application/compliance-organization.application.service';
 import { UpsertBranchDto } from './dto/upsert-branch.dto';
 import { UpsertEtimsConnectionDto } from './dto/upsert-etims-connection.dto';
+import { TenantUpsertResponseDto } from './dto/tenant-upsert-response.dto';
 import { UpsertTenantDto } from './dto/upsert-tenant.dto';
 
 @Controller('compliance-organization')
@@ -25,8 +26,16 @@ export class ComplianceOrganizationController {
 
   @Post('tenants')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create or update a compliance tenant' })
-  @ApiResponse({ status: 201, description: 'Tenant upserted' })
+  @ApiOperation({
+    summary:
+      'Create or update a compliance tenant (new tenants get a default Headquarters branch). Send `kraPin` (+ Test/Live) to also upsert the eTIMS shell on that branch.',
+  })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Tenant upserted; includes default branch id and optional eTIMS row',
+    type: TenantUpsertResponseDto,
+  })
   async upsertTenant(@Body() body: UpsertTenantDto) {
     return this.organization.upsertTenant({
       id: body.id,

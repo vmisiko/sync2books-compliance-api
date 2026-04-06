@@ -41,23 +41,39 @@ describe('Compliance organization (e2e)', () => {
       .send({ displayName: 'E2E Dashboard Tenant' })
       .expect(201);
 
-    const tenantId = (tenantRes.body as { id: string }).id;
+    const body = tenantRes.body as {
+      tenant: { id: string; sync2booksCompanyId: string | null };
+      defaultBranchId: string;
+      etimsConnection: unknown;
+    };
+    const tenantId = body.tenant.id;
     expect(tenantId).toBeTruthy();
-    expect(
-      (tenantRes.body as { sync2booksCompanyId: string | null })
-        .sync2booksCompanyId,
-    ).toBeNull();
+    expect(body.tenant.sync2booksCompanyId).toBeNull();
+    expect(body.defaultBranchId).toBeTruthy();
+    expect(body.etimsConnection).toBeNull();
+
+    const listRes = await request(http)
+      .get(`${base}/tenants/${tenantId}/branches`)
+      .expect(200);
+    const listed = listRes.body as Array<{
+      id: string;
+      displayName: string | null;
+      sync2booksBranchId: string | null;
+    }>;
+    expect(listed).toHaveLength(1);
+    expect(listed[0].displayName).toBe('Headquarters');
 
     const branchRes = await request(http)
       .post(`${base}/tenants/${tenantId}/branches`)
       .send({
+        id: listed[0].id,
         displayName: 'E2E Branch',
         kraBhfId: '00',
       })
       .expect(201);
 
     const branchId = (branchRes.body as { id: string }).id;
-    expect(branchId).toBeTruthy();
+    expect(branchId).toBe(listed[0].id);
     expect(
       (branchRes.body as { sync2booksBranchId: string | null })
         .sync2booksBranchId,
@@ -117,16 +133,48 @@ describe('Compliance organization (e2e)', () => {
       .send({ displayName: 'Before' })
       .expect(201);
 
-    const id = (created.body as { id: string }).id;
+    const id = (created.body as { tenant: { id: string } }).tenant.id;
 
     const updated = await request(http)
       .post(`${base}/tenants`)
       .send({ id, displayName: 'After' })
       .expect(201);
 
-    expect((updated.body as { id: string }).id).toBe(id);
-    expect((updated.body as { displayName: string | null }).displayName).toBe(
-      'After',
-    );
+    expect((updated.body as { tenant: { id: string } }).tenant.id).toBe(id);
+    expect(
+      (updated.body as { tenant: { displayName: string | null } }).tenant
+        .displayName,
+    ).toBe('After');
+  });
+
+  it('creates tenant, default branch, and eTIMS shell in one POST when kraPin is sent', async () => {
+    const http = app.getHttpServer();
+
+    const res = await request(http)
+      .post(`${base}/tenants`)
+      .send({
+        displayName: 'One-shot business',
+        kraPin: 'A123456789B',
+        isLiveBusiness: false,
+      })
+      .expect(201);
+
+    const payload = res.body as {
+      tenant: { id: string; displayName: string | null };
+      defaultBranchId: string;
+      etimsConnection: { kraPin: string; environment: string } | null;
+    };
+
+    expect(payload.tenant.displayName).toBe('One-shot business');
+    expect(payload.defaultBranchId).toBeTruthy();
+    expect(payload.etimsConnection).toBeTruthy();
+    expect(payload.etimsConnection?.kraPin).toBe('A123456789B');
+    expect(payload.etimsConnection?.environment).toBe('SANDBOX');
+
+    const listRes = await request(http)
+      .get(`${base}/tenants/${payload.tenant.id}/branches`)
+      .expect(200);
+    const listed = listRes.body as Array<{ id: string; displayName: string }>;
+    expect(listed.some((b) => b.id === payload.defaultBranchId)).toBe(true);
   });
 });

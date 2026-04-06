@@ -17,7 +17,7 @@ The Compliance API stores **OSCU/eTIMS runtime data** per company and branch: KR
 | KRA office | `kraBhfId` on the branch | Must match KRA **bhfId** used in OSCU |
 | eTIMS connection | One row per branch | Optional `sync2booksConnectionId` (integrator connection in main API) |
 
-**Compliance dashboard (no main-app Sync2Books ids):** Create a tenant without `sync2booksCompanyId` and branches without `sync2booksBranchId`; use the returned **`id`** values on later calls. To update those rows, send the same **`id`** in the request body (`POST .../tenants` or `POST .../branches`) together with fields to change. `sync2booksConnectionId` on the eTIMS connection remains optional everywhere.
+**Compliance dashboard (no main-app Sync2Books ids):** Create a tenant without `sync2booksCompanyId` and branches without `sync2booksBranchId`; use the returned **`tenant.id`** (and **`defaultBranchId`** from `POST .../tenants`) on later calls. To update those rows, send the same **`id`** in the request body (`POST .../tenants` or `POST .../branches`) together with fields to change. `sync2booksConnectionId` on the eTIMS connection remains optional everywhere.
 
 ---
 
@@ -45,7 +45,7 @@ All examples assume:
 
 Adjust the prefix if your deployment adds a global prefix (for example `/compliance/v1`).
 
-**Automated e2e (local):** The API uses TypeORM **sql.js** (embedded file DB). Compliance flows are covered by `npm run test:e2e:compliance`, which creates a **temporary database file** under the OS temp directory (no Docker DB required). Full suite: `npm run test:e2e`.
+**Automated e2e (local):** Compliance flows are covered by `npm run test:e2e:compliance` (requires a reachable **MySQL** instance matching `DB_*` env, with `synchronize` enabled for tests). Full suite: `npm run test:e2e`.
 
 ---
 
@@ -65,11 +65,15 @@ Body:
 }
 ```
 
-Omit `sync2booksCompanyId` when provisioning from the compliance dashboard only; the response still includes **`id`**. To change a dashboard-only tenant later, include **`id`** (internal tenant id) in the body.
+Omit `sync2booksCompanyId` when provisioning from the compliance dashboard only; the response still includes **`tenant.id`**. To change a dashboard-only tenant later, include **`id`** (internal tenant id) in the body.
 
 - **`sync2booksCompanyId`**: when present, must match the Sync2Books **company** id for idempotent upsert with the main API; when omitted, a new tenant is created without that link.
 
-Response includes **`id`** (internal Compliance tenant id). Use it for branch routes.
+**Response shape (`201`):** `{ "tenant": { … }, "defaultBranchId": "…", "etimsConnection": null | { … } }`. Use **`tenant.id`** for branch routes and **`defaultBranchId`** for eTIMS routes when the default branch is enough.
+
+Optional body fields for **Add new business** (DigiTax-style): **`kraPin`** (KRA PIN / TIN), **`isLiveBusiness`** (`false` = Test/SANDBOX, `true` = Live/PRODUCTION), and/or **`environment`** (`SANDBOX` | `PRODUCTION`; overrides `isLiveBusiness`). When **`kraPin`** is set, the API upserts the **eTIMS connection shell** on the default branch and returns it in **`etimsConnection`**.
+
+**Default branch:** On **every new tenant** (not on updates to an existing tenant), the API creates one branch automatically: **`displayName` = `Headquarters`**, **`sync2booksBranchId`** unset, **`kraBhfId`** = `00` (placeholder until you set a real office id). Use **`GET .../tenants/:tenantId/branches`** to list it, then **`POST .../branches`** with **`id`** to rename it or set **`kraBhfId`** / **`sync2booksBranchId`**, or add more branches.
 
 ---
 

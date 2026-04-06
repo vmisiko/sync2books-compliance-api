@@ -290,7 +290,7 @@ export class EtimsAdapterStub implements IEtimsAdapter {
     const tin = typeof body.tin === 'string' ? body.tin : '';
     const bhfId = typeof body.bhfId === 'string' ? body.bhfId : '';
     const dvcSrlNo =
-      typeof body.dvcSrlNo === 'string' ? body.dvcSrlNo : '';
+      typeof body.dvcSrlNo === 'string' ? body.dvcSrlNo : 'STUB-DVC-SERIAL';
     return Promise.resolve({
       success: true,
       rawResponse: {

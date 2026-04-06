@@ -2,7 +2,6 @@ import {
   Column,
   CreateDateColumn,
   Entity,
-  Index,
   PrimaryColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -13,7 +12,6 @@ export class ComplianceTenantOrmEntity {
   id!: string;
 
   @Column('varchar', { unique: true, nullable: true })
-  @Index()
   sync2booksCompanyId!: string | null;
 
   @Column('varchar', { nullable: true })

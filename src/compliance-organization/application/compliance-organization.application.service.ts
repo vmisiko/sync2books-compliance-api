@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import type { ComplianceBranch } from '../domain/entities/compliance-branch.entity';
@@ -30,12 +31,46 @@ function trimExternalId(
   return t === '' ? null : t;
 }
 
+const DEFAULT_BRANCH_DISPLAY_NAME = 'Headquarters';
+
+function trimKraPin(v: string | null | undefined): string | null {
+  if (v === undefined || v === null) return null;
+  const t = v.trim();
+  return t === '' ? null : t;
+}
+
 export type UpsertTenantInput = {
   /** Update an existing tenant (e.g. dashboard-only row) by internal id. */
   id?: string | null;
   sync2booksCompanyId?: string | null;
   displayName?: string | null;
+  /**
+   * KRA PIN / TIN (“PIN No.”). When set, creates or updates the eTIMS connection shell on the default branch.
+   */
+  kraPin?: string | null;
+  /** SANDBOX / PRODUCTION. Takes precedence over {@link isLiveBusiness}. */
+  environment?: ConnectionEnvironment;
+  /** false = Test (SANDBOX), true = Live (PRODUCTION). Used when `environment` is omitted. */
+  isLiveBusiness?: boolean;
 };
+
+export type TenantUpsertResult = {
+  tenant: ComplianceTenant;
+  defaultBranchId: string;
+  etimsConnection: ComplianceConnection | null;
+};
+
+function resolveTenantConnectionEnvironment(
+  input: UpsertTenantInput,
+): ConnectionEnvironment {
+  if (input.environment !== undefined) {
+    return input.environment;
+  }
+  if (input.isLiveBusiness === true) {
+    return ConnectionEnvironment.PRODUCTION;
+  }
+  return ConnectionEnvironment.SANDBOX;
+}
 
 export type UpsertBranchInput = {
   tenantId: string;
@@ -76,9 +111,10 @@ export class ComplianceOrganizationApplicationService {
     @Inject(ETIMS_ADAPTER) private readonly etimsAdapter: IEtimsAdapter,
   ) {}
 
-  async upsertTenant(input: UpsertTenantInput): Promise<ComplianceTenant> {
+  async upsertTenant(input: UpsertTenantInput): Promise<TenantUpsertResult> {
     const companyId = trimExternalId(input.sync2booksCompanyId);
     const now = new Date();
+    let saved: ComplianceTenant;
 
     if (input.id) {
       const existing = await this.tenantRepo.findById(input.id);
@@ -92,10 +128,8 @@ export class ComplianceOrganizationApplicationService {
         displayName: input.displayName ?? existing.displayName,
         updatedAt: now,
       };
-      return this.tenantRepo.save(updated);
-    }
-
-    if (companyId) {
+      saved = await this.tenantRepo.save(updated);
+    } else if (companyId) {
       const existing =
         await this.tenantRepo.findBySync2booksCompanyId(companyId);
       if (existing) {
@@ -104,18 +138,87 @@ export class ComplianceOrganizationApplicationService {
           displayName: input.displayName ?? existing.displayName,
           updatedAt: now,
         };
-        return this.tenantRepo.save(updated);
+        saved = await this.tenantRepo.save(updated);
+      } else {
+        const tenant: ComplianceTenant = {
+          id: randomUUID(),
+          sync2booksCompanyId: companyId,
+          displayName: input.displayName ?? null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        saved = await this.tenantRepo.save(tenant);
+        await this.ensureDefaultBranch(saved.id);
       }
+    } else {
+      const tenant: ComplianceTenant = {
+        id: randomUUID(),
+        sync2booksCompanyId: null,
+        displayName: input.displayName ?? null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      saved = await this.tenantRepo.save(tenant);
+      await this.ensureDefaultBranch(saved.id);
     }
 
-    const tenant: ComplianceTenant = {
+    const branch = await this.getOrCreateDefaultBranch(saved.id);
+
+    const kraPin = trimKraPin(input.kraPin);
+    let etimsConnection: ComplianceConnection | null = null;
+    if (kraPin) {
+      const env = resolveTenantConnectionEnvironment(input);
+      etimsConnection = await this.upsertEtimsConnection({
+        complianceBranchId: branch.id,
+        kraPin,
+        environment: env,
+      });
+    }
+
+    return {
+      tenant: saved,
+      defaultBranchId: branch.id,
+      etimsConnection,
+    };
+  }
+
+  /** First branch for the tenant, creating Headquarters if none exist. */
+  private async getOrCreateDefaultBranch(
+    tenantId: string,
+  ): Promise<ComplianceBranch> {
+    const branches = await this.branchRepo.listByTenantId(tenantId);
+    if (branches.length > 0) {
+      return branches[0];
+    }
+    await this.ensureDefaultBranch(tenantId);
+    const again = await this.branchRepo.listByTenantId(tenantId);
+    const first = again[0];
+    if (!first) {
+      throw new InternalServerErrorException(
+        `Failed to create default branch for tenant ${tenantId}`,
+      );
+    }
+    return first;
+  }
+
+  /** One default branch per new tenant (idempotent if branches already exist). */
+  private async ensureDefaultBranch(tenantId: string): Promise<void> {
+    const branches = await this.branchRepo.listByTenantId(tenantId);
+    if (branches.length > 0) {
+      return;
+    }
+    const now = new Date();
+    const branchId = '00';
+    const branch: ComplianceBranch = {
       id: randomUUID(),
-      sync2booksCompanyId: companyId ?? null,
-      displayName: input.displayName ?? null,
+      tenantId,
+      sync2booksBranchId: null,
+      displayName: DEFAULT_BRANCH_DISPLAY_NAME,
+      kraBhfId: branchId,
       createdAt: now,
       updatedAt: now,
     };
-    return this.tenantRepo.save(tenant);
+    await this.branchRepo.save(branch);
   }
 
   async getTenantBySync2booksCompanyId(

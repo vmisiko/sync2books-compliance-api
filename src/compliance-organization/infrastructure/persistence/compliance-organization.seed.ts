@@ -17,12 +17,18 @@ export class ComplianceOrganizationSeed {
     if (existing) {
       return;
     }
-    const tenant = await this.organization.upsertTenant({
+    const { tenant } = await this.organization.upsertTenant({
       sync2booksCompanyId: DEV_MERCHANT_ID,
       displayName: 'Dev merchant',
     });
+    const listed = await this.organization.listBranches(tenant.id);
+    const first = listed[0];
+    if (!first) {
+      throw new Error('Expected default branch after tenant creation');
+    }
     const branch = await this.organization.upsertBranch({
       tenantId: tenant.id,
+      id: first.id,
       sync2booksBranchId: DEV_BRANCH_ID,
       displayName: 'Main branch',
     });
