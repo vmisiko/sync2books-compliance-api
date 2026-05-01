@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import * as request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { withSync2BooksM2m } from './sync2books-m2m.helper';
 
 type SyncItemsResponseBody = {
   merchantId: string;
@@ -39,18 +40,21 @@ describe('Catalog items sync (e2e)', () => {
     const externalId = `qb-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const itemId = `item-${merchantId}-${externalId}`;
 
-    await request(httpServer).post('/catalog/items').send({
-      merchantId,
-      externalId,
-      name: 'Sync Widget',
-      itemType: 'GOODS',
-      taxCategory: 'VAT_STANDARD',
-      internalUnit: 'EA',
-      classificationCode: '14111400',
-    });
+    await withSync2BooksM2m(request(httpServer).post('/catalog/items'), merchantId)
+      .send({
+        merchantId,
+        externalId,
+        name: 'Sync Widget',
+        itemType: 'GOODS',
+        taxCategory: 'VAT_STANDARD',
+        internalUnit: 'EA',
+        classificationCode: '14111400',
+      });
 
-    const syncRes = await request(httpServer)
-      .post('/catalog/items/sync')
+    const syncRes = await withSync2BooksM2m(
+      request(httpServer).post('/catalog/items/sync'),
+      merchantId,
+    )
       .send({
         merchantId,
         branchId: 'branch-1',
@@ -66,9 +70,10 @@ describe('Catalog items sync (e2e)', () => {
     expect(body.results[0].itemCd).toBeTruthy();
     expect(body.results[0].success).toBe(true);
 
-    const listed = await request(httpServer)
-      .get(`/catalog/merchants/${merchantId}/items`)
-      .expect(200);
+    const listed = await withSync2BooksM2m(
+      request(httpServer).get(`/catalog/merchants/${merchantId}/items`),
+      merchantId,
+    ).expect(200);
 
     const listedBody = listed.body as { items: Array<Record<string, unknown>> };
     const found = listedBody.items.find((i) => i.id === itemId);

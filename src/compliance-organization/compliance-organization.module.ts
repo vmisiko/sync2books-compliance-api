@@ -11,9 +11,11 @@ import { ComplianceTenantOrmEntity } from './infrastructure/persistence/complian
 import { ComplianceTenantTypeOrmRepository } from './infrastructure/persistence/compliance-tenant.typeorm.repository';
 import { ComplianceOrganizationController } from './presentation/compliance-organization.controller';
 import { EtimsModule } from '../regulatory/oscu/etims.module';
+import { ComplianceServiceAuthModule } from '../integration/compliance-service-auth.module';
 
 @Module({
   imports: [
+    ComplianceServiceAuthModule,
     EtimsModule,
     TypeOrmModule.forFeature([
       ComplianceTenantOrmEntity,

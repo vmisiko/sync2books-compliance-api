@@ -8,8 +8,10 @@ import * as request from 'supertest';
 import type { App } from 'supertest/types';
 
 import { AppModule } from '../src/app.module';
+import { withSync2BooksM2m } from './sync2books-m2m.helper';
 
 const base = '/compliance-organization';
+const HDR = 's2b-m2m-e2e-default';
 
 describe('Compliance organization (e2e)', () => {
   let app: INestApplication<App>;
@@ -36,8 +38,7 @@ describe('Compliance organization (e2e)', () => {
   it('provisions dashboard-only tenant → branch → eTIMS shell → initialize (stub OSCU)', async () => {
     const http = app.getHttpServer();
 
-    const tenantRes = await request(http)
-      .post(`${base}/tenants`)
+    const tenantRes = await withSync2BooksM2m(request(http).post(`${base}/tenants`), HDR)
       .send({ displayName: 'E2E Dashboard Tenant' })
       .expect(201);
 
@@ -52,9 +53,10 @@ describe('Compliance organization (e2e)', () => {
     expect(body.defaultBranchId).toBeTruthy();
     expect(body.etimsConnection).toBeNull();
 
-    const listRes = await request(http)
-      .get(`${base}/tenants/${tenantId}/branches`)
-      .expect(200);
+    const listRes = await withSync2BooksM2m(
+      request(http).get(`${base}/tenants/${tenantId}/branches`),
+      HDR,
+    ).expect(200);
     const listed = listRes.body as Array<{
       id: string;
       displayName: string | null;
@@ -63,8 +65,10 @@ describe('Compliance organization (e2e)', () => {
     expect(listed).toHaveLength(1);
     expect(listed[0].displayName).toBe('Headquarters');
 
-    const branchRes = await request(http)
-      .post(`${base}/tenants/${tenantId}/branches`)
+    const branchRes = await withSync2BooksM2m(
+      request(http).post(`${base}/tenants/${tenantId}/branches`),
+      HDR,
+    )
       .send({
         id: listed[0].id,
         displayName: 'E2E Branch',
@@ -79,8 +83,10 @@ describe('Compliance organization (e2e)', () => {
         .sync2booksBranchId,
     ).toBeNull();
 
-    await request(http)
-      .put(`${base}/branches/${branchId}/etims-connection`)
+    await withSync2BooksM2m(
+      request(http).put(`${base}/branches/${branchId}/etims-connection`),
+      HDR,
+    )
       .send({
         kraPin: 'P012345678X',
         dvcSrlNo: 'DEVICE-SERIAL-E2E',
@@ -88,17 +94,21 @@ describe('Compliance organization (e2e)', () => {
       })
       .expect(200);
 
-    const initRes = await request(http)
-      .post(`${base}/branches/${branchId}/etims-connection/initialize`)
-      .expect(200);
+    const initRes = await withSync2BooksM2m(
+      request(http).post(
+        `${base}/branches/${branchId}/etims-connection/initialize`,
+      ),
+      HDR,
+    ).expect(200);
 
     const conn = initRes.body as { deviceId: string; cmcKey: string };
     expect(conn.deviceId).toContain('stub-dvc');
     expect(conn.cmcKey).toBe('cmc-key-stub-init');
 
-    const getTenant = await request(http)
-      .get(`${base}/tenants/${tenantId}`)
-      .expect(200);
+    const getTenant = await withSync2BooksM2m(
+      request(http).get(`${base}/tenants/${tenantId}`),
+      HDR,
+    ).expect(200);
     expect((getTenant.body as { displayName: string | null }).displayName).toBe(
       'E2E Dashboard Tenant',
     );
@@ -108,17 +118,17 @@ describe('Compliance organization (e2e)', () => {
     const http = app.getHttpServer();
     const extId = `s2b-co-${Date.now()}`;
 
-    await request(http)
-      .post(`${base}/tenants`)
+    await withSync2BooksM2m(request(http).post(`${base}/tenants`), extId)
       .send({
         sync2booksCompanyId: extId,
         displayName: 'Sync2Books linked',
       })
       .expect(201);
 
-    const found = await request(http)
-      .get(`${base}/tenants/by-sync2books/${extId}`)
-      .expect(200);
+    const found = await withSync2BooksM2m(
+      request(http).get(`${base}/tenants/by-sync2books/${extId}`),
+      extId,
+    ).expect(200);
 
     expect(
       (found.body as { sync2booksCompanyId: string }).sync2booksCompanyId,
@@ -128,15 +138,19 @@ describe('Compliance organization (e2e)', () => {
   it('updates dashboard-only tenant when id is sent on POST /tenants', async () => {
     const http = app.getHttpServer();
 
-    const created = await request(http)
-      .post(`${base}/tenants`)
+    const created = await withSync2BooksM2m(
+      request(http).post(`${base}/tenants`),
+      HDR,
+    )
       .send({ displayName: 'Before' })
       .expect(201);
 
     const id = (created.body as { tenant: { id: string } }).tenant.id;
 
-    const updated = await request(http)
-      .post(`${base}/tenants`)
+    const updated = await withSync2BooksM2m(
+      request(http).post(`${base}/tenants`),
+      HDR,
+    )
       .send({ id, displayName: 'After' })
       .expect(201);
 
@@ -150,8 +164,7 @@ describe('Compliance organization (e2e)', () => {
   it('creates tenant, default branch, and eTIMS shell in one POST when kraPin is sent', async () => {
     const http = app.getHttpServer();
 
-    const res = await request(http)
-      .post(`${base}/tenants`)
+    const res = await withSync2BooksM2m(request(http).post(`${base}/tenants`), HDR)
       .send({
         displayName: 'One-shot business',
         kraPin: 'A123456789B',
@@ -171,9 +184,10 @@ describe('Compliance organization (e2e)', () => {
     expect(payload.etimsConnection?.kraPin).toBe('A123456789B');
     expect(payload.etimsConnection?.environment).toBe('SANDBOX');
 
-    const listRes = await request(http)
-      .get(`${base}/tenants/${payload.tenant.id}/branches`)
-      .expect(200);
+    const listRes = await withSync2BooksM2m(
+      request(http).get(`${base}/tenants/${payload.tenant.id}/branches`),
+      HDR,
+    ).expect(200);
     const listed = listRes.body as Array<{ id: string; displayName: string }>;
     expect(listed.some((b) => b.id === payload.defaultBranchId)).toBe(true);
   });

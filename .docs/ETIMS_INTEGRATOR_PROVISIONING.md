@@ -136,3 +136,8 @@ Update this file when:
 - Main API route prefixes or connection model names change.
 - You add multi-region Compliance or multiple OSCU profiles per company.
 - Auth Mode A/B boundaries shift (e.g. BFF-only dashboard).
+
+**Implementation status & normative S2S contracts (main API ↔ Compliance):**
+
+- [COMPLIANCE_EMBEDDED_GAP_AND_SEQUENCING.md](./COMPLIANCE_EMBEDDED_GAP_AND_SEQUENCING.md) — gaps vs code, sequencing (S2S loop first, then React).
+- [MAIN_API_COMPLIANCE_SYNCHRONOUS_CONTRACT.md](./MAIN_API_COMPLIANCE_SYNCHRONOUS_CONTRACT.md) — proposed main API routes, Compliance callee map, sync flows, Mode A headers.

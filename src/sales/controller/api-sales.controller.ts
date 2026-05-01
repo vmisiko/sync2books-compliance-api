@@ -6,6 +6,7 @@ import {
   Param,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -23,9 +24,11 @@ import {
 } from './dto/sales-report.dto';
 import { CreateExpressCreditNoteDto } from './dto/create-express-credit-note.dto';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
+import { ComplianceServiceAuthGuard } from '../../integration/compliance-service-auth.guard';
 
 @Controller('api/sales')
 @ApiTags('API Sales')
+@UseGuards(ComplianceServiceAuthGuard)
 export class ApiSalesController {
   constructor(private readonly salesService: SalesService) {}
 

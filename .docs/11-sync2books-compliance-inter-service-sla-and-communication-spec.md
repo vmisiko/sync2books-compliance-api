@@ -2,6 +2,8 @@
 
 **Purpose:** Define SLAs, communication patterns, and integration boundaries between the **Sync2Books API** (main platform) and the **Compliance Engine** microservice *before* implementation.
 
+**Normative implementation contracts (embedded Mode A):** [MAIN_API_COMPLIANCE_SYNCHRONOUS_CONTRACT.md](./MAIN_API_COMPLIANCE_SYNCHRONOUS_CONTRACT.md) • **Gap & sequencing:** [COMPLIANCE_EMBEDDED_GAP_AND_SEQUENCING.md](./COMPLIANCE_EMBEDDED_GAP_AND_SEQUENCING.md)
+
 ---
 
 ## 1. Overview: Two Modes of Operation

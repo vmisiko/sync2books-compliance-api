@@ -1,11 +1,13 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CatalogService } from './catalog.service';
 import { RegisterCatalogItemDto } from './dto/register-catalog-item.dto';
 import { SyncCatalogItemsDto } from './dto/sync-catalog-items.dto';
+import { ComplianceServiceAuthGuard } from '../../integration/compliance-service-auth.guard';
 
 @Controller('catalog')
 @ApiTags('Catalog')
+@UseGuards(ComplianceServiceAuthGuard)
 export class CatalogController {
   constructor(private readonly catalogService: CatalogService) {}
 

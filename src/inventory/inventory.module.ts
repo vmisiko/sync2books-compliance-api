@@ -7,9 +7,10 @@ import {
   StockRepositoryStub,
 } from './infrastructure/stock-repository.stub';
 import { STOCK_MOVEMENT_REPO, STOCK_REPO } from '../shared/tokens';
+import { ComplianceServiceAuthModule } from '../integration/compliance-service-auth.module';
 
 @Module({
-  imports: [ComplianceOrganizationModule],
+  imports: [ComplianceOrganizationModule, ComplianceServiceAuthModule],
   controllers: [StockController],
   providers: [
     { provide: STOCK_REPO, useClass: StockRepositoryStub },

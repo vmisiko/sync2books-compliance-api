@@ -17,9 +17,11 @@ import { TaxMappingOrmEntity } from '../regulatory/oscu/infrastructure/persisten
 import { UnitMappingOrmEntity } from '../regulatory/oscu/infrastructure/persistence/unit-mapping.orm-entity';
 import { ComplianceOrganizationModule } from '../compliance-organization/compliance-organization.module';
 import { EtimsModule } from '../regulatory/oscu/etims.module';
+import { ComplianceServiceAuthModule } from '../integration/compliance-service-auth.module';
 
 @Module({
   imports: [
+    ComplianceServiceAuthModule,
     OscuMappingModule,
     ComplianceOrganizationModule,
     EtimsModule,

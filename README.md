@@ -25,6 +25,8 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+**Local port:** listens on **3001** by default when `PORT` / `COMPLIANCE_API_PORT` are unset, so the Sync2Books main API can use **3000** on the same machine. Swagger: `http://localhost:3001/docs`.
+
 ## Project setup
 
 ```bash

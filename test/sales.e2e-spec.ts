@@ -7,6 +7,7 @@ import type { IComplianceEventRepository } from '../src/shared/ports/repository.
 import { ETIMS_ADAPTER, EVENT_REPO } from '../src/shared/tokens';
 import { EtimsAdapterStub } from '../src/regulatory/oscu/adapters/etims-adapter.stub';
 import type { IEtimsAdapter } from '../src/regulatory/oscu/ports/etims-adapter.port';
+import { withSync2BooksM2m } from './sync2books-m2m.helper';
 
 type SaleReportDtoBody = {
   id: string;
@@ -73,7 +74,7 @@ describe('Sales API (e2e)', () => {
     const merchantId = 'merchant-1';
     const externalId = `qb-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    await request(httpServer).post('/catalog/items').send({
+    await withSync2BooksM2m(request(httpServer).post('/catalog/items'), merchantId).send({
       merchantId,
       externalId,
       name: 'Widget',
@@ -86,8 +87,10 @@ describe('Sales API (e2e)', () => {
     const itemId = `item-${merchantId}-${externalId}`;
 
     // Sync item to eTIMS so sales/stock submissions have an itemCd.
-    await request(httpServer)
-      .post('/catalog/items/sync')
+    await withSync2BooksM2m(
+      request(httpServer).post('/catalog/items/sync'),
+      merchantId,
+    )
       .send({
         merchantId,
         branchId: 'branch-1',
@@ -96,8 +99,10 @@ describe('Sales API (e2e)', () => {
       .expect(201);
 
     // Seed stock so sales can deduct without 500s.
-    await request(httpServer)
-      .put('/api/stock/adjust')
+    await withSync2BooksM2m(
+      request(httpServer).put('/api/stock/adjust'),
+      merchantId,
+    )
       .send({
         itemId,
         branchId: 'branch-1',
@@ -124,7 +129,7 @@ describe('Sales API (e2e)', () => {
     const itemId = `item-${merchantId}-${externalId}`;
 
     // Create item but do not sync it.
-    await request(httpServer).post('/catalog/items').send({
+    await withSync2BooksM2m(request(httpServer).post('/catalog/items'), merchantId).send({
       merchantId,
       externalId,
       name: 'Unsynced Widget',
@@ -135,8 +140,10 @@ describe('Sales API (e2e)', () => {
     });
 
     // Seed stock so failure is specifically about item sync, not stock.
-    await request(httpServer)
-      .put('/api/stock/adjust')
+    await withSync2BooksM2m(
+      request(httpServer).put('/api/stock/adjust'),
+      merchantId,
+    )
       .send({
         itemId,
         branchId: 'branch-1',
@@ -147,8 +154,10 @@ describe('Sales API (e2e)', () => {
       })
       .expect(200);
 
-    const res = await request(httpServer)
-      .post('/api/sales')
+    const res = await withSync2BooksM2m(
+      request(httpServer).post('/api/sales'),
+      merchantId,
+    )
       .send({
         merchantId,
         branchId: 'branch-1',
@@ -183,9 +192,10 @@ describe('Sales API (e2e)', () => {
     const saleDate = '2026-02-20';
     const traderInvoiceNumber = `INV-${Date.now()}`;
 
-    const res = await request(httpServer)
-      .post('/api/sales')
-      .send({
+    const res = await withSync2BooksM2m(
+      request(httpServer).post('/api/sales'),
+      merchantId,
+    ).send({
         merchantId,
         branchId: 'branch-1',
         saleDate,
@@ -220,9 +230,10 @@ describe('Sales API (e2e)', () => {
       (accepted!.responseSnapshot as Record<string, unknown>).resultCd,
     ).toBe('000');
 
-    const getRes = await request(httpServer)
-      .get(`/api/sales/${body.data.id}`)
-      .expect(200);
+    const getRes = await withSync2BooksM2m(
+      request(httpServer).get(`/api/sales/${body.data.id}`),
+      merchantId,
+    ).expect(200);
 
     const getBody = getRes.body as SalesReportDetailResponseBody;
     expect(getBody.data.id).toBe(body.data.id);
@@ -258,8 +269,7 @@ describe('Sales API (e2e)', () => {
     const creditNoteInvoiceNumber = `CN-456-${Date.now()}`;
 
     // Create original sale (so the credit note reference is realistic)
-    await request(httpServer)
-      .post('/api/sales')
+    await withSync2BooksM2m(request(httpServer).post('/api/sales'), merchantId)
       .send({
         merchantId,
         branchId: 'branch-1',
@@ -283,8 +293,10 @@ describe('Sales API (e2e)', () => {
     const creditNoteDate = '20260221103000';
     const creditNoteReasonCode = '06';
 
-    const res = await request(httpServer)
-      .post('/api/sales')
+    const res = await withSync2BooksM2m(
+      request(httpServer).post('/api/sales'),
+      merchantId,
+    )
       .send({
         merchantId,
         branchId: 'branch-1',
@@ -334,8 +346,10 @@ describe('Sales API (e2e)', () => {
     const httpServer: App = app.getHttpServer();
     const { merchantId, itemId } = await seedCatalogItem(httpServer);
 
-    const res = await request(httpServer)
-      .post('/api/sales?submit=false')
+    const res = await withSync2BooksM2m(
+      request(httpServer).post('/api/sales?submit=false'),
+      merchantId,
+    )
       .send({
         merchantId,
         branchId: 'branch-1',
@@ -360,8 +374,10 @@ describe('Sales API (e2e)', () => {
     expect(body.data.status).toBe('pending');
     expect(body.data.receiptNumber).toBeNull();
 
-    const getRes = await request(httpServer)
-      .get(`/api/sales/${body.data.id}`)
+    const getRes = await withSync2BooksM2m(
+      request(httpServer).get(`/api/sales/${body.data.id}`),
+      merchantId,
+    )
       .expect(200);
 
     const getBody = getRes.body as SalesReportDetailResponseBody;
@@ -460,8 +476,10 @@ describe('Sales API (e2e)', () => {
     const httpServer: App = app.getHttpServer();
     const { merchantId, itemId } = await seedCatalogItem(httpServer);
 
-    const res = await request(httpServer)
-      .post('/api/sales')
+    const res = await withSync2BooksM2m(
+      request(httpServer).post('/api/sales'),
+      merchantId,
+    )
       .send({
         merchantId,
         branchId: 'branch-1',
@@ -486,8 +504,10 @@ describe('Sales API (e2e)', () => {
     expect(body.data.status).toBe('failed');
     expect(body.data.receiptNumber).toBeNull();
 
-    const getRes = await request(httpServer)
-      .get(`/api/sales/${body.data.id}`)
+    const getRes = await withSync2BooksM2m(
+      request(httpServer).get(`/api/sales/${body.data.id}`),
+      merchantId,
+    )
       .expect(200);
     const getBody = getRes.body as SalesReportDetailResponseBody;
     expect(getBody.data.status).toBe('failed');
@@ -510,8 +530,10 @@ describe('Sales API (e2e)', () => {
     const httpServer: App = app.getHttpServer();
     const { merchantId, itemId } = await seedCatalogItem(httpServer);
 
-    const res = await request(httpServer)
-      .post('/api/sales')
+    const res = await withSync2BooksM2m(
+      request(httpServer).post('/api/sales'),
+      merchantId,
+    )
       .send({
         merchantId,
         branchId: 'branch-1',
@@ -536,9 +558,10 @@ describe('Sales API (e2e)', () => {
     expect(body.data.status).toBe('retrying');
     expect(body.data.receiptNumber).toBeNull();
 
-    const getRes = await request(httpServer)
-      .get(`/api/sales/${body.data.id}`)
-      .expect(200);
+    const getRes = await withSync2BooksM2m(
+      request(httpServer).get(`/api/sales/${body.data.id}`),
+      merchantId,
+    ).expect(200);
     const getBody = getRes.body as SalesReportDetailResponseBody;
     expect(getBody.data.status).toBe('retrying');
     expect(getBody.data.receiptNumber).toBeNull();
@@ -549,8 +572,10 @@ describe('Sales API (e2e)', () => {
     const httpServer: App = app.getHttpServer();
     const { merchantId, itemId } = await seedCatalogItem(httpServer);
 
-    const res = await request(httpServer)
-      .post('/api/sales')
+    const res = await withSync2BooksM2m(
+      request(httpServer).post('/api/sales'),
+      merchantId,
+    )
       .send({
         merchantId,
         branchId: 'branch-1',
@@ -605,12 +630,16 @@ describe('Sales API (e2e)', () => {
       ],
     };
 
-    const first = await request(httpServer)
-      .post('/api/sales')
+    const first = await withSync2BooksM2m(
+      request(httpServer).post('/api/sales'),
+      merchantId,
+    )
       .send(payload)
       .expect(201);
-    const second = await request(httpServer)
-      .post('/api/sales')
+    const second = await withSync2BooksM2m(
+      request(httpServer).post('/api/sales'),
+      merchantId,
+    )
       .send(payload)
       .expect(201);
 

@@ -13,9 +13,11 @@ import { ComplianceLineOrmEntity } from './infrastructure/persistence/compliance
 import { ComplianceEventOrmEntity } from './infrastructure/persistence/compliance-event.orm-entity';
 import { ComplianceDocumentTypeOrmRepository } from './infrastructure/persistence/compliance-document-typeorm.repository';
 import { ComplianceEventTypeOrmRepository } from './infrastructure/persistence/compliance-event-typeorm.repository';
+import { ComplianceServiceAuthModule } from '../integration/compliance-service-auth.module';
 
 @Module({
   imports: [
+    ComplianceServiceAuthModule,
     CatalogModule,
     InventoryModule,
     ComplianceOrganizationModule,

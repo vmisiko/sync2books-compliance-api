@@ -8,10 +8,12 @@ import {
   Param,
   Post,
   Put,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 import { ComplianceOrganizationApplicationService } from '../application/compliance-organization.application.service';
+import { ComplianceServiceAuthGuard } from '../../integration/compliance-service-auth.guard';
 import { UpsertBranchDto } from './dto/upsert-branch.dto';
 import { UpsertEtimsConnectionDto } from './dto/upsert-etims-connection.dto';
 import { TenantUpsertResponseDto } from './dto/tenant-upsert-response.dto';
@@ -19,6 +21,7 @@ import { UpsertTenantDto } from './dto/upsert-tenant.dto';
 
 @Controller('compliance-organization')
 @ApiTags('Compliance organization')
+@UseGuards(ComplianceServiceAuthGuard)
 export class ComplianceOrganizationController {
   constructor(
     private readonly organization: ComplianceOrganizationApplicationService,
@@ -41,6 +44,9 @@ export class ComplianceOrganizationController {
       id: body.id,
       sync2booksCompanyId: body.sync2booksCompanyId,
       displayName: body.displayName,
+      kraPin: body.kraPin,
+      environment: body.environment,
+      isLiveBusiness: body.isLiveBusiness,
     });
   }
 
