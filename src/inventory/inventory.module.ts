@@ -8,9 +8,14 @@ import {
 } from './infrastructure/stock-repository.stub';
 import { STOCK_MOVEMENT_REPO, STOCK_REPO } from '../shared/tokens';
 import { ComplianceServiceAuthModule } from '../integration/compliance-service-auth.module';
+import { PlatformCorrelationModule } from '../integration/platform-correlation.module';
 
 @Module({
-  imports: [ComplianceOrganizationModule, ComplianceServiceAuthModule],
+  imports: [
+    ComplianceOrganizationModule,
+    ComplianceServiceAuthModule,
+    PlatformCorrelationModule,
+  ],
   controllers: [StockController],
   providers: [
     { provide: STOCK_REPO, useClass: StockRepositoryStub },

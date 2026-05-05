@@ -6,6 +6,9 @@ import { SalesService } from './application/sales.service';
 import { ComplianceStatus } from '../shared/domain/enums/compliance-status.enum';
 import { DocumentType } from '../shared/domain/enums/document-type.enum';
 import { SourceSystem } from '../shared/domain/enums/source-system.enum';
+import type { Request } from 'express';
+import { PlatformOscuCallbackService } from '../integration/platform-outbound/platform-oscu-callback.service';
+import { Sync2BooksCorrelationPersistenceService } from '../integration/platform-outbound/sync2books-correlation-persistence.service';
 
 describe('Express credit note controllers', () => {
   let apiController: ApiSalesController;
@@ -65,6 +68,8 @@ describe('Express credit note controllers', () => {
     ],
   };
 
+  const emptyReq = {} as Request;
+
   beforeEach(async () => {
     salesService = {
       getDocument: jest.fn().mockResolvedValue({ document: acceptedSale }),
@@ -82,7 +87,21 @@ describe('Express credit note controllers', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ApiSalesController, DashboardSalesController],
-      providers: [{ provide: SalesService, useValue: salesService }],
+      providers: [
+        { provide: SalesService, useValue: salesService },
+        {
+          provide: PlatformOscuCallbackService,
+          useValue: {
+            postOutcomeWithCorrelation: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: Sync2BooksCorrelationPersistenceService,
+          useValue: {
+            patchComplianceDocument: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+      ],
     }).compile();
 
     apiController = module.get(ApiSalesController);
@@ -98,6 +117,7 @@ describe('Express credit note controllers', () => {
         traderInvoiceNumber: 'CN-1',
         returnDate: '2026-02-21',
       },
+      emptyReq,
       'false',
     );
 
@@ -154,6 +174,7 @@ describe('Express credit note controllers', () => {
           traderInvoiceNumber: 'CN-3',
           returnDate: '2026-02-21',
         },
+        emptyReq,
         'false',
       ),
     ).rejects.toBeInstanceOf(BadRequestException);

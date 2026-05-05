@@ -89,4 +89,8 @@ export class ComplianceDocumentOrmEntity {
 
   @Column('datetime', { nullable: true })
   submittedAt!: Date | null;
+
+  /** Pattern 2 headers from Main API (for `POST .../oscu-outcome` retries). */
+  @Column({ type: 'json', nullable: true })
+  sync2booksCorrelation!: Record<string, unknown> | null;
 }

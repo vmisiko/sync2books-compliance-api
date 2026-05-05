@@ -6,8 +6,11 @@ import {
   Param,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
+import { randomUUID } from 'crypto';
 import {
   ApiBadRequestResponse,
   ApiOperation,
@@ -25,12 +28,19 @@ import {
 import { CreateExpressCreditNoteDto } from './dto/create-express-credit-note.dto';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import { ComplianceServiceAuthGuard } from '../../integration/compliance-service-auth.guard';
+import { PlatformOscuCallbackService } from '../../integration/platform-outbound/platform-oscu-callback.service';
+import { Sync2BooksCorrelationPersistenceService } from '../../integration/platform-outbound/sync2books-correlation-persistence.service';
+import { parseSync2BooksCorrelation } from '../../integration/platform-outbound/sync2books-request-headers.util';
 
 @Controller('api/sales')
 @ApiTags('API Sales')
 @UseGuards(ComplianceServiceAuthGuard)
 export class ApiSalesController {
-  constructor(private readonly salesService: SalesService) {}
+  constructor(
+    private readonly salesService: SalesService,
+    private readonly oscuCallback: PlatformOscuCallbackService,
+    private readonly correlationPersistence: Sync2BooksCorrelationPersistenceService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List sales (Digitax-like report)' })
@@ -67,6 +77,7 @@ export class ApiSalesController {
   @ApiBadRequestResponse({ description: 'Validation failed' })
   async createSale(
     @Body() body: CreateSaleDto,
+    @Req() req: Request,
     @Query('submit') submit?: string,
   ): Promise<SalesReportDetailResponseDto> {
     const shouldSubmit = submit === undefined ? true : submit !== 'false';
@@ -142,6 +153,23 @@ export class ApiSalesController {
 
       await this.salesService.prepareDocument(documentId);
       await this.salesService.submitDocument(documentId);
+
+      const corr = parseSync2BooksCorrelation(req);
+      if (corr) {
+        await this.correlationPersistence.patchComplianceDocument(
+          documentId,
+          corr,
+        );
+        await this.oscuCallback.postOutcomeWithCorrelation(corr, {
+          channel: 'SALES_DOCUMENT',
+          aggregateStatus: 'SUCCESS',
+          complianceStatus: 'ACCEPTED',
+          complianceDocumentId: documentId,
+          oscuPhase: 'FINAL',
+          eventId: randomUUID(),
+          raw: { documentType: docType },
+        });
+      }
     }
 
     const data = await this.salesService.getNormalizedSaleReport(documentId);
@@ -160,6 +188,7 @@ export class ApiSalesController {
   @ApiBadRequestResponse({ description: 'Validation failed' })
   async createExpressCreditNote(
     @Body() body: CreateExpressCreditNoteDto,
+    @Req() req: Request,
     @Query('submit') submit?: string,
   ): Promise<SalesReportDetailResponseDto> {
     const shouldSubmit = submit === undefined ? true : submit !== 'false';
@@ -238,6 +267,27 @@ export class ApiSalesController {
 
       await this.salesService.prepareDocument(documentId);
       await this.salesService.submitDocument(documentId);
+
+      const corr = parseSync2BooksCorrelation(req);
+      if (corr) {
+        await this.correlationPersistence.patchComplianceDocument(
+          documentId,
+          corr,
+        );
+        await this.oscuCallback.postOutcomeWithCorrelation(corr, {
+          channel: 'SALES_DOCUMENT',
+          aggregateStatus: 'SUCCESS',
+          complianceStatus: 'ACCEPTED',
+          complianceDocumentId: documentId,
+          oscuPhase: 'FINAL',
+          eventId: randomUUID(),
+          raw: {
+            documentType: DocumentType.CREDIT_NOTE,
+            expressCreditNote: true,
+            originalSaleId: body.saleId,
+          },
+        });
+      }
     }
 
     const data = await this.salesService.getNormalizedSaleReport(documentId);

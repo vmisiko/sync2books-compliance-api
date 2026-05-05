@@ -14,10 +14,12 @@ import { ComplianceEventOrmEntity } from './infrastructure/persistence/complianc
 import { ComplianceDocumentTypeOrmRepository } from './infrastructure/persistence/compliance-document-typeorm.repository';
 import { ComplianceEventTypeOrmRepository } from './infrastructure/persistence/compliance-event-typeorm.repository';
 import { ComplianceServiceAuthModule } from '../integration/compliance-service-auth.module';
+import { PlatformCorrelationModule } from '../integration/platform-correlation.module';
 
 @Module({
   imports: [
     ComplianceServiceAuthModule,
+    PlatformCorrelationModule,
     CatalogModule,
     InventoryModule,
     ComplianceOrganizationModule,

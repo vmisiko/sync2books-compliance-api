@@ -23,6 +23,7 @@ import { UnitMappingOrmEntity } from './regulatory/oscu/infrastructure/persisten
 import { ComplianceDocumentOrmEntity } from './sales/infrastructure/persistence/compliance-document.orm-entity';
 import { ComplianceEventOrmEntity } from './sales/infrastructure/persistence/compliance-event.orm-entity';
 import { ComplianceLineOrmEntity } from './sales/infrastructure/persistence/compliance-line.orm-entity';
+import { PlatformCorrelationModule } from './integration/platform-correlation.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { ComplianceLineOrmEntity } from './sales/infrastructure/persistence/comp
     }),
     OscuReferenceModule,
     OscuMappingModule,
+    PlatformCorrelationModule,
     CatalogModule,
     ComplianceOrganizationModule,
     InventoryModule,

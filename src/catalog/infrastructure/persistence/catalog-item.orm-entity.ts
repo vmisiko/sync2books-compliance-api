@@ -70,4 +70,8 @@ export class CatalogItemOrmEntity {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  /** Pattern 2 headers from Main API (for `POST .../oscu-outcome` retries). */
+  @Column({ type: 'json', nullable: true })
+  sync2booksCorrelation!: Record<string, unknown> | null;
 }
