@@ -19,6 +19,7 @@ function toDomain(
     id: conn.id,
     merchantId: tenant.sync2booksCompanyId ?? tenant.id,
     branchId: branch.sync2booksBranchId ?? branch.id,
+    kraBhfId: branch.kraBhfId,
     kraPin: conn.kraPin,
     deviceId: conn.deviceId,
     dvcSrlNo: conn.dvcSrlNo,

@@ -33,7 +33,40 @@
 | ETIMS **platform** `connection.id` | **`sync2booksConnectionId`** on Compliance eTIMS connection row (optional but recommended for 1:1 traceability). |
 | KRA office id | **`kraBhfId`** on Compliance **branch** (required before **initialize**). |
 
-**Note:** Some Compliance operational code paths still resolve OSCU **bhfId** from ERP `branchId` vs `kraBhfId` inconsistently; provisioning **must** set **`kraBhfId`** for each branch that will call **initialize** and submit. A later hardening pass should unify **OSCU header `bhfId`** to **`kraBhfId`** everywhere.
+**Note (resolved, eTIMS multi-branch — `api/.docs/ETIMS_MULTI_BRANCH_PLAN.md`):** the earlier
+**bhfId vs branchId** inconsistency is unified: OSCU header **`bhfId`** is always sourced from
+**`branch.kraBhfId`**; the request-body **`branchId`** on operational routes (catalog sync, sales,
+stock) is always the branch's stable external key — **`branchKey`** on the main API,
+**`sync2booksBranchId`** on Compliance (same value, two names). These are never interchanged.
+
+### 2.1 Multi-branch model (one company, many branches)
+
+A company (taxpayer / KRA PIN) can have **many** eTIMS branches, each independently syncable:
+
+- Main API: one `etims_branches` row per branch, each owning its own `connections` row
+  (`integrationKey='etims'`) — so `sync_batches`/`sync_items`/webhooks are **branch**-scoped, not
+  company-scoped. `branchKey` defaults to `kraBhfId`, is generated once, and is **immutable**
+  thereafter (it anchors historical KRA invoices). The Headquarters branch (`kraBhfId='00'`) is
+  created at provisioning and cannot be removed.
+- Compliance already modeled **tenant → many branches → one eTIMS-connection each**
+  (`compliance_branches`, `compliance_etims_connections`) before this work — no schema change was
+  needed on this side.
+- `kraPin` and `environment` are **denormalized from the taxpayer onto every branch** (all of a
+  company's branches share one PIN); a new branch inherits them from the Headquarters branch rather
+  than accepting its own.
+- Every mutating operational route (`POST .../catalog/items/sync`, `POST .../sales`,
+  `POST .../sales/credit-notes/express`, `PUT .../stock/adjust`, `POST .../stock/transfer`) now
+  **requires and validates** `branchId` (= `branchKey`) against a real, `CONNECTED` branch owned by
+  the calling company — an unknown or foreign branch id is rejected (404), not silently routed to an
+  arbitrary connection. Catalog **registration/listing** stay tenant-wide (Compliance's catalog is
+  merchant-scoped, not branch-scoped).
+- New branch-management routes: `POST/GET/PATCH/DELETE
+  applications/:applicationId/companies/:companyId/integrations/etims/branches[/:branchId]` (JWT) and
+  the equivalent `companies/:companyId/integrations/etims/branches[/:branchId]` (API key), plus
+  `POST .../branches/:branchId/initialize` to re-run OSCU initialize for one branch.
+- Covered end-to-end by `e2e/specs/07-multi-branch.e2e-spec.ts` (scenario 12): a second branch gets
+  its own connection distinct from HQ, mirrors correctly on both DBs, and a sale on the new branch is
+  attributed to *its* connection — not Headquarters'.
 
 ---
 

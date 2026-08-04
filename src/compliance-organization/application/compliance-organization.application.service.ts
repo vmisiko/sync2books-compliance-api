@@ -291,6 +291,29 @@ export class ComplianceOrganizationApplicationService {
     return this.branchRepo.findById(branchId);
   }
 
+  /**
+   * Read-only lookup used by the main API to reconcile locally-denormalized fields
+   * (e.g. backfilling `kraPin` onto pre-multi-branch `etims_branches` rows, which never
+   * persisted it locally — kraPin has only ever lived on this etims-connection row).
+   */
+  async getEtimsConnectionForBranch(branchId: string): Promise<{
+    kraPin: string;
+    environment: string;
+    status: string;
+    dvcSrlNo: string | null;
+  } | null> {
+    const found =
+      await this.orgConnectionRepo.findBranchTenantEtimsByBranchId(branchId);
+    if (!found?.etims) return null;
+    const { etims } = found;
+    return {
+      kraPin: etims.kraPin,
+      environment: etims.environment,
+      status: etims.status,
+      dvcSrlNo: etims.dvcSrlNo,
+    };
+  }
+
   async upsertEtimsConnection(
     input: UpsertEtimsConnectionInput,
   ): Promise<ComplianceConnection> {

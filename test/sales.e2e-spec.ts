@@ -74,7 +74,10 @@ describe('Sales API (e2e)', () => {
     const merchantId = 'merchant-1';
     const externalId = `qb-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    await withSync2BooksM2m(request(httpServer).post('/catalog/items'), merchantId).send({
+    await withSync2BooksM2m(
+      request(httpServer).post('/catalog/items'),
+      merchantId,
+    ).send({
       merchantId,
       externalId,
       name: 'Widget',
@@ -129,7 +132,10 @@ describe('Sales API (e2e)', () => {
     const itemId = `item-${merchantId}-${externalId}`;
 
     // Create item but do not sync it.
-    await withSync2BooksM2m(request(httpServer).post('/catalog/items'), merchantId).send({
+    await withSync2BooksM2m(
+      request(httpServer).post('/catalog/items'),
+      merchantId,
+    ).send({
       merchantId,
       externalId,
       name: 'Unsynced Widget',
@@ -195,7 +201,8 @@ describe('Sales API (e2e)', () => {
     const res = await withSync2BooksM2m(
       request(httpServer).post('/api/sales'),
       merchantId,
-    ).send({
+    )
+      .send({
         merchantId,
         branchId: 'branch-1',
         saleDate,
@@ -377,8 +384,7 @@ describe('Sales API (e2e)', () => {
     const getRes = await withSync2BooksM2m(
       request(httpServer).get(`/api/sales/${body.data.id}`),
       merchantId,
-    )
-      .expect(200);
+    ).expect(200);
 
     const getBody = getRes.body as SalesReportDetailResponseBody;
     expect(getBody.data.status).toBe('pending');
@@ -507,8 +513,7 @@ describe('Sales API (e2e)', () => {
     const getRes = await withSync2BooksM2m(
       request(httpServer).get(`/api/sales/${body.data.id}`),
       merchantId,
-    )
-      .expect(200);
+    ).expect(200);
     const getBody = getRes.body as SalesReportDetailResponseBody;
     expect(getBody.data.status).toBe('failed');
     expect(getBody.data.receiptNumber).toBeNull();

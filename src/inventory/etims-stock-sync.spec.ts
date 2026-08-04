@@ -80,6 +80,7 @@ describe('InventoryService eTIMS stock sync', () => {
           merchantId: 'merchant-1',
           kraPin: 'P1234567890',
           branchId: 'branch-1',
+          kraBhfId: '00',
           deviceId: 'device-1',
           environment: ConnectionEnvironment.SANDBOX,
           status: ConnectionStatus.ACTIVE,

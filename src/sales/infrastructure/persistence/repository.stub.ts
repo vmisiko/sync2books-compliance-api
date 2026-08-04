@@ -22,6 +22,7 @@ export function seedStubData(): void {
     merchantId: 'merchant-1',
     kraPin: 'P1234567890',
     branchId: 'branch-1',
+    kraBhfId: '00',
     deviceId: 'device-1',
     dvcSrlNo: null,
     environment: ConnectionEnvironment.SANDBOX,

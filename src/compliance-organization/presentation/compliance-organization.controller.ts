@@ -108,6 +108,20 @@ export class ComplianceOrganizationController {
     return this.organization.listBranches(tenantId);
   }
 
+  @Get('branches/:branchId/etims-connection')
+  @ApiOperation({
+    summary:
+      'Get the eTIMS connection (kraPin, environment, status, dvcSrlNo) for a branch. Used by the main API to reconcile locally-denormalized fields (e.g. backfill).',
+  })
+  @ApiResponse({ status: 200, description: 'eTIMS connection or 404' })
+  async getEtimsConnection(@Param('branchId') branchId: string) {
+    const conn = await this.organization.getEtimsConnectionForBranch(branchId);
+    if (!conn) {
+      throw new NotFoundException(`No eTIMS connection for branch ${branchId}`);
+    }
+    return conn;
+  }
+
   @Put('branches/:branchId/etims-connection')
   @ApiOperation({
     summary:

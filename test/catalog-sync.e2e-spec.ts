@@ -40,16 +40,18 @@ describe('Catalog items sync (e2e)', () => {
     const externalId = `qb-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const itemId = `item-${merchantId}-${externalId}`;
 
-    await withSync2BooksM2m(request(httpServer).post('/catalog/items'), merchantId)
-      .send({
-        merchantId,
-        externalId,
-        name: 'Sync Widget',
-        itemType: 'GOODS',
-        taxCategory: 'VAT_STANDARD',
-        internalUnit: 'EA',
-        classificationCode: '14111400',
-      });
+    await withSync2BooksM2m(
+      request(httpServer).post('/catalog/items'),
+      merchantId,
+    ).send({
+      merchantId,
+      externalId,
+      name: 'Sync Widget',
+      itemType: 'GOODS',
+      taxCategory: 'VAT_STANDARD',
+      internalUnit: 'EA',
+      classificationCode: '14111400',
+    });
 
     const syncRes = await withSync2BooksM2m(
       request(httpServer).post('/catalog/items/sync'),

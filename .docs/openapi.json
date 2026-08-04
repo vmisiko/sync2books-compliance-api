@@ -64,34 +64,373 @@
         ]
       }
     },
-    "/inventory/movements": {
+    "/catalog/items/sync": {
       "post": {
-        "operationId": "InventoryController_recordMovement",
+        "operationId": "CatalogController_syncItems",
         "parameters": [],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RecordMovementDto"
+                "$ref": "#/components/schemas/SyncCatalogItemsDto"
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "Stock movement recorded"
+            "description": "Items synced"
           }
         },
-        "summary": "Create stock movement",
+        "summary": "Sync catalog items to eTIMS (register/update)",
         "tags": [
-          "Inventory"
+          "Catalog"
         ]
       }
     },
-    "/inventory/branches/{branchId}/items/{itemId}": {
+    "/catalog/item-classifications": {
       "get": {
-        "operationId": "InventoryController_getStockLevel",
+        "operationId": "CatalogController_searchItemClassifications",
+        "parameters": [
+          {
+            "name": "query",
+            "required": false,
+            "in": "query",
+            "description": "Filter by item classification code prefix or name (case-insensitive contains)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "itemClsLvl",
+            "required": false,
+            "in": "query",
+            "description": "Filter by classification level (1-5)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "includeInactive",
+            "required": false,
+            "in": "query",
+            "description": "Include codes where useYn=N (retired). Defaults to false.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Max rows to return (default 20, max 100)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching classification codes"
+          }
+        },
+        "summary": "Search OSCU item classification codes (itemClsCd) for use when registering items",
+        "tags": [
+          "Catalog"
+        ]
+      }
+    },
+    "/catalog/item-classifications/{itemClsCd}": {
+      "get": {
+        "operationId": "CatalogController_getItemClassification",
+        "parameters": [
+          {
+            "name": "itemClsCd",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Classification code"
+          }
+        },
+        "summary": "Fetch a single OSCU item classification code",
+        "tags": [
+          "Catalog"
+        ]
+      }
+    },
+    "/catalog/item-classifications/sync": {
+      "post": {
+        "operationId": "CatalogController_syncItemClassifications",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncItemClassificationsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sync result"
+          }
+        },
+        "summary": "Pull the latest item classification reference list from OSCU (/selectItemClsList) and upsert it locally",
+        "tags": [
+          "Catalog"
+        ]
+      }
+    },
+    "/catalog/code-classes": {
+      "get": {
+        "operationId": "CatalogController_listCodeClasses",
+        "parameters": [
+          {
+            "name": "includeInactive",
+            "required": false,
+            "in": "query",
+            "description": "Include groups where useYn=N (retired). Defaults to false.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Code groups"
+          }
+        },
+        "summary": "List OSCU code groups (cdCls), e.g. '10' Unit of Quantity, '17' Packaging Unit, '04' Tax Type",
+        "tags": [
+          "Catalog"
+        ]
+      }
+    },
+    "/catalog/codes": {
+      "get": {
+        "operationId": "CatalogController_searchCodes",
+        "parameters": [
+          {
+            "name": "cdCls",
+            "required": false,
+            "in": "query",
+            "description": "Code group to search within, e.g. '10' (Unit of Quantity), '17' (Packaging Unit), '04' (Tax Type), '24' (Product Type), '07' (Payment Method). Omit to search across all groups.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "query",
+            "required": false,
+            "in": "query",
+            "description": "Filter by code prefix or name (case-insensitive contains)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "includeInactive",
+            "required": false,
+            "in": "query",
+            "description": "Include codes where useYn=N (retired). Defaults to false.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Max rows to return (default 50, max 200)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching codes"
+          }
+        },
+        "summary": "Search OSCU codes (qtyUnitCd, pkgUnitCd, taxTyCd, itemTyCd, pmtTyCd...) within a code group",
+        "tags": [
+          "Catalog"
+        ]
+      }
+    },
+    "/catalog/codes/sync": {
+      "post": {
+        "operationId": "CatalogController_syncCodeList",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncCodeListDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sync result"
+          }
+        },
+        "summary": "Pull the latest code list from OSCU (/selectCodeList) and upsert it locally",
+        "tags": [
+          "Catalog"
+        ]
+      }
+    },
+    "/compliance-organization/tenants": {
+      "post": {
+        "operationId": "ComplianceOrganizationController_upsertTenant",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertTenantDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Tenant upserted; includes default branch id and optional eTIMS row",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantUpsertResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create or update a compliance tenant (new tenants get a default Headquarters branch). Send `kraPin` (+ Test/Live) to also upsert the eTIMS shell on that branch.",
+        "tags": [
+          "Compliance organization"
+        ]
+      }
+    },
+    "/compliance-organization/tenants/by-sync2books/{sync2booksCompanyId}": {
+      "get": {
+        "operationId": "ComplianceOrganizationController_getTenantBySync2books",
+        "parameters": [
+          {
+            "name": "sync2booksCompanyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tenant or 404"
+          }
+        },
+        "summary": "Get tenant by Sync2Books company id",
+        "tags": [
+          "Compliance organization"
+        ]
+      }
+    },
+    "/compliance-organization/tenants/{tenantId}": {
+      "get": {
+        "operationId": "ComplianceOrganizationController_getTenantById",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get tenant by internal id",
+        "tags": [
+          "Compliance organization"
+        ]
+      }
+    },
+    "/compliance-organization/tenants/{tenantId}/branches": {
+      "post": {
+        "operationId": "ComplianceOrganizationController_upsertBranch",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertBranchDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Create or update a branch under a tenant",
+        "tags": [
+          "Compliance organization"
+        ]
+      },
+      "get": {
+        "operationId": "ComplianceOrganizationController_listBranches",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "List branches for a tenant",
+        "tags": [
+          "Compliance organization"
+        ]
+      }
+    },
+    "/compliance-organization/branches/{branchId}/etims-connection": {
+      "get": {
+        "operationId": "ComplianceOrganizationController_getEtimsConnection",
         "parameters": [
           {
             "name": "branchId",
@@ -100,9 +439,57 @@
             "schema": {
               "type": "string"
             }
-          },
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "eTIMS connection or 404"
+          }
+        },
+        "summary": "Get the eTIMS connection (kraPin, environment, status, dvcSrlNo) for a branch. Used by the main API to reconcile locally-denormalized fields (e.g. backfill).",
+        "tags": [
+          "Compliance organization"
+        ]
+      },
+      "put": {
+        "operationId": "ComplianceOrganizationController_upsertEtimsConnection",
+        "parameters": [
           {
-            "name": "itemId",
+            "name": "branchId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertEtimsConnectionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Create or update eTIMS connection shell (kraPin, environment, etc.). OSCU deviceId/cmcKey are set only after initialize, not from this body.",
+        "tags": [
+          "Compliance organization"
+        ]
+      }
+    },
+    "/compliance-organization/branches/{branchId}/etims-connection/initialize": {
+      "post": {
+        "operationId": "ComplianceOrganizationController_initializeEtimsConnection",
+        "parameters": [
+          {
+            "name": "branchId",
             "required": true,
             "in": "path",
             "schema": {
@@ -112,164 +499,62 @@
         ],
         "responses": {
           "200": {
-            "description": "Stock level"
+            "description": "Connection updated after initialize"
           }
         },
-        "summary": "Get stock level for item in branch",
+        "summary": "Call OSCU initialize using stored connection (kraPin, dvcSrlNo) and branch kraBhfId; persist cmcKey + dvcId from response. No body — branch id in path only.",
         "tags": [
-          "Inventory"
+          "Compliance organization"
         ]
       }
     },
-    "/documents": {
+    "/api/stock/transfer": {
       "post": {
-        "operationId": "DocumentsController_createDocument",
+        "operationId": "StockController_transferStock",
         "parameters": [],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateDocumentDto"
+                "$ref": "#/components/schemas/TransferStockDto"
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "Document created"
+            "description": "Stock transferred"
           }
         },
-        "summary": "Create compliance document (DRAFT)",
+        "summary": "Transfer stock between businesses/branches",
         "tags": [
-          "Documents"
+          "Stock"
         ]
       }
     },
-    "/documents/{id}": {
-      "get": {
-        "operationId": "DocumentsController_getDocument",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Document details",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetSaleResponseDto"
-                }
+    "/api/stock/adjust": {
+      "put": {
+        "operationId": "StockController_adjustStock",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdjustStockDto"
               }
             }
           }
         },
-        "summary": "Get document details",
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/merchants/{merchantId}": {
-      "get": {
-        "operationId": "DocumentsController_listDocuments",
-        "parameters": [
-          {
-            "name": "merchantId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
-            "description": "Document list"
+            "description": "Stock adjusted"
           }
         },
-        "summary": "List documents by merchant",
+        "summary": "Adjust item stock",
         "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/validate": {
-      "post": {
-        "operationId": "DocumentsController_validateDocument",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Validation result"
-          }
-        },
-        "summary": "Validate document before submission",
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/prepare": {
-      "post": {
-        "operationId": "DocumentsController_prepareDocument",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Prepared"
-          }
-        },
-        "summary": "Prepare document for submission",
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/submit": {
-      "post": {
-        "operationId": "DocumentsController_submitDocument",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Submission result"
-          }
-        },
-        "summary": "Submit document to eTIMS",
-        "tags": [
-          "Documents"
+          "Stock"
         ]
       }
     },
@@ -279,22 +564,6 @@
         "parameters": [
           {
             "name": "merchantId",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "start_date",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "end_date",
             "required": true,
             "in": "query",
             "schema": {
@@ -318,14 +587,6 @@
             }
           },
           {
-            "name": "page_size",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "startDate",
             "required": true,
             "in": "query",
@@ -335,14 +596,6 @@
           },
           {
             "name": "endDate",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cursor",
             "required": true,
             "in": "query",
             "schema": {
@@ -377,7 +630,16 @@
       },
       "post": {
         "operationId": "ApiSalesController_createSale",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "submit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -394,7 +656,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SaleCreateResponseDto"
+                  "$ref": "#/components/schemas/SalesReportDetailResponseDto"
                 }
               }
             }
@@ -409,38 +671,51 @@
         ]
       }
     },
-    "/api/sales/{id}": {
-      "get": {
-        "operationId": "ApiSalesController_getSale",
+    "/api/sales/credit-notes/express": {
+      "post": {
+        "operationId": "ApiSalesController_createExpressCreditNote",
         "parameters": [
           {
-            "name": "id",
+            "name": "submit",
             "required": true,
-            "in": "path",
+            "in": "query",
             "schema": {
               "type": "string"
             }
           }
         ],
-        "responses": {
-          "200": {
-            "description": "Sale details",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetSaleResponseDto"
-                }
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateExpressCreditNoteDto"
               }
             }
           }
         },
-        "summary": "Get sale status/details",
+        "responses": {
+          "201": {
+            "description": "Credit note created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SalesReportDetailResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed"
+          }
+        },
+        "summary": "Create an express credit note from an existing sale",
         "tags": [
           "API Sales"
         ]
       }
     },
-    "/api/sales/{id}/report": {
+    "/api/sales/{id}": {
       "get": {
         "operationId": "ApiSalesController_getSaleReport",
         "parameters": [
@@ -465,7 +740,7 @@
             }
           }
         },
-        "summary": "Get sale (Digitax-like report)",
+        "summary": "Get sale by sale id",
         "tags": [
           "API Sales"
         ]
@@ -477,22 +752,6 @@
         "parameters": [
           {
             "name": "merchantId",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "start_date",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "end_date",
             "required": true,
             "in": "query",
             "schema": {
@@ -516,14 +775,6 @@
             }
           },
           {
-            "name": "page_size",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "startDate",
             "required": true,
             "in": "query",
@@ -533,14 +784,6 @@
           },
           {
             "name": "endDate",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cursor",
             "required": true,
             "in": "query",
             "schema": {
@@ -575,7 +818,16 @@
       },
       "post": {
         "operationId": "DashboardSalesController_createSale",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "submit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -592,7 +844,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SaleCreateResponseDto"
+                  "$ref": "#/components/schemas/SalesReportDetailResponseDto"
                 }
               }
             }
@@ -607,38 +859,51 @@
         ]
       }
     },
-    "/dashboard-api/sales/{id}": {
-      "get": {
-        "operationId": "DashboardSalesController_getSale",
+    "/dashboard-api/sales/credit-notes/express": {
+      "post": {
+        "operationId": "DashboardSalesController_createExpressCreditNote",
         "parameters": [
           {
-            "name": "id",
+            "name": "submit",
             "required": true,
-            "in": "path",
+            "in": "query",
             "schema": {
               "type": "string"
             }
           }
         ],
-        "responses": {
-          "200": {
-            "description": "Sale details",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetSaleResponseDto"
-                }
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateExpressCreditNoteDto"
               }
             }
           }
         },
-        "summary": "Get sale status/details",
+        "responses": {
+          "201": {
+            "description": "Credit note created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SalesReportDetailResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed"
+          }
+        },
+        "summary": "Create an express credit note from an existing sale",
         "tags": [
           "Dashboard Sales"
         ]
       }
     },
-    "/dashboard-api/sales/{id}/report": {
+    "/dashboard-api/sales/{id}": {
       "get": {
         "operationId": "DashboardSalesController_getSaleReport",
         "parameters": [
@@ -663,7 +928,7 @@
             }
           }
         },
-        "summary": "Get sale (Digitax-like report)",
+        "summary": "Get sale  by sale id",
         "tags": [
           "Dashboard Sales"
         ]
@@ -694,7 +959,7 @@
             "type": "string"
           },
           "sku": {
-            "type": "object",
+            "type": "string",
             "nullable": true
           },
           "itemType": {
@@ -746,434 +1011,263 @@
           "taxCategory"
         ]
       },
-      "RecordMovementDto": {
+      "SyncCatalogItemsDto": {
         "type": "object",
         "properties": {
-          "itemId": {
+          "merchantId": {
             "type": "string"
           },
           "branchId": {
             "type": "string"
           },
-          "movementType": {
+          "itemIds": {
+            "description": "Optional list of internal item ids to sync.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "onlyPending": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true, only sync items in PENDING/FAILED state (skips REGISTERED)."
+          },
+          "force": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, force re-sync even if already REGISTERED."
+          }
+        },
+        "required": [
+          "merchantId",
+          "branchId"
+        ]
+      },
+      "SyncItemClassificationsDto": {
+        "type": "object",
+        "properties": {
+          "merchantId": {
             "type": "string",
-            "enum": [
-              "SALE",
-              "PURCHASE",
-              "TRANSFER_OUT",
-              "TRANSFER_IN",
-              "ADJUSTMENT",
-              "RETURN"
-            ]
+            "description": "Merchant with a provisioned eTIMS connection to use for the OSCU call. The fetched list is global reference data, not merchant-scoped."
           },
-          "quantity": {
-            "type": "number"
+          "branchId": {
+            "type": "string"
           },
-          "referenceType": {
+          "full": {
+            "type": "boolean",
+            "description": "Ignore the stored watermark (lastReqDt) and re-pull the full reference list."
+          }
+        },
+        "required": [
+          "merchantId",
+          "branchId"
+        ]
+      },
+      "SyncCodeListDto": {
+        "type": "object",
+        "properties": {
+          "merchantId": {
+            "type": "string",
+            "description": "Merchant with a provisioned eTIMS connection to use for the OSCU call. The fetched list is global reference data, not merchant-scoped."
+          },
+          "branchId": {
+            "type": "string"
+          },
+          "full": {
+            "type": "boolean",
+            "description": "Ignore the stored watermark (lastReqDt) and re-pull the full reference list."
+          }
+        },
+        "required": [
+          "merchantId",
+          "branchId"
+        ]
+      },
+      "UpsertTenantDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "object",
+            "nullable": true,
+            "description": "Internal Compliance tenant id. Send when updating a tenant created without a Sync2Books company id."
+          },
+          "sync2booksCompanyId": {
+            "type": "object",
+            "nullable": true,
+            "description": "Sync2Books company id when integrating with the main Sync2Books API; omit for compliance-dashboard-only tenants."
+          },
+          "displayName": {
             "type": "object",
             "nullable": true
           },
-          "referenceId": {
+          "kraPin": {
+            "type": "object",
+            "nullable": true,
+            "description": "KRA PIN / TIN (DigiTax “PIN No.”). When set, creates or updates the eTIMS connection shell on the default Headquarters branch.",
+            "example": "A123456789B"
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "SANDBOX",
+              "PRODUCTION"
+            ],
+            "description": "SANDBOX = Test, PRODUCTION = Live. Takes precedence over `isLiveBusiness`."
+          },
+          "isLiveBusiness": {
+            "type": "boolean",
+            "description": "false = Test (SANDBOX), true = Live (PRODUCTION). Ignored when `environment` is set."
+          }
+        }
+      },
+      "TenantUpsertResponseDto": {
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": "object"
+          },
+          "defaultBranchId": {
+            "type": "string",
+            "description": "Internal id of the default branch (Headquarters), used for eTIMS routes."
+          },
+          "etimsConnection": {
+            "type": "object",
+            "nullable": true,
+            "description": "Present when `kraPin` was sent: eTIMS connection shell on the default branch."
+          }
+        },
+        "required": [
+          "tenant",
+          "defaultBranchId"
+        ]
+      },
+      "UpsertBranchDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "object",
+            "nullable": true,
+            "description": "Internal branch id. Send when updating a branch that has no Sync2Books branch id."
+          },
+          "sync2booksBranchId": {
+            "type": "object",
+            "nullable": true,
+            "description": "Sync2Books branch / location id when linked to the main product; omit for dashboard-only branches."
+          },
+          "displayName": {
+            "type": "object",
+            "nullable": true
+          },
+          "kraBhfId": {
+            "type": "object",
+            "nullable": true
+          }
+        }
+      },
+      "UpsertEtimsConnectionDto": {
+        "type": "object",
+        "properties": {
+          "kraPin": {
+            "type": "string"
+          },
+          "dvcSrlNo": {
+            "type": "object",
+            "nullable": true,
+            "description": "Device serial sent in initialize request body (`dvcSrlNo`). Not the same as OSCU `dvcId` (stored after initialize)."
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "SANDBOX",
+              "PRODUCTION"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "ERROR"
+            ]
+          },
+          "sync2booksConnectionId": {
             "type": "object",
             "nullable": true
           }
         },
         "required": [
+          "kraPin",
+          "environment"
+        ]
+      },
+      "TransferStockDto": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "description": "Source item id"
+          },
+          "fromBranchId": {
+            "type": "string",
+            "description": "Source branch id"
+          },
+          "receivingItemId": {
+            "type": "string",
+            "description": "Destination item id (may differ by business)"
+          },
+          "toBranchId": {
+            "type": "string",
+            "description": "Destination branch id"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "referenceId": {
+            "type": "string",
+            "description": "Optional correlation id"
+          }
+        },
+        "required": [
           "itemId",
-          "branchId",
-          "movementType",
+          "fromBranchId",
+          "receivingItemId",
+          "toBranchId",
           "quantity"
         ]
       },
-      "CreateDocumentLineDto": {
+      "AdjustStockDto": {
         "type": "object",
         "properties": {
           "itemId": {
             "type": "string"
           },
-          "description": {
+          "branchId": {
             "type": "string"
           },
           "quantity": {
-            "type": "number"
+            "type": "number",
+            "description": "Absolute quantity to add/deduct"
           },
-          "unitPrice": {
-            "type": "number"
-          },
-          "taxCategory": {
+          "action": {
             "type": "string",
-            "description": "Internal tax category (mapped to OSCU tax type internally). e.g. VAT_STANDARD"
+            "enum": [
+              "ADD",
+              "DEDUCT"
+            ]
           },
-          "taxAmount": {
-            "type": "number"
+          "movementTypeCode": {
+            "type": "string",
+            "description": "Optional movement type code for audit (e.g. OSCU stock movement type code)"
+          },
+          "referenceId": {
+            "type": "string"
           }
         },
         "required": [
           "itemId",
-          "description",
-          "quantity",
-          "unitPrice",
-          "taxCategory",
-          "taxAmount"
-        ]
-      },
-      "CreateDocumentDto": {
-        "type": "object",
-        "properties": {
-          "merchantId": {
-            "type": "string"
-          },
-          "branchId": {
-            "type": "string"
-          },
-          "sourceSystem": {
-            "type": "string",
-            "enum": [
-              "QUICKBOOKS",
-              "XERO",
-              "API"
-            ]
-          },
-          "sourceDocumentId": {
-            "type": "string"
-          },
-          "documentType": {
-            "type": "string",
-            "enum": [
-              "SALE",
-              "SALE_INVOICE",
-              "CREDIT_NOTE",
-              "PURCHASE",
-              "EXPORT",
-              "REVERSE_INVOICE"
-            ]
-          },
-          "documentNumber": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "exchangeRate": {
-            "type": "number"
-          },
-          "subtotalAmount": {
-            "type": "number"
-          },
-          "totalTax": {
-            "type": "number"
-          },
-          "totalAmount": {
-            "type": "number"
-          },
-          "customerPin": {
-            "type": "object",
-            "nullable": true
-          },
-          "lines": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CreateDocumentLineDto"
-            }
-          }
-        },
-        "required": [
-          "merchantId",
           "branchId",
-          "sourceSystem",
-          "sourceDocumentId",
-          "documentType",
-          "documentNumber",
-          "currency",
-          "exchangeRate",
-          "subtotalAmount",
-          "totalTax",
-          "totalAmount",
-          "lines"
-        ]
-      },
-      "SaleLineResponseDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "itemId": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "quantity": {
-            "type": "number"
-          },
-          "unitPrice": {
-            "type": "number"
-          },
-          "taxCategory": {
-            "type": "string",
-            "enum": [
-              "VAT_STANDARD",
-              "VAT_ZERO",
-              "EXEMPT",
-              "OTHER"
-            ]
-          },
-          "taxAmount": {
-            "type": "number"
-          },
-          "classificationCodeSnapshot": {
-            "type": "string"
-          },
-          "unitCodeSnapshot": {
-            "type": "string"
-          },
-          "packagingUnitCodeSnapshot": {
-            "type": "object",
-            "nullable": true
-          },
-          "taxTyCdSnapshot": {
-            "type": "object",
-            "nullable": true
-          },
-          "productTypeCodeSnapshot": {
-            "type": "object",
-            "nullable": true
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "itemId",
-          "description",
           "quantity",
-          "unitPrice",
-          "taxCategory",
-          "taxAmount",
-          "classificationCodeSnapshot",
-          "unitCodeSnapshot",
-          "packagingUnitCodeSnapshot",
-          "taxTyCdSnapshot",
-          "productTypeCodeSnapshot",
-          "createdAt"
-        ]
-      },
-      "SaleDocumentResponseDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "merchantId": {
-            "type": "string"
-          },
-          "branchId": {
-            "type": "string"
-          },
-          "sourceSystem": {
-            "type": "string",
-            "enum": [
-              "QUICKBOOKS",
-              "XERO",
-              "API"
-            ]
-          },
-          "sourceDocumentId": {
-            "type": "string"
-          },
-          "documentType": {
-            "type": "string",
-            "enum": [
-              "SALE",
-              "SALE_INVOICE",
-              "CREDIT_NOTE",
-              "PURCHASE",
-              "EXPORT",
-              "REVERSE_INVOICE"
-            ]
-          },
-          "documentNumber": {
-            "type": "string"
-          },
-          "saleDate": {
-            "type": "object",
-            "nullable": true,
-            "description": "YYYY-MM-DD"
-          },
-          "receiptTypeCode": {
-            "type": "object",
-            "nullable": true
-          },
-          "paymentTypeCode": {
-            "type": "object",
-            "nullable": true
-          },
-          "invoiceStatusCode": {
-            "type": "object",
-            "nullable": true
-          },
-          "currency": {
-            "type": "string"
-          },
-          "exchangeRate": {
-            "type": "number"
-          },
-          "subtotalAmount": {
-            "type": "number"
-          },
-          "totalAmount": {
-            "type": "number"
-          },
-          "totalTax": {
-            "type": "number"
-          },
-          "customerPin": {
-            "type": "object",
-            "nullable": true
-          },
-          "complianceStatus": {
-            "type": "string",
-            "enum": [
-              "DRAFT",
-              "VALIDATED",
-              "READY_FOR_SUBMISSION",
-              "SUBMITTED",
-              "ACCEPTED",
-              "REJECTED",
-              "RETRYING",
-              "FAILED",
-              "CANCELLED"
-            ]
-          },
-          "submissionAttempts": {
-            "type": "number"
-          },
-          "etimsReceiptNumber": {
-            "type": "object",
-            "nullable": true
-          },
-          "idempotencyKey": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "submittedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "lines": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SaleLineResponseDto"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "merchantId",
-          "branchId",
-          "sourceSystem",
-          "sourceDocumentId",
-          "documentType",
-          "documentNumber",
-          "saleDate",
-          "receiptTypeCode",
-          "paymentTypeCode",
-          "invoiceStatusCode",
-          "currency",
-          "exchangeRate",
-          "subtotalAmount",
-          "totalAmount",
-          "totalTax",
-          "customerPin",
-          "complianceStatus",
-          "submissionAttempts",
-          "etimsReceiptNumber",
-          "idempotencyKey",
-          "createdAt",
-          "submittedAt",
-          "lines"
-        ]
-      },
-      "KraSalesSaveResponseDataDto": {
-        "type": "object",
-        "properties": {
-          "curRcptNo": {
-            "type": "string"
-          },
-          "totRcptNo": {
-            "type": "string"
-          },
-          "intrlData": {
-            "type": "string"
-          },
-          "rcptSign": {
-            "type": "string"
-          },
-          "sdcDateTime": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "curRcptNo",
-          "totRcptNo",
-          "intrlData",
-          "rcptSign",
-          "sdcDateTime"
-        ]
-      },
-      "KraSalesSaveResponseDto": {
-        "type": "object",
-        "properties": {
-          "resultCd": {
-            "type": "string"
-          },
-          "resultMsg": {
-            "type": "string"
-          },
-          "resultDt": {
-            "type": "string"
-          },
-          "data": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/KraSalesSaveResponseDataDto"
-              }
-            ]
-          }
-        },
-        "required": [
-          "resultCd",
-          "resultMsg",
-          "resultDt",
-          "data"
-        ]
-      },
-      "GetSaleResponseDto": {
-        "type": "object",
-        "properties": {
-          "document": {
-            "$ref": "#/components/schemas/SaleDocumentResponseDto"
-          },
-          "kraResponse": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/KraSalesSaveResponseDto"
-              }
-            ]
-          }
-        },
-        "required": [
-          "document",
-          "kraResponse"
+          "action"
         ]
       },
       "CursorPaginationDto": {
@@ -1533,6 +1627,18 @@
           "traderInvoiceNumber": {
             "type": "string"
           },
+          "originalTraderInvoiceNumber": {
+            "type": "string",
+            "description": "For credit notes (receiptTypeCode=R): original sale trader invoice number"
+          },
+          "creditNoteDate": {
+            "type": "string",
+            "description": "For credit notes (receiptTypeCode=R): credit note datetime (OSCU rfdDt). Accepts yyyyMMddhhmmss, yyyyMMdd, YYYY-MM-DD, or ISO date-time."
+          },
+          "creditNoteReasonCode": {
+            "type": "string",
+            "description": "For credit notes (receiptTypeCode=R): credit note reason code (OSCU rfdRsnCd). Spec codes: 01 Missing Quantity, 02 Missing data, 03 Damaged, 04 Wasted, 05 Shortage, 06 Refund."
+          },
           "customerTin": {
             "type": "string"
           },
@@ -1569,46 +1675,6 @@
           "items"
         ]
       },
-      "SaleCreateResponseDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "DRAFT",
-              "VALIDATED",
-              "READY_FOR_SUBMISSION",
-              "SUBMITTED",
-              "ACCEPTED",
-              "REJECTED",
-              "RETRYING",
-              "FAILED",
-              "CANCELLED"
-            ]
-          },
-          "receiptNumber": {
-            "type": "object",
-            "nullable": true
-          },
-          "kraResponse": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/KraSalesSaveResponseDto"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "status",
-          "receiptNumber",
-          "kraResponse"
-        ]
-      },
       "SalesReportDetailResponseDto": {
         "type": "object",
         "properties": {
@@ -1618,6 +1684,44 @@
         },
         "required": [
           "data"
+        ]
+      },
+      "CreateExpressCreditNoteDto": {
+        "type": "object",
+        "properties": {
+          "merchantId": {
+            "type": "string"
+          },
+          "branchId": {
+            "type": "string"
+          },
+          "saleId": {
+            "type": "string",
+            "description": "Existing sale id (ComplianceDocument.id)"
+          },
+          "traderInvoiceNumber": {
+            "type": "string",
+            "description": "New credit note trader invoice number"
+          },
+          "returnDate": {
+            "type": "string",
+            "description": "Return date (YYYY-MM-DD)"
+          },
+          "paymentTypeCode": {
+            "type": "string",
+            "description": "Payment type code override (defaults to original sale or 01)"
+          },
+          "invoiceStatusCode": {
+            "type": "string",
+            "description": "Invoice status code override (defaults to original sale or 02)"
+          }
+        },
+        "required": [
+          "merchantId",
+          "branchId",
+          "saleId",
+          "traderInvoiceNumber",
+          "returnDate"
         ]
       }
     }

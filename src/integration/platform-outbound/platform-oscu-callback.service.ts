@@ -22,10 +22,7 @@ export class PlatformOscuCallbackService {
       'syncItemId' | 'syncBatchId' | 'companyId'
     > &
       Partial<
-        Pick<
-          Sync2BooksOscuOutcomeBody,
-          'applicationId' | 'connectionId'
-        >
+        Pick<Sync2BooksOscuOutcomeBody, 'applicationId' | 'connectionId'>
       >,
   ): Promise<void> {
     const correlation = parseSync2BooksCorrelation(req);
@@ -45,10 +42,7 @@ export class PlatformOscuCallbackService {
       'syncItemId' | 'syncBatchId' | 'companyId'
     > &
       Partial<
-        Pick<
-          Sync2BooksOscuOutcomeBody,
-          'applicationId' | 'connectionId'
-        >
+        Pick<Sync2BooksOscuOutcomeBody, 'applicationId' | 'connectionId'>
       >,
   ): Promise<void> {
     await this.mainApi.postOscuOutcome({
@@ -56,8 +50,7 @@ export class PlatformOscuCallbackService {
       syncItemId: correlation.syncItemId,
       syncBatchId: correlation.syncBatchId,
       companyId: correlation.companyId,
-      applicationId:
-        outcome.applicationId ?? correlation.applicationId,
+      applicationId: outcome.applicationId ?? correlation.applicationId,
       connectionId: outcome.connectionId ?? correlation.connectionId,
     });
   }

@@ -9,7 +9,10 @@ export interface ComplianceConnection {
   id: string;
   merchantId: string;
   kraPin: string;
+  /** Internal/sync2books branch id -- NOT the KRA office code, use {@link kraBhfId} for OSCU calls. */
   branchId: string;
+  /** KRA branch office id (OSCU `bhfId`), e.g. "00". Required for any real OSCU request. */
+  kraBhfId: string | null;
   deviceId: string;
   /** Serial used in initialize request (`dvcSrlNo`); optional after init. */
   dvcSrlNo?: string | null;

@@ -38,7 +38,10 @@ describe('Compliance organization (e2e)', () => {
   it('provisions dashboard-only tenant → branch → eTIMS shell → initialize (stub OSCU)', async () => {
     const http = app.getHttpServer();
 
-    const tenantRes = await withSync2BooksM2m(request(http).post(`${base}/tenants`), HDR)
+    const tenantRes = await withSync2BooksM2m(
+      request(http).post(`${base}/tenants`),
+      HDR,
+    )
       .send({ displayName: 'E2E Dashboard Tenant' })
       .expect(201);
 
@@ -164,7 +167,10 @@ describe('Compliance organization (e2e)', () => {
   it('creates tenant, default branch, and eTIMS shell in one POST when kraPin is sent', async () => {
     const http = app.getHttpServer();
 
-    const res = await withSync2BooksM2m(request(http).post(`${base}/tenants`), HDR)
+    const res = await withSync2BooksM2m(
+      request(http).post(`${base}/tenants`),
+      HDR,
+    )
       .send({
         displayName: 'One-shot business',
         kraPin: 'A123456789B',

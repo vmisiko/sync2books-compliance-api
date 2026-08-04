@@ -22,24 +22,18 @@ export class Sync2BooksCorrelationPersistenceService {
     documentId: string,
     corr: Sync2BooksCorrelationStored,
   ): Promise<void> {
-    await this.documents.update(
-      { id: documentId },
-      {
-        sync2booksCorrelation: { ...corr },
-      } as Parameters<Repository<ComplianceDocumentOrmEntity>['update']>[1],
-    );
+    await this.documents.update({ id: documentId }, {
+      sync2booksCorrelation: { ...corr },
+    } as Parameters<Repository<ComplianceDocumentOrmEntity>['update']>[1]);
   }
 
   async patchCatalogItem(
     itemId: string,
     corr: Sync2BooksCorrelationStored,
   ): Promise<void> {
-    await this.catalogItems.update(
-      { id: itemId },
-      {
-        sync2booksCorrelation: { ...corr },
-      } as Parameters<Repository<CatalogItemOrmEntity>['update']>[1],
-    );
+    await this.catalogItems.update({ id: itemId }, {
+      sync2booksCorrelation: { ...corr },
+    } as Parameters<Repository<CatalogItemOrmEntity>['update']>[1]);
   }
 
   async patchCatalogItems(
@@ -49,11 +43,8 @@ export class Sync2BooksCorrelationPersistenceService {
     if (itemIds.length === 0) {
       return;
     }
-    await this.catalogItems.update(
-      { id: In(itemIds) },
-      {
-        sync2booksCorrelation: { ...corr },
-      } as Parameters<Repository<CatalogItemOrmEntity>['update']>[1],
-    );
+    await this.catalogItems.update({ id: In(itemIds) }, {
+      sync2booksCorrelation: { ...corr },
+    } as Parameters<Repository<CatalogItemOrmEntity>['update']>[1]);
   }
 }

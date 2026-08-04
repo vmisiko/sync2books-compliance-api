@@ -223,7 +223,70 @@ export class EtimsAdapterStub implements IEtimsAdapter {
   ): Promise<OscuEnvelopeResponse> {
     void _body;
     void _ctx;
-    return Promise.resolve(stubOscuEnvelope());
+    const now = new Date();
+    return Promise.resolve({
+      success: true,
+      rawResponse: {
+        resultCd: '000',
+        resultMsg: 'It is succeeded',
+        resultDt: formatYyyyMMddhhmmssUtc(now),
+        data: {
+          clsList: [
+            {
+              cdCls: '04',
+              cdClsNm: 'Taxation Type',
+              cdClsDesc: null,
+              useYn: 'Y',
+              userDfnNm1: 'Tax Rate',
+              userDfnNm2: null,
+              userDfnNm3: null,
+              dtlList: [
+                {
+                  cd: 'A',
+                  cdNm: 'A-EX',
+                  cdDesc: 'A-EX',
+                  useYn: 'Y',
+                  srtOrd: 1,
+                  userDfnCd1: '0',
+                  userDfnCd2: null,
+                  userDfnCd3: null,
+                },
+                {
+                  cd: 'B',
+                  cdNm: 'B-18.00%',
+                  cdDesc: 'B-18.00%',
+                  useYn: 'Y',
+                  srtOrd: 2,
+                  userDfnCd1: '18',
+                  userDfnCd2: null,
+                  userDfnCd3: null,
+                },
+                {
+                  cd: 'C',
+                  cdNm: 'C',
+                  cdDesc: 'C',
+                  useYn: 'Y',
+                  srtOrd: 3,
+                  userDfnCd1: '0',
+                  userDfnCd2: null,
+                  userDfnCd3: null,
+                },
+                {
+                  cd: 'D',
+                  cdNm: 'D',
+                  cdDesc: 'D',
+                  useYn: 'Y',
+                  srtOrd: 4,
+                  userDfnCd1: '0',
+                  userDfnCd2: null,
+                  userDfnCd3: null,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
   }
 
   customerPinInfo(
@@ -235,13 +298,49 @@ export class EtimsAdapterStub implements IEtimsAdapter {
     return Promise.resolve(stubOscuEnvelope());
   }
 
-  selectItemClass(
+  selectItemClsList(
     _body: Record<string, unknown>,
     _ctx: EtimsConnectionContext,
   ): Promise<OscuEnvelopeResponse> {
     void _body;
     void _ctx;
-    return Promise.resolve(stubOscuEnvelope());
+    const now = new Date();
+    return Promise.resolve({
+      success: true,
+      rawResponse: {
+        resultCd: '000',
+        resultMsg: 'It is succeeded',
+        resultDt: formatYyyyMMddhhmmssUtc(now),
+        data: {
+          itemClsList: [
+            {
+              itemClsCd: '14111400',
+              itemClsNm: 'Paper products',
+              itemClsLvl: 3,
+              taxTyCd: null,
+              mjrTgYn: null,
+              useYn: 'Y',
+            },
+            {
+              itemClsCd: '14111401',
+              itemClsNm: 'Paper Commodity products',
+              itemClsLvl: 4,
+              taxTyCd: null,
+              mjrTgYn: null,
+              useYn: 'Y',
+            },
+            {
+              itemClsCd: '3133130600',
+              itemClsNm: 'Non metallic welded structural assemblies',
+              itemClsLvl: 5,
+              taxTyCd: 'B',
+              mjrTgYn: 'N',
+              useYn: 'Y',
+            },
+          ],
+        },
+      },
+    });
   }
 
   selectTaxpayerInfo(

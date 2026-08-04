@@ -3,6 +3,10 @@
  */
 export type RedisLike = {
   get(key: string): Promise<string | null>;
-  set(key: string, value: string, ...args: (string | number)[]): Promise<unknown>;
+  set(
+    key: string,
+    value: string,
+    ...args: (string | number)[]
+  ): Promise<unknown>;
   del(...keys: string[]): Promise<number>;
 };

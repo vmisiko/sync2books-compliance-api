@@ -57,13 +57,18 @@ export async function submitDocument(
       `Compliance connection is not ACTIVE (status: ${connection.status})`,
     );
   }
+  if (!connection.kraBhfId) {
+    throw new Error(
+      `Branch ${document.branchId} has no KRA branch office id (kraBhfId) set`,
+    );
+  }
 
   const payload = EtimsPayloadBuilder.buildFromDocument(document);
   payload.deviceId = connection.deviceId;
 
   const result = await etimsAdapter.submitInvoice(payload, {
     merchantId: document.merchantId,
-    branchId: document.branchId,
+    branchId: connection.kraBhfId,
     kraPin: connection.kraPin,
     environment: connection.environment,
     cmcKey: connection.cmcKey,

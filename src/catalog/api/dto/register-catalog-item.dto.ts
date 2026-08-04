@@ -14,7 +14,7 @@ export class RegisterCatalogItemDto {
   @ApiProperty()
   name!: string;
 
-  @ApiProperty({ required: false, nullable: true })
+  @ApiProperty({ type: String, required: false, nullable: true })
   sku?: string | null;
 
   @ApiProperty({ enum: ItemType })

@@ -21,7 +21,8 @@ export const OSCU_ENDPOINTS = {
     branchList: 'branchList',
     selectCodeList: 'selectCodeList',
     customerPinInfo: 'customerPinInfo',
-    selectItemClass: 'selectItemClass',
+    // Legacy/direct-KRA-host path per OSCU Specification v2.0 §3.3.3.1.
+    selectItemClsList: 'selectItemClsList',
     selectTaxpayerInfo: 'selectTaxpayerInfo',
     selectNoticeList: 'selectNoticeList',
     importedItemInfo: 'importedItemInfo',
@@ -46,7 +47,10 @@ export const OSCU_ENDPOINTS = {
     branchList: 'branchList',
     selectCodeList: 'selectCodeList',
     customerPinInfo: 'customerPinInfo',
-    selectItemClass: 'selectItemClass',
+    // Verified against the real "eTIMS-OSCU-Integrator-Automated-Testing-SBX" Postman
+    // collection (Gava Connect dev portal): the Apigee integrator gateway exposes this
+    // as `/selectItemClass` (no "List" suffix) -- diverges from the legacy spec path.
+    selectItemClsList: 'selectItemClass',
     selectTaxpayerInfo: 'selectTaxpayerInfo',
     selectNoticeList: 'selectNoticeList',
     importedItemInfo: 'importedItemInfo',

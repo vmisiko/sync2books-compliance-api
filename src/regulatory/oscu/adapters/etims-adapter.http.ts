@@ -239,7 +239,13 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
 
       const text = await res.text();
       const json = text ? (JSON.parse(text) as unknown) : null;
-      return { ok: res.ok, status: res.status, raw: asRecord(json) ?? {} };
+      const parsed = asRecord(json) ?? {};
+      // Apigee integrator gateway wraps the OSCU business payload as
+      // { responseHeader, responseBody: { resultCd, resultMsg, resultDt, data } }.
+      // Legacy/direct KRA responses are already flat -- unwrap here, once, so every
+      // caller of postOscu() sees a consistent flat shape regardless of gateway style.
+      const raw = asRecord(parsed['responseBody']) ?? parsed;
+      return { ok: res.ok, status: res.status, raw };
     } finally {
       clearTimeout(timeout);
     }
@@ -675,11 +681,11 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
     return this.postOscuEnvelope('customerPinInfo', body, connectionContext);
   }
 
-  selectItemClass(
+  selectItemClsList(
     body: Record<string, unknown>,
     connectionContext: EtimsConnectionContext,
   ): Promise<OscuEnvelopeResponse> {
-    return this.postOscuEnvelope('selectItemClass', body, connectionContext);
+    return this.postOscuEnvelope('selectItemClsList', body, connectionContext);
   }
 
   selectTaxpayerInfo(

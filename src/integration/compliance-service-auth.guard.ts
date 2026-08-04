@@ -43,7 +43,9 @@ export class ComplianceServiceAuthGuard implements CanActivate {
       const a = Buffer.from(bearer, 'utf8');
       const b = Buffer.from(expected, 'utf8');
       if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-        throw new UnauthorizedException('Invalid or missing service credentials');
+        throw new UnauthorizedException(
+          'Invalid or missing service credentials',
+        );
       }
     } catch (e) {
       if (e instanceof UnauthorizedException) throw e;
@@ -51,12 +53,9 @@ export class ComplianceServiceAuthGuard implements CanActivate {
     }
 
     const companyRaw = req.headers['x-sync2books-company-id'];
-    const companyId =
-      typeof companyRaw === 'string' ? companyRaw.trim() : '';
+    const companyId = typeof companyRaw === 'string' ? companyRaw.trim() : '';
     if (!companyId) {
-      throw new BadRequestException(
-        'Missing x-sync2books-company-id header',
-      );
+      throw new BadRequestException('Missing x-sync2books-company-id header');
     }
 
     return true;

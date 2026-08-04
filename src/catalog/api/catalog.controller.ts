@@ -1,9 +1,12 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -13,6 +16,13 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CatalogService } from './catalog.service';
 import { RegisterCatalogItemDto } from './dto/register-catalog-item.dto';
 import { SyncCatalogItemsDto } from './dto/sync-catalog-items.dto';
+import { SearchItemClassificationsQueryDto } from './dto/search-item-classifications.dto';
+import { SyncItemClassificationsDto } from './dto/sync-item-classifications.dto';
+import {
+  ListCodeClassesQueryDto,
+  SearchCodesQueryDto,
+} from './dto/search-codes.dto';
+import { SyncCodeListDto } from './dto/sync-code-list.dto';
 import { ComplianceServiceAuthGuard } from '../../integration/compliance-service-auth.guard';
 import { PlatformOscuCallbackService } from '../../integration/platform-outbound/platform-oscu-callback.service';
 import { Sync2BooksCorrelationPersistenceService } from '../../integration/platform-outbound/sync2books-correlation-persistence.service';
@@ -99,5 +109,108 @@ export class CatalogController {
       });
     }
     return result;
+  }
+
+  @Get('item-classifications')
+  @ApiOperation({
+    summary:
+      'Search OSCU item classification codes (itemClsCd) for use when registering items',
+  })
+  @ApiResponse({ status: 200, description: 'Matching classification codes' })
+  async searchItemClassifications(
+    @Query() query: SearchItemClassificationsQueryDto,
+  ) {
+    const itemClsLvl =
+      query.itemClsLvl !== undefined ? Number(query.itemClsLvl) : undefined;
+    if (itemClsLvl !== undefined && !Number.isInteger(itemClsLvl)) {
+      throw new BadRequestException('itemClsLvl must be an integer');
+    }
+    const limit = query.limit !== undefined ? Number(query.limit) : undefined;
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+      throw new BadRequestException('limit must be a positive integer');
+    }
+
+    const results = await this.catalogService.searchItemClassifications({
+      query: query.query,
+      itemClsLvl,
+      includeInactive: query.includeInactive === 'true',
+      limit,
+    });
+    return { results };
+  }
+
+  @Get('item-classifications/:itemClsCd')
+  @ApiOperation({ summary: 'Fetch a single OSCU item classification code' })
+  @ApiResponse({ status: 200, description: 'Classification code' })
+  async getItemClassification(@Param('itemClsCd') itemClsCd: string) {
+    const found = await this.catalogService.getItemClassification(itemClsCd);
+    if (!found) {
+      throw new NotFoundException(
+        `Unknown item classification code: ${itemClsCd}`,
+      );
+    }
+    return found;
+  }
+
+  @Post('item-classifications/sync')
+  @ApiOperation({
+    summary:
+      'Pull the latest item classification reference list from OSCU (/selectItemClsList) and upsert it locally',
+  })
+  @ApiResponse({ status: 201, description: 'Sync result' })
+  async syncItemClassifications(@Body() body: SyncItemClassificationsDto) {
+    return this.catalogService.syncItemClassifications({
+      merchantId: body.merchantId,
+      branchId: body.branchId,
+      full: body.full,
+    });
+  }
+
+  @Get('code-classes')
+  @ApiOperation({
+    summary:
+      "List OSCU code groups (cdCls), e.g. '10' Unit of Quantity, '17' Packaging Unit, '04' Tax Type",
+  })
+  @ApiResponse({ status: 200, description: 'Code groups' })
+  async listCodeClasses(@Query() query: ListCodeClassesQueryDto) {
+    const results = await this.catalogService.listCodeClasses(
+      query.includeInactive === 'true',
+    );
+    return { results };
+  }
+
+  @Get('codes')
+  @ApiOperation({
+    summary:
+      'Search OSCU codes (qtyUnitCd, pkgUnitCd, taxTyCd, itemTyCd, pmtTyCd...) within a code group',
+  })
+  @ApiResponse({ status: 200, description: 'Matching codes' })
+  async searchCodes(@Query() query: SearchCodesQueryDto) {
+    const limit = query.limit !== undefined ? Number(query.limit) : undefined;
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+      throw new BadRequestException('limit must be a positive integer');
+    }
+
+    const results = await this.catalogService.searchCodes({
+      cdCls: query.cdCls,
+      query: query.query,
+      includeInactive: query.includeInactive === 'true',
+      limit,
+    });
+    return { results };
+  }
+
+  @Post('codes/sync')
+  @ApiOperation({
+    summary:
+      'Pull the latest code list from OSCU (/selectCodeList) and upsert it locally',
+  })
+  @ApiResponse({ status: 201, description: 'Sync result' })
+  async syncCodeList(@Body() body: SyncCodeListDto) {
+    return this.catalogService.syncCodeList({
+      merchantId: body.merchantId,
+      branchId: body.branchId,
+      full: body.full,
+    });
   }
 }

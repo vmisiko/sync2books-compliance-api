@@ -112,7 +112,8 @@ export interface IEtimsAdapter {
     connectionContext: EtimsConnectionContext,
   ): Promise<OscuEnvelopeResponse>;
 
-  selectItemClass(
+  /** `/selectItemClsList` — paged item classification reference list (`ItemClsSearchReq/Res`). */
+  selectItemClsList(
     body: Record<string, unknown>,
     connectionContext: EtimsConnectionContext,
   ): Promise<OscuEnvelopeResponse>;

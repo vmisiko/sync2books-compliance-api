@@ -6,6 +6,7 @@ import { CatalogModule } from './catalog/catalog.module';
 import { ComplianceOrganizationModule } from './compliance-organization/compliance-organization.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { OscuMappingModule } from './regulatory/oscu/oscu-mapping.module';
+import { OscuOperationsModule } from './regulatory/oscu/presentation/oscu-operations.module';
 import { OscuReferenceModule } from './regulatory/oscu/oscu-reference.module';
 import { SalesModule } from './sales/sales.module';
 import { CatalogItemOrmEntity } from './catalog/infrastructure/persistence/catalog-item.orm-entity';
@@ -16,6 +17,7 @@ import { ClassificationMappingOrmEntity } from './regulatory/oscu/infrastructure
 import { OscuCodeClassOrmEntity } from './regulatory/oscu/infrastructure/persistence/oscu-code-class.orm-entity';
 import { OscuCodeOrmEntity } from './regulatory/oscu/infrastructure/persistence/oscu-code.orm-entity';
 import { OscuItemClassificationOrmEntity } from './regulatory/oscu/infrastructure/persistence/oscu-item-classification.orm-entity';
+import { OscuOperationLogOrmEntity } from './regulatory/oscu/infrastructure/persistence/oscu-operation-log.orm-entity';
 import { OscuSyncStateOrmEntity } from './regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
 import { PaymentTypeMappingOrmEntity } from './regulatory/oscu/infrastructure/persistence/payment-type-mapping.orm-entity';
 import { TaxMappingOrmEntity } from './regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
@@ -48,6 +50,7 @@ import { PlatformCorrelationModule } from './integration/platform-correlation.mo
         OscuCodeClassOrmEntity,
         OscuCodeOrmEntity,
         OscuItemClassificationOrmEntity,
+        OscuOperationLogOrmEntity,
         OscuSyncStateOrmEntity,
         PaymentTypeMappingOrmEntity,
         TaxMappingOrmEntity,
@@ -58,6 +61,7 @@ import { PlatformCorrelationModule } from './integration/platform-correlation.mo
     }),
     OscuReferenceModule,
     OscuMappingModule,
+    OscuOperationsModule,
     PlatformCorrelationModule,
     CatalogModule,
     ComplianceOrganizationModule,

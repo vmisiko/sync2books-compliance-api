@@ -13,6 +13,7 @@ import {
 } from '../shared/tokens';
 import { ClassificationMappingOrmEntity } from '../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
 import { OscuMappingModule } from '../regulatory/oscu/oscu-mapping.module';
+import { OscuReferenceModule } from '../regulatory/oscu/oscu-reference.module';
 import { TaxMappingOrmEntity } from '../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
 import { UnitMappingOrmEntity } from '../regulatory/oscu/infrastructure/persistence/unit-mapping.orm-entity';
 import { ComplianceOrganizationModule } from '../compliance-organization/compliance-organization.module';
@@ -25,6 +26,7 @@ import { PlatformCorrelationModule } from '../integration/platform-correlation.m
     ComplianceServiceAuthModule,
     PlatformCorrelationModule,
     OscuMappingModule,
+    OscuReferenceModule,
     ComplianceOrganizationModule,
     EtimsModule,
     TypeOrmModule.forFeature([
