@@ -298,6 +298,15 @@ export class EtimsAdapterStub implements IEtimsAdapter {
     return Promise.resolve(stubOscuEnvelope());
   }
 
+  selectCustomerList(
+    _body: Record<string, unknown>,
+    _ctx: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    void _body;
+    void _ctx;
+    return Promise.resolve(stubOscuEnvelope());
+  }
+
   selectItemClsList(
     _body: Record<string, unknown>,
     _ctx: EtimsConnectionContext,

@@ -702,6 +702,13 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
     return this.postOscuEnvelope('customerPinInfo', body, connectionContext);
   }
 
+  selectCustomerList(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope('selectCustomerList', body, connectionContext);
+  }
+
   selectItemClsList(
     body: Record<string, unknown>,
     connectionContext: EtimsConnectionContext,

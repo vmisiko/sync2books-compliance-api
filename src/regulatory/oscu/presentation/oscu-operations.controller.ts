@@ -65,6 +65,20 @@ export class OscuOperationsController {
     );
   }
 
+  @Get('customers')
+  @ApiOperation({
+    summary:
+      'selectCustomerList — fetch customer records since lastReqDt (previously sent via branchSendCustomerInfo)',
+  })
+  @ApiResponse({ status: 200, description: 'Customer list' })
+  customerList(@Query() query: OscuLookupQueryDto) {
+    return this.oscu.customerList(
+      query.merchantId,
+      query.branchId,
+      query.lastReqDt,
+    );
+  }
+
   // --- Imports ---
 
   @Get('imported-items')

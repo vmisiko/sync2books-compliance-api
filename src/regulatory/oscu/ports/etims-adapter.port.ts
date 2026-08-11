@@ -112,6 +112,12 @@ export interface IEtimsAdapter {
     connectionContext: EtimsConnectionContext,
   ): Promise<OscuEnvelopeResponse>;
 
+  /** `/selectCustomerList` — customer records previously sent via `branchSendCustomerInfo`. */
+  selectCustomerList(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse>;
+
   /** `/selectItemClsList` — paged item classification reference list (`ItemClsSearchReq/Res`). */
   selectItemClsList(
     body: Record<string, unknown>,

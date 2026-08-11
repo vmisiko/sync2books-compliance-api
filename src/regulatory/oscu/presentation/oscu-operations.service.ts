@@ -25,6 +25,7 @@ type EnvelopeOperation =
   | 'branchSendCustomerInfo'
   | 'branchList'
   | 'customerPinInfo'
+  | 'selectCustomerList'
   | 'selectTaxpayerInfo'
   | 'selectNoticeList'
   | 'importedItemInfo'
@@ -64,6 +65,7 @@ export class OscuOperationsService {
         this.etimsAdapter.branchSendCustomerInfo(b, c),
       branchList: (b, c) => this.etimsAdapter.branchList(b, c),
       customerPinInfo: (b, c) => this.etimsAdapter.customerPinInfo(b, c),
+      selectCustomerList: (b, c) => this.etimsAdapter.selectCustomerList(b, c),
       selectTaxpayerInfo: (b, c) => this.etimsAdapter.selectTaxpayerInfo(b, c),
       selectNoticeList: (b, c) => this.etimsAdapter.selectNoticeList(b, c),
       importedItemInfo: (b, c) => this.etimsAdapter.importedItemInfo(b, c),
@@ -218,6 +220,12 @@ export class OscuOperationsService {
 
   customerPinInfo(merchantId: string, branchId: string, lastReqDt?: string) {
     return this.dispatch('customerPinInfo', merchantId, branchId, (c) =>
+      this.lookupBody(c, lastReqDt),
+    );
+  }
+
+  customerList(merchantId: string, branchId: string, lastReqDt?: string) {
+    return this.dispatch('selectCustomerList', merchantId, branchId, (c) =>
       this.lookupBody(c, lastReqDt),
     );
   }

@@ -34,6 +34,7 @@ export const OSCU_ENDPOINTS = {
     sendPurchaseTransactionInfo: 'sendPurchaseTransactionInfo',
     selectInvoiceDetail: 'selectInvoiceDetail',
     selectSalesTransactions: 'selectSalesTransactions',
+    selectCustomerList: 'selectCustomerList',
   },
   integrator: {
     submitSales: 'sendSalesTransaction',
@@ -62,6 +63,9 @@ export const OSCU_ENDPOINTS = {
     sendPurchaseTransactionInfo: 'sendPurchaseTransactionInfo',
     selectInvoiceDetail: 'selectInvoiceDetail',
     selectSalesTransactions: 'selectSalesTransactions',
+    // Confirmed live 2026-08-11 against the Apigee integrator gateway: same name as
+    // legacy, resultCd 000 with a real custList.
+    selectCustomerList: 'selectCustomerList',
   },
 } as const;
 
