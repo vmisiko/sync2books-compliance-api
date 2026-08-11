@@ -24,4 +24,13 @@ export class AdjustStockDto {
 
   @ApiProperty({ required: false })
   referenceId?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Unit price for this quantity, required for the eTIMS insertStockIO sync ' +
+      '(ETIMS_STOCK_SYNC) to actually succeed -- KRA rejects a zero amount. Without ' +
+      'it, the adjustment still records locally but the eTIMS sync is skipped.',
+  })
+  unitPrice?: number;
 }

@@ -112,6 +112,7 @@ describe('InventoryService eTIMS stock sync', () => {
       quantity: 10,
       referenceType: 'SEED',
       referenceId: 'seed-1',
+      unitPrice: 100,
     });
 
     insertStockIO.mockClear();
@@ -124,6 +125,7 @@ describe('InventoryService eTIMS stock sync', () => {
       quantity: 5,
       referenceType: 'COMPLIANCE_DOCUMENT',
       referenceId: 'doc-1',
+      unitPrice: 100,
     });
 
     expect(insertStockIO).toHaveBeenCalledTimes(1);
@@ -131,8 +133,28 @@ describe('InventoryService eTIMS stock sync', () => {
     expect(req.sarTyCd).toBe('11'); // sale
     expect(req.itemList[0].qty).toBe(5); // absolute
     expect(req.itemList[0].itemCd).toBe('IT000000000001');
+    // taxTyCd 'B' (16%) -- splyAmt (qty * unitPrice) is tax-inclusive, so
+    // taxblAmt/taxAmt are derived by division rather than added on top.
+    expect(req.itemList[0].pkg).toBe(5);
+    expect(req.itemList[0].splyAmt).toBe(500);
+    expect(req.itemList[0].taxblAmt).toBe(431.03);
+    expect(req.itemList[0].taxAmt).toBe(68.97);
+    expect(req.totAmt).toBe(500);
 
     // saveStockMaster is reconciliation-only now.
     expect(saveStockMaster).toHaveBeenCalledTimes(0);
+
+    // Skips the sync entirely (rather than sending a rejected zero-amount
+    // request) when no unitPrice is supplied.
+    insertStockIO.mockClear();
+    await service.recordMovement({
+      itemId: 'item-1',
+      branchId: 'branch-1',
+      movementType: MovementType.SALE,
+      quantity: 1,
+      referenceType: 'COMPLIANCE_DOCUMENT',
+      referenceId: 'doc-2',
+    });
+    expect(insertStockIO).toHaveBeenCalledTimes(0);
   });
 });

@@ -18,4 +18,10 @@ export class TransferStockDto {
 
   @ApiProperty({ required: false, description: 'Optional correlation id' })
   referenceId?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Unit price, required for the eTIMS insertStockIO sync to succeed.',
+  })
+  unitPrice?: number;
 }

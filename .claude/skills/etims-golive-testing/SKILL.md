@@ -211,16 +211,21 @@ against compliance-api, then `GET /catalog/item-classifications?limit=5`.
 Stock Information Management (gates their `sendSalesTransaction` check):
 
 ```bash
-# Local (compliance-api)
+# Local (compliance-api) -- pass unitPrice or the eTIMS sync below is skipped, not sent with zeros
 curl -s -X PUT http://localhost:3001/api/stock/adjust -H "Content-Type: application/json" \
-  -d '{"itemId":"<item id>","branchId":"00","quantity":100,"action":"ADD"}'
+  -d '{"itemId":"<item id>","branchId":"00","quantity":100,"action":"ADD","unitPrice":100}'
 ```
 
-This also *attempts* to push `insertStockIO`/`saveStockMaster` to KRA automatically
-(`ETIMS_STOCK_SYNC`/`ETIMS_STOCK_MASTER_SYNC`), but that path has no pricing data to work with (generic
-stock adjustments carry no unit price) and KRA rejects zero amounts — check for a `WARN` in
-`compliance-api.log` and if it failed, push the KRA-side registration manually per
-`references/oscu-payload-gotchas.md` before trying a sale.
+This also pushes `insertStockIO`/`saveStockMaster` to KRA automatically
+(`ETIMS_STOCK_SYNC`/`ETIMS_STOCK_MASTER_SYNC`). It used to be unconditionally broken because generic stock
+adjustments carry no unit price and KRA rejects a zero `totAmt` -- fixed 2026-08-11 by adding an optional
+`unitPrice` to `PUT /api/stock/adjust` / `POST /api/stock/transfer` (and to `recordMovement()` internally).
+With a `unitPrice`, `InventoryService.syncStockMovementToEtims()` computes real tax-inclusive `splyAmt`/
+`taxblAmt`/`taxAmt` (same `splitTaxInclusiveAmount()` rule as sales, see below) and sends a valid request.
+Without one, it now logs a clear `WARN` and skips the call entirely instead of sending a doomed zero-amount
+request. If you still see a `WARN` with `unitPrice` supplied, it's a real KRA-side rejection -- check
+`compliance-api.log` (see note on reading `HTTP 400 calling OSCU` below) and cross-reference
+`references/oscu-payload-gotchas.md`.
 
 Then the sale, and — once `complianceStatus` is `ACCEPTED` — a credit note referencing it:
 
@@ -243,9 +248,11 @@ SELECT eventType, responseSnapshot FROM compliance_events
 WHERE documentId LIKE '%<traderInvoiceNumber>%' ORDER BY createdAt DESC LIMIT 1\G"
 ```
 
-Get the *real* raw KRA error from `responseSnapshot`/`oscu_operation_logs`, not the generic
-`"HTTP 400 calling OSCU"` the HTTP wrapper surfaces at the API boundary — the wrapper strips detail on
-purpose, but you need it for debugging.
+The `WARN` line in `compliance-api.log` (e.g. `eTIMS insertStockIO rejected: HTTP 400 calling OSCU: <detail>`)
+now includes KRA's actual `debugMessage`/`customerMessage` when the rejection is HTTP-level (not just a
+KRA-envelope `resultCd`/`resultMsg`) -- fixed 2026-08-11 in `etims-adapter.http.ts`'s `describeHttpRejection()`
+after repeatedly having to re-derive it by hand from `responseSnapshot`/`oscu_operation_logs`. If you still
+need the full raw payload, it's there too.
 
 ## Step 5 — Work through the rest of the checklist
 

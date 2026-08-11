@@ -73,6 +73,24 @@ function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 429 || (status >= 500 && status <= 599);
 }
 
+/**
+ * On a non-2xx HTTP response, `postOscu()`'s `raw` is the whole parsed body
+ * (since `responseBody` is null), which for Apigee integrator errors looks
+ * like `{ responseHeader: { responseCode, customerMessage, debugMessage }, responseBody: null }`.
+ * Without this, every HTTP-level rejection collapsed into an undiagnosable
+ * "HTTP 400 calling OSCU" -- confirmed live 2026-08-11 debugging insertStockIO,
+ * where the real cause ("Incorrect Quantity Unit Code...") was sitting right
+ * there in the response body the whole time.
+ */
+function describeHttpRejection(status: number, raw: Record<string, unknown>): string {
+  const header = asRecord(raw['responseHeader']);
+  const detail =
+    (header && safeString(header['debugMessage'])) ||
+    (header && safeString(header['customerMessage'])) ||
+    '';
+  return detail ? `HTTP ${status} calling OSCU: ${detail}` : `HTTP ${status} calling OSCU`;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object') return null;
   if (Array.isArray(value)) return null;
@@ -272,8 +290,8 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         return {
           success: false,
           error: retryable
-            ? `retryable: HTTP ${status} calling OSCU`
-            : `HTTP ${status} calling OSCU`,
+            ? `retryable: ${describeHttpRejection(status, raw)}`
+            : describeHttpRejection(status, raw),
           rawResponse,
         };
       }
@@ -344,8 +362,8 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         return {
           success: false,
           error: retryable
-            ? `retryable: HTTP ${status} calling OSCU`
-            : `HTTP ${status} calling OSCU`,
+            ? `retryable: ${describeHttpRejection(status, raw)}`
+            : describeHttpRejection(status, raw),
           rawResponse: responseSnapshot,
         };
       }
@@ -410,8 +428,8 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         return {
           success: false,
           error: retryable
-            ? `retryable: HTTP ${status} calling OSCU`
-            : `HTTP ${status} calling OSCU`,
+            ? `retryable: ${describeHttpRejection(status, raw)}`
+            : describeHttpRejection(status, raw),
           rawResponse,
         };
       }
@@ -471,8 +489,8 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         return {
           success: false,
           error: retryable
-            ? `retryable: HTTP ${status} calling OSCU`
-            : `HTTP ${status} calling OSCU`,
+            ? `retryable: ${describeHttpRejection(status, raw)}`
+            : describeHttpRejection(status, raw),
           rawResponse,
         };
       }
@@ -532,8 +550,8 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         return {
           success: false,
           error: retryable
-            ? `retryable: HTTP ${status} calling OSCU`
-            : `HTTP ${status} calling OSCU`,
+            ? `retryable: ${describeHttpRejection(status, raw)}`
+            : describeHttpRejection(status, raw),
           rawResponse,
         };
       }
@@ -603,8 +621,8 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         return {
           success: false,
           error: retryable
-            ? `retryable: HTTP ${status} calling OSCU`
-            : `HTTP ${status} calling OSCU`,
+            ? `retryable: ${describeHttpRejection(status, raw)}`
+            : describeHttpRejection(status, raw),
           rawResponse,
         };
       }

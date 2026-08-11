@@ -78,6 +78,13 @@ given a tax-inclusive total `T` and 16% VAT (`taxTyCd: "B"`):
 taxblAmt = T / 1.16
 taxAmt   = T - taxblAmt
 ```
+Same rule for `pkg` as `sendSalesTransaction` below — a real count, not `0`.
+
+The app's automatic sync (`InventoryService.syncStockMovementToEtims()`, triggered by `ETIMS_STOCK_SYNC=true`
+on `recordMovement()`/`adjustStock()`/`transferStock()`) implements exactly this — fixed 2026-08-11. It needs
+a `unitPrice` (pass it to `PUT /api/stock/adjust` / `POST /api/stock/transfer`) to compute `splyAmt`/
+`taxblAmt`/`taxAmt`; without one it now logs a `WARN` and skips the call rather than sending a doomed
+zero-amount request (previously it always sent one and always got rejected).
 
 ```json
 POST /insert/stockIO
@@ -102,7 +109,7 @@ POST /insert/stockIO
       "itemNm": "Test Item",
       "bcd": null,
       "pkgUnitCd": "NT",
-      "pkg": 0,
+      "pkg": 100,
       "qtyUnitCd": "NO",
       "qty": 100,
       "itemExprDt": null,
