@@ -340,6 +340,14 @@ with a misleading `400 "tin cannot be Null"` even though the header is clearly p
 exact error on an endpoint not yet documented here, try adding `"tin"` and `"bhfId"` to the body first
 before assuming something else is wrong.
 
+**`selectStockMoveList` had this as a real app bug, now fixed** — its adapter method
+(`etims-adapter.http.ts`) was running the request through `asJsonBody()`, which strips `tin`/`bhfId` for
+integrator-style calls (correct for write endpoints, since they're already in the headers there). Fixed by
+passing the request through untouched instead, matching how `getPurchaseTransactionInfo` (via
+`postOscuEnvelope`) already worked. **Audit any other lookup endpoint that calls `asJsonBody()` directly for
+the same bug** if you hit an empty/malformed response with no clear error message — check
+`oscu_operation_logs` for a response with blank `resultCd`/`resultMsg` as the signature.
+
 ## initialize
 
 ```json
