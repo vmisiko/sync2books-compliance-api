@@ -47,12 +47,17 @@ export class OscuMappingSeed {
     if (unitCount === 0) {
       await this.unitRepo.save(
         [
-          // Global defaults (merchantId = null)
-          // Internal 'EA' -> qty 'U' + packaging 'NT'
-          { internalUnit: 'EA', qtyUnitCd: 'U', pkgUnitCd: 'NT' },
+          // Global defaults (merchantId = null).
+          // qtyUnitCd must be exactly 2 characters -- OSCU embeds it verbatim in
+          // itemCd (spec section 4.19) and rejects shorter/longer codes with
+          // "Incorrect QtyUnitCd Prefix" (confirmed empirically against the sandbox
+          // 2026-08-10). The 1-char code 'U' ("Pieces/item") looked like the obvious
+          // match for count-based units but fails that check, so default to 'NO'
+          // ("Number") instead.
+          { internalUnit: 'EA', qtyUnitCd: 'NO', pkgUnitCd: 'NT' },
           // Some common internal variants
-          { internalUnit: 'EACH', qtyUnitCd: 'U', pkgUnitCd: 'NT' },
-          { internalUnit: 'PCS', qtyUnitCd: 'U', pkgUnitCd: 'NT' },
+          { internalUnit: 'EACH', qtyUnitCd: 'NO', pkgUnitCd: 'NT' },
+          { internalUnit: 'PCS', qtyUnitCd: 'NO', pkgUnitCd: 'NT' },
           { internalUnit: 'KG', qtyUnitCd: 'KG', pkgUnitCd: 'NT' },
           { internalUnit: 'KILOGRAM', qtyUnitCd: 'KG', pkgUnitCd: 'NT' },
           { internalUnit: 'L', qtyUnitCd: 'LTR', pkgUnitCd: 'NT' },
