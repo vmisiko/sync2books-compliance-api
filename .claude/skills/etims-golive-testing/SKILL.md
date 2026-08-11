@@ -17,6 +17,13 @@ the "obvious" version of each fails.
 
 ## The three repos
 
+This skill lives inside `sync2books-compliance-api/.claude/skills/`. All four project folders below
+(including that one) are siblings under one parent workspace directory — commands in this skill that `cd`
+into a project folder assume you start from that shared parent, not from inside `sync2books-compliance-api`
+itself. If unsure where that parent is, it's the directory containing `sync2books-compliance-api/.claude/`
+that this very file lives under (two levels up from `SKILL.md`) — use `pwd`/`find` to confirm before running
+the `cd` commands below rather than assuming.
+
 - `sync2books-compliance-api` (NestJS) — talks directly to KRA's sandbox
   (`https://sbx.kra.go.ke/etims-oscu/api/v1`, integrator path style). Needs its own MySQL.
 - `nest-sync-2-books-api` (NestJS, "main API") — sits in front of compliance-api. Has a **direct REST API**
