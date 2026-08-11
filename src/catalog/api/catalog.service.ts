@@ -91,6 +91,7 @@ export class CatalogService {
       itemRepo: this.itemRepo,
       connectionRepo: this.connectionRepo,
       etimsAdapter: this.etimsAdapter,
+      syncStateRepo: this.oscuSyncStateRepo,
     });
   }
 

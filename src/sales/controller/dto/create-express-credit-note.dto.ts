@@ -32,4 +32,13 @@ export class CreateExpressCreditNoteDto {
       'Invoice status code override (defaults to original sale or 02)',
   })
   invoiceStatusCode?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'OSCU rfdRsnCd (credit note reason). Spec codes: 01 Missing Quantity, ' +
+      '02 Missing data, 03 Damaged, 04 Wasted, 05 Shortage, 06 Refund. ' +
+      'Defaults to 06 (Refund) -- KRA rejects a missing/invalid value.',
+  })
+  creditNoteReasonCode?: string;
 }

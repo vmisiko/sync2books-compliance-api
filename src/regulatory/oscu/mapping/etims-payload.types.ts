@@ -24,6 +24,16 @@ export interface EtimsInvoicePayload {
   /** Document reference */
   documentNumber: string;
   documentType: string;
+  /**
+   * OSCU `invcNo` -- a real, persistent, strictly-incrementing-from-1 sequence per
+   * (kraPin, environment). NOT derived from documentNumber text (KRA rejects a
+   * mismatched value with "Invalid invcNo sequence, expected: N but found: M",
+   * confirmed live 2026-08-11). Falls back to 1 if unset (should not happen once
+   * submit-document.usecase.ts allocates it).
+   */
+  invoiceSequence: number;
+  /** For CREDIT_NOTE: the original sale's `invoiceSequence` (its OSCU invcNo). */
+  originalInvoiceSequence?: number;
   /** Sales metadata */
   saleDate?: string;
   receiptTypeCode?: string;

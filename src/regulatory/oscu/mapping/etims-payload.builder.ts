@@ -26,6 +26,10 @@ export class EtimsPayloadBuilder {
     const payload: EtimsInvoicePayload = {
       documentNumber: document.documentNumber,
       documentType: document.documentType,
+      // Allocated by submit-document.usecase.ts before this is called -- see
+      // allocateInvoiceSequence there. Falling back to 1 should not happen in
+      // practice; it's only a guard against calling this builder out of sequence.
+      invoiceSequence: document.oscuInvcNo ?? 1,
       originalDocumentNumber: document.originalDocumentNumber ?? undefined,
       creditNoteDate: document.creditNoteDate ?? undefined,
       creditNoteReasonCode: document.creditNoteReasonCode ?? undefined,

@@ -42,7 +42,7 @@ describe('QB import → Catalog item registration (matrix)', () => {
     expect(res.created).toBe(true);
     expect(res.item.externalId).toBe('qb-1');
     expect(res.item.taxTyCd).toBe('B');
-    expect(res.item.unitCode).toBe('U');
+    expect(res.item.unitCode).toBe('NO');
     expect(res.item.packagingUnitCode).toBe('NT');
   });
 
@@ -81,8 +81,8 @@ describe('QB import → Catalog item registration (matrix)', () => {
     expect(res.created).toBe(true);
     // taxCategory OTHER -> taxTyCd D (global default seed)
     expect(res.item.taxTyCd).toBe('D');
-    // internalUnit defaults to EA -> qty U + pkg NT (global default seed)
-    expect(res.item.unitCode).toBe('U');
+    // internalUnit defaults to EA -> qty NO + pkg NT (global default seed)
+    expect(res.item.unitCode).toBe('NO');
     expect(res.item.packagingUnitCode).toBe('NT');
   });
 

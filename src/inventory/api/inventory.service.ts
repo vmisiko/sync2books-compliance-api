@@ -1,4 +1,6 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import type { Repository } from 'typeorm';
 import { recordMovement } from '../application/use-cases/record-movement.usecase';
 import type {
   IStockMovementRepository,
@@ -20,6 +22,7 @@ import type { IEtimsAdapter } from '../../regulatory/oscu/ports/etims-adapter.po
 import type { ComplianceItem } from '../../shared/domain/entities/compliance-item.entity';
 import type { InventoryStock } from '../domain/entities/inventory-stock.entity';
 import type { StockMovement } from '../domain/entities/stock-movement.entity';
+import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
 
 @Injectable()
 export class InventoryService {
@@ -39,6 +42,9 @@ export class InventoryService {
     @Optional()
     @Inject(ETIMS_ADAPTER)
     private readonly etimsAdapter?: IEtimsAdapter,
+    @Optional()
+    @InjectRepository(OscuSyncStateOrmEntity)
+    private readonly syncStateRepo?: Repository<OscuSyncStateOrmEntity>,
   ) {}
 
   private shouldSyncMovementsToEtims(): boolean {
@@ -59,6 +65,26 @@ export class InventoryService {
       `${pad2(date.getUTCMinutes())}` +
       `${pad2(date.getUTCSeconds())}`
     );
+  }
+
+  private formatYyyyMMddUtc(date: Date): string {
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    return `${date.getUTCFullYear()}${pad2(date.getUTCMonth() + 1)}${pad2(date.getUTCDate())}`;
+  }
+
+  /**
+   * KRA validates `sarNo` is strictly incrementing per tin, starting at 1 --
+   * same requirement as the OSCU itemCd sequence (see sync-items.usecase.ts).
+   * A timestamp-based sarNo will eventually collide with the sandbox's
+   * "Invalid sarNo: Expected X" check, so persist a real counter instead.
+   */
+  private async allocateSarNo(kraPin: string, environment: string): Promise<number> {
+    if (!this.syncStateRepo) return Date.now();
+    const syncKey = `stock_sar_no:${kraPin}:${environment}`;
+    const existing = await this.syncStateRepo.findOne({ where: { syncKey } });
+    const next = (existing?.lastReqDt ? parseInt(existing.lastReqDt, 10) : 0) + 1;
+    await this.syncStateRepo.upsert({ syncKey, lastReqDt: String(next) }, ['syncKey']);
+    return next;
   }
 
   private mapSarTyCd(movement: StockMovement): string {
@@ -116,37 +142,42 @@ export class InventoryService {
     );
     if (!connection) return;
 
-    const ocrnDt = this.formatYyyyMMddhhmmssUtc(movement.createdAt);
-    const sarNo = movement.createdAt.getTime();
+    // Note: qty-only adjustments carry no unit price, so tot*/taxblAmt/taxAmt
+    // are 0 here. KRA's sandbox rejects a literal 0 on `totAmt` ("Expected a
+    // value ... but it is empty or null"), so this call will still fail
+    // validation until item pricing is modeled -- logged below instead of
+    // swallowed, so that gap is visible rather than silent.
+    const ocrnDt = this.formatYyyyMMddUtc(movement.createdAt);
+    const sarNo = await this.allocateSarNo(connection.kraPin, connection.environment);
     const qty = Math.abs(movement.quantity);
 
     try {
-      await adapter.insertStockIO(
+      const result = await adapter.insertStockIO(
         {
           tin: connection.kraPin,
           bhfId: stock.branchId,
           cmcKey: connection.cmcKey,
           sarNo,
+          orgSarNo: null,
+          regTyCd: this.mapRegTyCd(movement),
+          custTin: null,
+          custNm: null,
+          custBhfId: null,
+          sarTyCd: this.mapSarTyCd(movement),
+          ocrnDt,
+          totItemCnt: 1,
+          totTaxblAmt: 0,
+          totTaxAmt: 0,
+          totAmt: 0,
+          remark: movement.referenceId
+            ? `${movement.referenceType ?? 'REF'}:${movement.referenceId}`
+            : movement.referenceType,
+          regrId: 'sync2books',
+          regrNm: 'sync2books',
+          modrId: 'sync2books',
+          modrNm: 'sync2books',
           itemList: [
             {
-              orgSarNo: null,
-              regTyCd: this.mapRegTyCd(movement),
-              custTin: null,
-              custNm: null,
-              custBhfId: null,
-              sarTyCd: this.mapSarTyCd(movement),
-              ocrnDt,
-              totItemCnt: 1,
-              totTaxblAmt: 0,
-              totTaxAmt: 0,
-              totAmt: 0,
-              remark: movement.referenceId
-                ? `${movement.referenceType ?? 'REF'}:${movement.referenceId}`
-                : movement.referenceType,
-              regrId: 'sync2books',
-              regrNm: 'sync2books',
-              modrId: 'sync2books',
-              modrNm: 'sync2books',
               itemSeq: 1,
               itemCd,
               itemClsCd: item.classificationCode,
@@ -175,6 +206,9 @@ export class InventoryService {
           deviceId: connection.deviceId,
         },
       );
+      if (!result.success) {
+        this.logger.warn(`eTIMS insertStockIO rejected: ${result.error}`);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.logger.warn(`eTIMS insertStockIO failed: ${msg}`);
@@ -204,7 +238,7 @@ export class InventoryService {
     if (!connection) return;
 
     try {
-      await adapter.saveStockMaster(
+      const result = await adapter.saveStockMaster(
         {
           tin: connection.kraPin,
           bhfId: stock.branchId,
@@ -225,6 +259,9 @@ export class InventoryService {
           deviceId: connection.deviceId,
         },
       );
+      if (!result.success) {
+        this.logger.warn(`eTIMS saveStockMaster rejected: ${result.error}`);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.logger.warn(`eTIMS saveStockMaster failed: ${msg}`);

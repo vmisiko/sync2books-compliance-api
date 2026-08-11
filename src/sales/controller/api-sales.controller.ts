@@ -232,6 +232,13 @@ export class ApiSalesController {
         originalDocumentNumber: original.documentNumber,
         originalSaleId: body.saleId,
         saleDate: body.returnDate,
+        // OSCU rfdDt (credit note date) is required -- KRA rejects a null value
+        // with "Missing RfdDt Date" (confirmed live 2026-08-11). Express credit
+        // notes don't take a separate date field, so derive it from returnDate.
+        creditNoteDate: body.returnDate,
+        // OSCU rfdRsnCd is required too -- KRA rejects a missing value with
+        // "Invalid RfdRsnCd" (confirmed live 2026-08-11). Default to 06 (Refund).
+        creditNoteReasonCode: body.creditNoteReasonCode ?? '06',
         receiptTypeCode: 'R',
         paymentTypeCode:
           body.paymentTypeCode ?? original.paymentTypeCode ?? '01',

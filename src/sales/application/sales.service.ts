@@ -1,4 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import type { Repository } from 'typeorm';
+import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
 import type {
   CreateDocumentInput,
   CreateDocumentResult,
@@ -53,6 +56,8 @@ export class SalesService {
     @Inject(ETIMS_ADAPTER)
     private readonly etimsAdapter: IEtimsAdapter,
     private readonly inventoryService: InventoryService,
+    @InjectRepository(OscuSyncStateOrmEntity)
+    private readonly syncStateRepo: Repository<OscuSyncStateOrmEntity>,
   ) {}
 
   async createDocument(
@@ -120,6 +125,7 @@ export class SalesService {
       this.connectionRepo,
       this.eventRepo,
       this.etimsAdapter,
+      this.syncStateRepo,
     );
   }
 
@@ -496,7 +502,8 @@ const TAX_RATE_BY_TAX_TY_CD: Record<string, number> = {
   B: 16,
   C: 0,
   D: 0,
-  E: 8,
+  // Confirmed live against the sandbox 2026-08-11 (see oscu-sales-request.builder.ts).
+  E: 0,
 };
 
 function taxRateByTaxTypeCode(code: string | null): number {

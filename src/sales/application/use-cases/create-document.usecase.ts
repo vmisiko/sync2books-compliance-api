@@ -89,7 +89,10 @@ export async function createDocument(
       documentId: '',
       itemId: l.itemId,
       etimsItemCodeSnapshot: item.etimsItemCode ?? null,
-      description: l.description,
+      // Falls back to the catalog item's own name, same as the other snapshot
+      // fields below -- an empty description becomes OSCU `itemNm`, which KRA
+      // rejects with "Expected a value for itemNm" if left blank.
+      description: l.description && l.description.trim() !== '' ? l.description : item.name,
       quantity: l.quantity,
       unitPrice: l.unitPrice,
       taxCategory: l.taxCategory as ComplianceLine['taxCategory'],
@@ -140,6 +143,7 @@ export async function createDocument(
     complianceStatus: ComplianceStatus.DRAFT,
     submissionAttempts: 0,
     etimsReceiptNumber: null,
+    oscuInvcNo: null,
     idempotencyKey,
     createdAt: now,
     submittedAt: null,

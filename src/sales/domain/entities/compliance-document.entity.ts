@@ -53,6 +53,12 @@ export interface ComplianceDocument {
   complianceStatus: ComplianceStatus;
   submissionAttempts: number;
   etimsReceiptNumber: string | null;
+  /**
+   * OSCU `invcNo` -- persistent, strictly-incrementing-from-1 sequence per
+   * (kraPin, environment), allocated on first submission and reused on retry.
+   * Null until first submitDocument() call.
+   */
+  oscuInvcNo: number | null;
   idempotencyKey: string;
   createdAt: Date;
   submittedAt: Date | null;

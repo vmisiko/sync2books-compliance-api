@@ -15,6 +15,7 @@ import { ComplianceDocumentTypeOrmRepository } from './infrastructure/persistenc
 import { ComplianceEventTypeOrmRepository } from './infrastructure/persistence/compliance-event-typeorm.repository';
 import { ComplianceServiceAuthModule } from '../integration/compliance-service-auth.module';
 import { PlatformCorrelationModule } from '../integration/platform-correlation.module';
+import { OscuSyncStateOrmEntity } from '../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { PlatformCorrelationModule } from '../integration/platform-correlation.m
       ComplianceDocumentOrmEntity,
       ComplianceLineOrmEntity,
       ComplianceEventOrmEntity,
+      OscuSyncStateOrmEntity,
     ]),
   ],
   controllers: [ApiSalesController, DashboardSalesController],

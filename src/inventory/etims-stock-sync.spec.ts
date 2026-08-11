@@ -128,7 +128,7 @@ describe('InventoryService eTIMS stock sync', () => {
 
     expect(insertStockIO).toHaveBeenCalledTimes(1);
     const req: OscuStockIOSaveReq = insertStockIO.mock.calls[0][0];
-    expect(req.itemList[0].sarTyCd).toBe('11'); // sale
+    expect(req.sarTyCd).toBe('11'); // sale
     expect(req.itemList[0].qty).toBe(5); // absolute
     expect(req.itemList[0].itemCd).toBe('IT000000000001');
 

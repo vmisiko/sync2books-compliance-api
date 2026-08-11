@@ -10,6 +10,7 @@ describe('OscuSalesRequestBuilder', () => {
       payload: {
         documentNumber: 'INV-123',
         documentType: 'SALE_INVOICE',
+        invoiceSequence: 1,
         branchId: '00',
         deviceId: 'dev',
         currency: 'KES',
@@ -37,12 +38,19 @@ describe('OscuSalesRequestBuilder', () => {
     expect(req.tin).toBe('A123456789Z');
     expect(req.bhfId).toBe('00');
     expect(req.trdInvcNo).toBe('INV-123');
+    // invcNo comes from the real allocated sequence, not parsed from documentNumber.
+    expect(req.invcNo).toBe(1);
     expect(req.rcptTyCd).toBe('S');
     expect(req.totItemCnt).toBe(1);
-    expect(req.taxblAmtB).toBe(100);
-    expect(req.taxAmtB).toBe(16);
-    expect(req.totTaxblAmt).toBe(100);
-    expect(req.totTaxAmt).toBe(16);
+    // KRA treats splyAmt (qty * unitPrice = 100) as the tax-inclusive line total and
+    // derives taxblAmt/taxAmt from it -- confirmed live against the sandbox 2026-08-11.
+    expect(req.taxblAmtB).toBe(86.21);
+    expect(req.taxAmtB).toBe(13.79);
+    expect(req.totTaxblAmt).toBe(86.21);
+    expect(req.totTaxAmt).toBe(13.79);
+    expect(req.totAmt).toBe(100);
+    expect(req.itemList[0].totAmt).toBe(100);
+    expect(req.itemList[0].pkg).toBe(1);
     expect(req.itemList[0].itemClsCd).toBe('14111400');
     expect(req.itemList[0].qtyUnitCd).toBe('U');
     expect(req.itemList[0].pkgUnitCd).toBe('NT');
@@ -59,6 +67,7 @@ describe('OscuSalesRequestBuilder', () => {
       payload: {
         documentNumber: 'CN-1',
         documentType: 'CREDIT_NOTE',
+        invoiceSequence: 2,
         originalDocumentNumber: 'INV-123',
         branchId: '00',
         deviceId: 'dev',

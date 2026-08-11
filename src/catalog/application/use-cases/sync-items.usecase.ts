@@ -1,9 +1,10 @@
-import { createHash } from 'crypto';
+import type { Repository } from 'typeorm';
 import type { CatalogItem } from '../../domain/entities/catalog-item.entity';
 import type { ICatalogItemRepository } from '../../domain/ports/item-repository.port';
 import type { IComplianceConnectionRepository } from '../../../shared/ports/repository.port';
 import type { IEtimsAdapter } from '../../../regulatory/oscu/ports/etims-adapter.port';
 import type { OscuItemSaveReq } from '../../../regulatory/oscu/transport/endpoints/item-save.dto';
+import { OscuSyncStateOrmEntity } from '../../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
 
 export interface SyncItemsInput {
   merchantId: string;
@@ -40,35 +41,56 @@ export interface SyncItemsResult {
 }
 
 /**
- * OSCU `itemCd` is not arbitrary -- KRA validates it's built from the item's own
- * registered codes. Decoded from the OSCU Postman collection's saveItem example
- * ("AO2NTBA00000005" alongside orgnNatCd="AO", itemTyCd="2", pkgUnitCd="NT",
- * qtyUnitCd="BA"): `orgnNatCd + itemTyCd + pkgUnitCd + qtyUnitCd + <8-digit seq>`.
- * Confirmed empirically: reusing a foreign itemCd whose embedded qtyUnitCd segment
- * didn't match the qtyUnitCd field sent alongside it was rejected by /insert/stockIO
- * with "Incorrect QtyUnitCd Prefix".
+ * OSCU `itemCd` format, per spec section 4.19 "Item Code":
+ * `orgnNatCd(2) + itemTyCd(1) + pkgUnitCd(2) + qtyUnitCd(2) + seq(7 digits, from 0000001)`
+ * e.g. "KE2NTBA0000012".
  *
- * The 8-digit sequence is derived deterministically from merchantId+item.id so the
- * same item always gets the same itemCd across retries (mirrors the previous
- * hash-based scheme's determinism, just now formula-compliant).
+ * Confirmed empirically against the sandbox (2026-08-10, PIN P600004123A):
+ * - qtyUnitCd MUST be exactly 2 characters -- a 1-char code (e.g. "U") is rejected
+ *   with `400 "Incorrect QtyUnitCd Prefix"` even with an otherwise well-formed itemCd.
+ * - seq MUST be 7 digits, not 8, and must be the next unused value for this tin
+ *   (KRA rejected an out-of-order 7-digit seq with
+ *   `400 "Invalid itemCd Sequence. Expected sequence ending with: ********1"`).
  */
-function generateEtimsItemCd(item: {
-  merchantId: string;
-  id: string;
-  productTypeCode: string;
-  packagingUnitCode: string;
-  unitCode: string;
-}): string {
+function generateEtimsItemCd(
+  item: {
+    productTypeCode: string;
+    packagingUnitCode: string;
+    unitCode: string;
+  },
+  seq: number,
+): string {
+  if (item.unitCode.length !== 2) {
+    throw new Error(
+      `qtyUnitCd "${item.unitCode}" must be exactly 2 characters to embed in an OSCU itemCd ` +
+        `(spec section 4.19) -- fix the unit mapping for this item instead of guessing a padding scheme`,
+    );
+  }
   const orgnNatCd = 'KE';
-  const digest = createHash('sha256')
-    .update(item.merchantId)
-    .update('|')
-    .update(item.id)
-    .digest('hex');
-  const seq = (parseInt(digest.slice(0, 8), 16) % 100_000_000)
-    .toString()
-    .padStart(8, '0');
-  return `${orgnNatCd}${item.productTypeCode}${item.packagingUnitCode}${item.unitCode}${seq}`;
+  const seqStr = seq.toString().padStart(7, '0');
+  if (seqStr.length > 7) {
+    throw new Error(`itemCd sequence overflowed 7 digits: ${seq}`);
+  }
+  return `${orgnNatCd}${item.productTypeCode}${item.packagingUnitCode}${item.unitCode}${seqStr}`;
+}
+
+/**
+ * KRA validates the itemCd sequence is strictly incrementing per tin, starting at
+ * 0000001 -- not just unique. Track the last-issued value per (kraPin, environment)
+ * in `oscu_sync_state` (same table used for other OSCU watermarks) and hand out the
+ * next one. Only called when an item doesn't already have a persisted itemCd, so
+ * retries of the same item never burn a new sequence number.
+ */
+async function allocateItemCdSequence(
+  syncStateRepo: Repository<OscuSyncStateOrmEntity>,
+  kraPin: string,
+  environment: string,
+): Promise<number> {
+  const syncKey = `item_cd_seq:${kraPin}:${environment}`;
+  const existing = await syncStateRepo.findOne({ where: { syncKey } });
+  const next = (existing?.lastReqDt ? parseInt(existing.lastReqDt, 10) : 0) + 1;
+  await syncStateRepo.upsert({ syncKey, lastReqDt: String(next) }, ['syncKey']);
+  return next;
 }
 
 function normalizeNonEmptyString(value: unknown): string | null {
@@ -83,6 +105,7 @@ export async function syncItemsToEtims(
     itemRepo: ICatalogItemRepository;
     connectionRepo: IComplianceConnectionRepository;
     etimsAdapter: IEtimsAdapter;
+    syncStateRepo: Repository<OscuSyncStateOrmEntity>;
   },
 ): Promise<SyncItemsResult> {
   const onlyPending = input.force ? false : (input.onlyPending ?? true);
@@ -113,8 +136,15 @@ export async function syncItemsToEtims(
 
   const results: SyncItemResult[] = [];
   for (const item of toSync) {
-    const itemCd =
-      normalizeNonEmptyString(item.etimsItemCode) ?? generateEtimsItemCd(item);
+    let itemCd = normalizeNonEmptyString(item.etimsItemCode);
+    if (!itemCd) {
+      const seq = await allocateItemCdSequence(
+        deps.syncStateRepo,
+        connection.kraPin,
+        connection.environment,
+      );
+      itemCd = generateEtimsItemCd(item, seq);
+    }
     const now = new Date();
 
     const request: OscuItemSaveReq = {
