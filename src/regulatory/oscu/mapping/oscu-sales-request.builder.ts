@@ -6,7 +6,9 @@ const TAX_RATE_BY_TAX_TY_CD: Record<string, number> = {
   B: 16,
   C: 0,
   D: 0,
-  E: 8,
+  // Confirmed live against the sandbox 2026-08-11: KRA rejects taxRtE: 8 with
+  // "Rule taxRtE failed: Tax rate mismatch. Expected: 0.00, Found: 8".
+  E: 0,
 };
 
 export class OscuSalesRequestBuilder {
@@ -25,9 +27,17 @@ export class OscuSalesRequestBuilder {
     const yyyyMMddhhmmss = formatYyyyMMddhhmmss(now);
 
     const itemList = params.payload.lines.map((l, idx) => {
+      // KRA treats splyAmt (qty * unitPrice) as the tax-INCLUSIVE line total and
+      // derives taxblAmt/taxAmt from it, rather than accepting a separately-computed
+      // tax-exclusive taxblAmt + taxAmt on top -- confirmed live 2026-08-11: a request
+      // with taxblAmt: splyAmt (i.e. treating unitPrice as tax-exclusive) was rejected
+      // with "Invalid taxblAmt on item: N. Expected: <splyAmt/rate>, But Found: <splyAmt>".
+      // Same rule as insertStockIO (see oscu-payload-gotchas.md).
       const splyAmt = round2(l.quantity * l.unitPrice);
-      const taxAmt = round2(l.taxAmount);
-      const totAmt = round2(splyAmt + taxAmt);
+      const rate = TAX_RATE_BY_TAX_TY_CD[l.taxTyCd.toUpperCase()] ?? 0;
+      const taxblAmt = rate > 0 ? round2(splyAmt / (1 + rate / 100)) : splyAmt;
+      const taxAmt = round2(splyAmt - taxblAmt);
+      const totAmt = splyAmt;
       return {
         itemSeq: idx + 1,
         itemClsCd: l.classificationCode,
@@ -35,7 +45,9 @@ export class OscuSalesRequestBuilder {
         itemNm: l.description,
         bcd: null,
         pkgUnitCd: l.packagingUnitCode,
-        pkg: 0,
+        // KRA rejects pkg: 0 with "Invalid pkg for ItemList N. Expected: <qty>, Found: 0"
+        // (confirmed live 2026-08-11) -- it wants a real package count, not a placeholder.
+        pkg: l.quantity,
         qtyUnitCd: l.unitCode,
         qty: l.quantity,
         prc: l.unitPrice,
@@ -43,7 +55,7 @@ export class OscuSalesRequestBuilder {
         dcRt: 0,
         dcAmt: 0,
         taxTyCd: l.taxTyCd,
-        taxblAmt: splyAmt,
+        taxblAmt,
         taxAmt,
         totAmt,
       };
@@ -76,10 +88,12 @@ export class OscuSalesRequestBuilder {
       bhfId: params.bhfId,
       cmcKey: params.cmcKey,
       trdInvcNo: params.payload.documentNumber,
-      invcNo: safeParseInt(params.payload.documentNumber) ?? 1,
+      invcNo: params.payload.invoiceSequence,
       orgInvcNo:
         params.payload.documentType === 'CREDIT_NOTE'
-          ? (safeParseInt(params.payload.originalDocumentNumber ?? '') ?? 0)
+          ? (params.payload.originalInvoiceSequence ??
+            safeParseInt(params.payload.originalDocumentNumber ?? '') ??
+            0)
           : 0,
       custTin: params.payload.customerPin ?? null,
       custNm: params.payload.customerName ?? null,
@@ -112,7 +126,9 @@ export class OscuSalesRequestBuilder {
       taxAmtE: taxBuckets.taxAmtE,
       totTaxblAmt: taxBuckets.totTaxblAmt,
       totTaxAmt: taxBuckets.totTaxAmt,
-      totAmt: round2(params.payload.totalAmount),
+      // = sum of item totAmt (each = splyAmt, tax-inclusive) -- NOT payload.totalAmount,
+      // which double-counts tax under the old (incorrect) exclusive-pricing assumption.
+      totAmt: round2(itemList.reduce((sum, i) => sum + i.totAmt, 0)),
       prchrAcptcYn: params.payload.purchaseAcceptanceYn ?? 'N',
       remark: null,
       regrId: 'sync2books',

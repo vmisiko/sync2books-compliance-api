@@ -80,6 +80,15 @@ export class ComplianceDocumentOrmEntity {
   @Column('varchar', { nullable: true })
   etimsReceiptNumber!: string | null;
 
+  /**
+   * OSCU `invcNo` -- a real, persistent, strictly-incrementing-from-1 sequence per
+   * (kraPin, environment), NOT parsed from the human-readable documentNumber. KRA
+   * rejects a wrong invcNo with "Invalid invcNo sequence, expected: N but found: M"
+   * (confirmed live 2026-08-11). Allocated once on first submission, reused on retry.
+   */
+  @Column('int', { nullable: true })
+  oscuInvcNo!: number | null;
+
   @Column('varchar')
   @Index({ unique: true })
   idempotencyKey!: string;

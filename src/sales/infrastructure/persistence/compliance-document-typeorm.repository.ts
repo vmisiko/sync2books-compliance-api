@@ -59,6 +59,7 @@ function docOrmToDomain(
       row.complianceStatus as ComplianceDocument['complianceStatus'],
     submissionAttempts: row.submissionAttempts,
     etimsReceiptNumber: row.etimsReceiptNumber,
+    oscuInvcNo: row.oscuInvcNo,
     idempotencyKey: row.idempotencyKey,
     createdAt: row.createdAt,
     submittedAt: row.submittedAt,
@@ -94,6 +95,7 @@ function docDomainToOrm(
   e.complianceStatus = document.complianceStatus;
   e.submissionAttempts = document.submissionAttempts;
   e.etimsReceiptNumber = document.etimsReceiptNumber;
+  e.oscuInvcNo = document.oscuInvcNo;
   e.idempotencyKey = document.idempotencyKey;
   e.createdAt = document.createdAt;
   e.submittedAt = document.submittedAt;

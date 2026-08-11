@@ -143,6 +143,7 @@ export async function createDocument(
     complianceStatus: ComplianceStatus.DRAFT,
     submissionAttempts: 0,
     etimsReceiptNumber: null,
+    oscuInvcNo: null,
     idempotencyKey,
     createdAt: now,
     submittedAt: null,
