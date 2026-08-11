@@ -264,6 +264,15 @@ prior correspondence on this integration confirmed that; don't waste time trying
 non-empty data. The compliance-api HTTP wrapper surfaces both as an error though, so check
 `oscu_operation_logs` for the real `resultCd` rather than trusting the HTTP status code.
 
+`selectCustomerList` (`GET /oscu/customers?merchantId=...&branchId=...`) was missing entirely until
+2026-08-11 — every other lookup in the dashboard checklist had a route, this one didn't. Added following the
+exact same generic-envelope pattern as `branchList`/`selectNoticeList`/`customerPinInfo` (no special-casing
+needed, unlike `selectStockMoveList`); confirmed live with `resultCd: "000"` and a real `custList` entry. If
+a *different* Go-Live test case 404s the same way, it's very likely the same gap: check
+`oscu-operations.controller.ts` for a matching route before assuming it's a payload bug, and wire it the same
+way if it's missing (port interface → http adapter one-liner via `postOscuEnvelope` → stub adapter → service
+dispatch entry → controller route).
+
 ## The developer.go.ke test-case dashboard
 
 This is KRA's own live tracker, separate from anything we control — reach it with **Claude in Chrome
