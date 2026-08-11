@@ -572,11 +572,14 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
     error?: string;
   }> {
     const path = resolveOscuPath(this.pathStyle, 'selectStockMoveList');
-    const body = asJsonBody(this.pathStyle, request);
+    // Unlike the write-style endpoints, this lookup rejects a body with tin/bhfId
+    // stripped out ("tin cannot be Null") even though they're already in the
+    // headers -- confirmed live 2026-08-11. Pass the request through as-is instead
+    // of running it through asJsonBody's integrator-style stripping.
     try {
       const { ok, status, raw } = await this.postOscu(
         path,
-        body,
+        { ...request },
         connectionContext,
       );
       const dataRaw = asRecord(raw['data']);
