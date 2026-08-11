@@ -127,6 +127,19 @@ POST /insert/stockIO
 movement, `05` adjustment, `06` processing; outgoing `11` sale, `12` return, `13` stock movement,
 `14` processing, `15` discarding, `16` adjustment.
 
+**Status as of 2026-08-11: payload/code confirmed correct, but no live `resultCd: "000"` yet obtained.**
+Every attempt (across 3 different items, including two freshly registered with `resultCd: "000"` on
+`saveItem` moments earlier) got the exact same `400`:
+`"Error occurred while validating item tax type: Please try again later"` — reproduced consistently over a
+~10 minute window, not a one-off. Since it reproduces identically on brand-new items right after a successful
+registration, and the message is KRA's own "try again later" wording (not a validation complaint about the
+payload shape), this looks like a KRA sandbox-side degradation in their item-tax-type-validation service
+specifically for `insertStockIO`, not a client bug — but it hasn't been proven to *always* be transient the
+way `importedItemConvertedInfo`'s "999 unknown error" was (that one resolved on immediate retry; this one
+didn't resolve across ~10 minutes of retries). If you hit this again: confirm the item really did register
+(`resultCd: "000"` on `saveItem`/`items/sync`), then retry `insertStockIO` after a longer wait (many minutes,
+not seconds) before assuming it's a new payload bug.
+
 ## saveStockMaster
 
 Must be called **after** `insertStockIO` for the same `itemCd` — calling it first fails with

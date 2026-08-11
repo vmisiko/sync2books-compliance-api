@@ -227,6 +227,16 @@ request. If you still see a `WARN` with `unitPrice` supplied, it's a real KRA-si
 `compliance-api.log` (see note on reading `HTTP 400 calling OSCU` below) and cross-reference
 `references/oscu-payload-gotchas.md`.
 
+**Status as of 2026-08-11: the code fix is confirmed correct (unit tested, and live requests correctly reach
+KRA with a well-formed payload -- confirmed via several different real KRA validation messages round-tripped
+successfully), but no live `insertStockIO`/`saveStockMaster` `resultCd: "000"` has actually been obtained
+yet.** Every live attempt has hit either transient local network flakiness (`fetch failed`/`ENETDOWN` in this
+dev sandbox -- unrelated to KRA, confirmed by retrying with a bare `node -e fetch()` to the same URL, which
+succeeded) or a KRA-side `"Error occurred while validating item tax type: Please try again later"` that
+reproduced identically across 3 different items (two of them freshly registered seconds earlier) over ~10
+minutes. Don't assume the fix is broken if you see this again -- see the detailed note in
+`references/oscu-payload-gotchas.md`'s `insertStockIO` section before re-debugging the payload.
+
 Then the sale, and — once `complianceStatus` is `ACCEPTED` — a credit note referencing it:
 
 ```bash
