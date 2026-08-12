@@ -95,7 +95,13 @@ export async function syncCodeList(
     },
   );
 
-  if (!envelope.success) {
+  // `resultCd: "001"` ("There is no search result") is KRA's documented way of saying
+  // "nothing new since your watermark" -- a valid empty response, not a failure. Without
+  // this, an incremental sync that legitimately has nothing new throws and surfaces as an
+  // uncaught 500, even though the OSCU call itself succeeded.
+  const resultCd = envelope.rawResponse?.['resultCd'];
+  const noNewResults = resultCd === '001';
+  if (!envelope.success && !noNewResults) {
     throw new Error(envelope.error ?? 'Failed to fetch code list from OSCU');
   }
 

@@ -37,6 +37,51 @@ flow (it exercises the same code paths a real integration would). Fall back to c
 `sync2books-compliance-api` directly, or raw `curl` against KRA's sandbox, when isolating whether a bug is
 in our code or in KRA's backend.
 
+**✅ RESOLVED 2026-08-12: the `JM9QLXNJ75` "Query did not return a unique result" corruption was scoped to the
+Apigee app, not the device serial — registering a brand-new Apigee app fixed it.** For 5 distinct Application
+Test Pins across ~2 days, `/initialize` failed identically under one Apigee app (first `cff33b56-...`, then
+`e0c07d61-...` after registering "a new app" that turned out to still carry the same corrupted session
+state). We initially (wrongly) concluded this meant the device serial itself was permanently corrupted
+KRA-side (see `KRA_SUPPORT_TICKET_DRAFT_2.md` updates 1-3) — don't trust that conclusion, it was superseded.
+The actual fix: register a genuinely new Apigee app on the Go-Live dashboard (new App ID + new OAuth
+client id/secret), update `.env`, **restart the server correctly** (see the process-management gotcha right
+below — a naive restart can silently keep the old app's env alive and produce a false "still broken"
+result, which is exactly what happened on the first attempt at this same fix), then call `/initialize` with
+the new pin against the *same* `dvcSrlNo`. It returned HTTP 200 on the first try. If you hit this exact
+error again in a future session, try a new Apigee app first (not a device serial reissue) — confirm the
+restart actually took effect before trusting the result either way.
+
+**⚠️ Process management gotcha (2026-08-12): `pkill -f "node_modules/.bin/nest start"` does NOT kill a
+running compliance-api/nest-api server.** `nest start` (non-watch mode, i.e. `pnpm start`) execs into
+`node dist/main` — the process's command line changes, so a pattern match on the original `nest start`
+invocation stops matching it after the exec. A "restart" that pkills by that pattern and then relaunches
+silently fails: the new process crashes with `EADDRINUSE` (port already held by the old one), while curl
+health checks against `/docs` or `/health` keep returning 200 because the **old** process, with its old env
+vars (old Apigee app id, old client id/secret, etc.), was never actually killed and is still the one serving
+traffic. This produced a false "still corrupted with a new Apigee app" result earlier in this project — the
+user had to catch it by asking "are you sure you used the new .env?". To restart correctly: find the actual
+listening PID with `lsof -ti :3001 -sTCP:LISTEN` (or `:3000` for nest-api), `kill -TERM` that exact PID,
+confirm `lsof` shows nothing on the port, then relaunch. After relaunching, verify the new env actually took
+effect *before trusting any test result against it*:
+`ps eww -p $(lsof -ti :3001 -sTCP:LISTEN) | tr ' ' '\n' | grep ETIMS_OSCU_APIGEE` and check it matches the
+current `.env`. The new centralized `postOscu()` logging (see below) also helps catch this class of mistake
+going forward — check the `merchant=... branch=... env=...` line actually reflects what you expect before
+trusting a result.
+
+**⚠️ Process management gotcha (2026-08-12): `pkill -f "node_modules/.bin/nest start"` does NOT kill a
+running compliance-api/nest-api server.** `nest start` (non-watch mode, i.e. `pnpm start`) execs into
+`node dist/main` — the process's command line changes, so a pattern match on the original `nest start`
+invocation stops matching it after the exec. A "restart" that pkills by that pattern and then relaunches
+silently fails: the new process crashes with `EADDRINUSE` (port already held by the old one), while curl
+health checks against `/docs` or `/health` keep returning 200 because the **old** process, with its old env
+vars (old Apigee app id, old client id/secret, etc.), was never actually killed and is still the one serving
+traffic. This produced a false "confirmed with a new Apigee app" result earlier in this project — don't
+repeat it. To restart correctly: find the actual listening PID with `lsof -ti :3001 -sTCP:LISTEN` (or `:3000`
+for nest-api), `kill -TERM` that exact PID, confirm `lsof` shows nothing on the port, then relaunch. After
+relaunching, verify the new env actually took effect before trusting any test result against it:
+`ps eww -p $(lsof -ti :3001 -sTCP:LISTEN) | tr ' ' '\n' | grep ETIMS_OSCU_APIGEE` and check it matches the
+current `.env`.
+
 ## Step 1 — Get credentials from the user
 
 Ask for whatever you don't already have, from the KRA Go-Live page (`developer.go.ke`) or the credentials

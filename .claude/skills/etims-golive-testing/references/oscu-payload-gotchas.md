@@ -135,10 +135,22 @@ Every attempt (across 3 different items, including two freshly registered with `
 registration, and the message is KRA's own "try again later" wording (not a validation complaint about the
 payload shape), this looks like a KRA sandbox-side degradation in their item-tax-type-validation service
 specifically for `insertStockIO`, not a client bug — but it hasn't been proven to *always* be transient the
-way `importedItemConvertedInfo`'s "999 unknown error" was (that one resolved on immediate retry; this one
+way `importedItemConvertedInfo`'s "999 unknown error" usually was (that one resolved on immediate retry; this one
 didn't resolve across ~10 minutes of retries). If you hit this again: confirm the item really did register
 (`resultCd: "000"` on `saveItem`/`items/sync`), then retry `insertStockIO` after a longer wait (many minutes,
 not seconds) before assuming it's a new payload bug.
+
+**Still reproducing 2026-08-12, now under a genuinely fresh device/Apigee-app session (the `JM9QLXNJ75`
+device-corruption bug from the main `SKILL.md` was fixed same-day by registering a new Apigee app — this is
+a *separate* issue).** Fresh item (`KE2NTNO0000001` under pin `P600004152A`), registered with `resultCd: 000`
+seconds earlier, still got `"Error occurred while validating item tax type: Please try again later"` on 3
+consecutive `insertStockIO` attempts a few minutes apart. This transitively blocked `sendSalesTransaction`
+too — KRA rejected the sale with `"Items provided under the itemList section do not exist in your stock.
+Consider adding them under Stock Information Management package to proceed."`, which is the expected
+consequence of `insertStockIO` never having succeeded (KRA's own stock records for this item are genuinely
+empty). This confirms the item-tax-type-validation issue is independent of the device/app corruption and is
+still unresolved as of this date — don't burn the test window retrying it more than once or twice per
+session; it hasn't cleared within any session tested so far.
 
 ## saveStockMaster
 
@@ -310,6 +322,15 @@ Two more requirements once you have a real record to reference:
 2. Amounts (`totItemCnt`, `taxblAmt*`, `totAmt`, etc.) must be internally consistent with whatever subset of
    the seller's `itemList` you reference — safest to reference exactly one item from the seed record and set
    totals to match just that one line, rather than trying to match a multi-item invoice exactly.
+3. **`splyAmt` is tax-INCLUSIVE here too — same rule as `insertStockIO`/`sendSalesTransaction` (see
+   `oscu-tax-rates.ts`), not the seed record's pre-tax `splyAmt`.** Confirmed live 2026-08-12: sending the
+   seed's own `splyAmt`/`taxblAmt`/`taxAmt` values verbatim (e.g. seed had `splyAmt: 1122`, `totAmt: 1302.07`
+   for a B-rate item) got rejected with `"Invalid splyAmnt on item: 1. Expected: 1302.07, But Found:
+   1122.00"` — KRA wants `splyAmt = totAmt` (tax-inclusive), then `taxblAmt = round(splyAmt / 1.16, 2)` and
+   `taxAmt = round(splyAmt - taxblAmt, 2)` derived from that, NOT copied from the seed item's own
+   (differently-rounded) `taxblAmt`/`taxAmt` — a second attempt reusing the seed's `taxblAmt: 1122`/
+   `taxAmt: 180.07` alongside the corrected `splyAmt` still got rejected (`"Invalid taxblAmt... Expected:
+   1122.47, But Found: 1122.00"`) until they were recomputed from the corrected `splyAmt` directly.
 
 ```json
 POST /sendPurchaseTransactionInfo
@@ -345,7 +366,10 @@ POST /sendPurchaseTransactionInfo
   }]
 }
 ```
-Confirmed working live 2026-08-11 with `resultCd: "000"`.
+Confirmed working live 2026-08-11 with `resultCd: "000"`, and reconfirmed live 2026-08-12 under a fresh
+Application Test Pin (with the corrected tax-inclusive `splyAmt` math above — the 2026-08-11 pass apparently
+used seed data where the pre-tax and post-tax numbers happened not to conflict, don't assume the seed's own
+`splyAmt`/`taxblAmt` are safe to copy verbatim).
 
 **No local persistence exists for purchases** (unlike sales, which has the full `ComplianceDocument`
 lifecycle) — `sendPurchaseTransaction` in `oscu-operations.service.ts` is a raw pass-through, and only
@@ -383,3 +407,33 @@ Note `tin`/`bhfId` must be in the **body** as well as the headers — a body wit
 
 Success returns `cmcKey` and `deviceId` — store these; you should not need to call `/initialize` again for
 this device+pin combination (see the device-corruption warning in `SKILL.md`).
+
+## branchInsuranceInfo / branchUserAccount / branchSendCustomerInfo
+
+All three need **both** `regrId`/`regrNm` (registrar) **and** `modrId`/`modrNm` (modifier) — sending only the
+registrar pair fails with `400 "Request parameter error[<modrId> : may not be empty][<modrNm> : may not be
+empty]"`. Confirmed live 2026-08-12; fixed by always sending all four (`modrId`/`modrNm` can just mirror
+`regrId`/`regrNm` on first creation). `branchSendCustomerInfo` additionally rejects a null/empty `custTin`
+(`400 "custTin cannot be empty or Null"`) even though the DTO/OSCU spec doesn't mark it required-looking —
+always send a real-looking TIN string.
+
+## selectCodeList
+
+`resultCd: "001"` ("There is no search result") is a normal, expected response for an **incremental** pull
+(`full` not set) once you've already done a full sync and nothing changed since — not a failure. This was a
+real bug in `sync-code-list.usecase.ts` (fixed 2026-08-12): it unconditionally threw on any
+`!envelope.success`, and since only `resultCd: "000"` counts as `success` in `postOscuEnvelope`, a legitimate
+"nothing new" response surfaced as an **uncaught 500**, not a clean error. Fixed by special-casing
+`resultCd === "001"` as a valid empty result. If you see a raw 500 (not a handled 400) from any `/catalog/*`
+or `/oscu/*` sync route, check `oscu_operation_logs` for a `resultCd: "001"` first before assuming something
+is actually broken — the same class of bug could exist in other sync usecases that haven't been audited yet.
+
+## importedItemConvertedInfo — persistent `999` as of 2026-08-12
+
+Previously documented as usually resolving on immediate retry (see the `insertStockIO` section's cross
+reference). On 2026-08-12, 3 attempts across ~15 minutes, with two different real `taskCd` values from a
+freshly-fetched `importedItemInfo` seed list, all got the identical `resultCd: "999" "There is an unknown
+error. Please ask administrator"`. Payload was verified correct (`imptItemSttsCd: "3"` = "Approved", checked
+against the cached `cdCls=26` code list). Didn't chase further this session — if you hit this, don't assume
+it's a payload bug; try once or twice with a longer gap, and if it persists, treat it like the `insertStockIO`
+issue (a KRA sandbox-side problem, not something fixable from our side).
