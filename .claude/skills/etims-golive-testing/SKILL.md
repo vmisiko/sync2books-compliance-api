@@ -264,6 +264,23 @@ KRA-envelope `resultCd`/`resultMsg`) -- fixed 2026-08-11 in `etims-adapter.http.
 after repeatedly having to re-derive it by hand from `responseSnapshot`/`oscu_operation_logs`. If you still
 need the full raw payload, it's there too.
 
+**Logging is now centralized in `postOscu()` (2026-08-12) — don't hand-add `console.error` again.** Every
+single OSCU call, both the generic envelope dispatch and the bespoke typed methods (`insertStockIO`,
+`saveStockMaster`, `saveItem`, `selectStockMoveList`, `submitInvoice`), funnels through one private method
+in `etims-adapter.http.ts`. That method now:
+- logs every outgoing request at `debug` (`-> insertStockIO merchant=... branch=... env=... body={...}`) —
+  set `NODE_ENV`/log level to see full request payloads without adding anything.
+- logs every rejected response (`!res.ok` OR `resultCd !== '000'`) at `warn` with the **full raw KRA
+  response body**, not just a derived string.
+- logs thrown exceptions (network failures) at `error`, **including `error.cause`** — this is exactly what
+  disambiguated the local `ENETDOWN`/"fetch failed" sandbox flakiness from a real KRA-side rejection during
+  this project's `insertStockIO` debugging, and previously required temporarily adding `console.error` to
+  inspect `.cause` and then reverting it. Don't re-add that by hand; it's already logged every time.
+
+`InventoryService`'s own `insertStockIO`/`saveStockMaster` warn logs (in `inventory.service.ts`) were also
+enriched to include `itemCd`/`sarNo`/`movement id` (or `branch`/`rsdQty` for stock master), so you can
+correlate a domain-level failure with the adapter-level request/response log lines above by timestamp.
+
 ## Step 5 — Work through the rest of the checklist
 
 Most of the remaining 23 test cases map onto `sync2books-compliance-api`'s existing OSCU pass-through

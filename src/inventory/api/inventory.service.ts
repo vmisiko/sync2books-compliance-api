@@ -225,11 +225,17 @@ export class InventoryService {
         },
       );
       if (!result.success) {
-        this.logger.warn(`eTIMS insertStockIO rejected: ${result.error}`);
+        this.logger.warn(
+          `eTIMS insertStockIO rejected: itemCd=${itemCd} sarNo=${sarNo} ` +
+            `movement=${movement.id} error=${result.error}`,
+        );
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      this.logger.warn(`eTIMS insertStockIO failed: ${msg}`);
+      this.logger.warn(
+        `eTIMS insertStockIO failed: itemCd=${itemCd} sarNo=${sarNo} ` +
+          `movement=${movement.id} error=${msg}`,
+      );
     }
   }
 
@@ -278,11 +284,17 @@ export class InventoryService {
         },
       );
       if (!result.success) {
-        this.logger.warn(`eTIMS saveStockMaster rejected: ${result.error}`);
+        this.logger.warn(
+          `eTIMS saveStockMaster rejected: itemCd=${itemCd} branch=${stock.branchId} ` +
+            `rsdQty=${stock.quantityOnHand} error=${result.error}`,
+        );
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      this.logger.warn(`eTIMS saveStockMaster failed: ${msg}`);
+      this.logger.warn(
+        `eTIMS saveStockMaster failed: itemCd=${itemCd} branch=${stock.branchId} ` +
+          `rsdQty=${stock.quantityOnHand} error=${msg}`,
+      );
     }
   }
 

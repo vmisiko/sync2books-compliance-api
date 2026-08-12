@@ -37,6 +37,7 @@ import {
   type FetchEtimsApigeeAccessTokenResult,
 } from '../transport/apigee-client-credentials';
 import { createHash } from 'crypto';
+import { Logger } from '@nestjs/common';
 
 type EtimsAdapterHttpConfig = {
   sandboxBaseUrl?: string;
@@ -120,6 +121,7 @@ function asJsonBody<T extends OscuRequestContext>(
 }
 
 export class EtimsAdapterHttp implements IEtimsAdapter {
+  private readonly logger = new Logger(EtimsAdapterHttp.name);
   private readonly sandboxBaseUrl: string;
   private readonly productionBaseUrl: string;
   private readonly timeoutMs: number;
@@ -234,6 +236,15 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
       : this.sandboxBaseUrl;
   }
 
+  /**
+   * Single choke point every OSCU call goes through (both the generic
+   * `postOscuEnvelope` dispatch and the bespoke typed methods like
+   * `insertStockIO`). Centralizing request/response/error logging here means
+   * it's always on -- we spent a lot of this project debugging KRA sandbox
+   * errors ("Please try again later" on insertStockIO, ENETDOWN vs real
+   * rejection) by hand-adding `console.error` and reverting it afterward.
+   * That's a sign the logging belongs here permanently, not in the caller.
+   */
   private async postOscu(
     pathSegment: string,
     body: Record<string, unknown>,
@@ -243,7 +254,10 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
       this.resolveBaseUrl(connectionContext.environment),
       pathSegment,
     );
+    const logCtx = `${pathSegment} merchant=${connectionContext.merchantId} branch=${connectionContext.branchId} env=${connectionContext.environment}`;
     const headers = await this.buildHeaders(connectionContext);
+
+    this.logger.debug(`-> ${logCtx} body=${JSON.stringify(body)}`);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -263,7 +277,29 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
       // Legacy/direct KRA responses are already flat -- unwrap here, once, so every
       // caller of postOscu() sees a consistent flat shape regardless of gateway style.
       const raw = asRecord(parsed['responseBody']) ?? parsed;
+
+      const resultCd = safeString(raw['resultCd']);
+      const isBusinessFailure = resultCd !== '' && resultCd !== '000';
+      if (!res.ok || isBusinessFailure) {
+        this.logger.warn(
+          `<- ${logCtx} status=${res.status} rejected: ${JSON.stringify(raw)}`,
+        );
+      } else {
+        this.logger.debug(`<- ${logCtx} status=${res.status} ok`);
+      }
+
       return { ok: res.ok, status: res.status, raw };
+    } catch (e) {
+      // `.cause` is what actually disambiguates a real KRA rejection from local
+      // sandbox network flakiness (e.g. ENETDOWN surfaces as a generic "fetch
+      // failed" without it) -- confirmed live 2026-08-11/12. Log it every time
+      // instead of re-adding this inspection by hand next time something looks flaky.
+      const cause = e instanceof Error ? (e as Error & { cause?: unknown }).cause : undefined;
+      this.logger.error(
+        `x ${logCtx} threw: ${e instanceof Error ? e.message : safeString(e)}` +
+          (cause ? ` cause=${safeString(cause) || JSON.stringify(cause)}` : ''),
+      );
+      throw e;
     } finally {
       clearTimeout(timeout);
     }
