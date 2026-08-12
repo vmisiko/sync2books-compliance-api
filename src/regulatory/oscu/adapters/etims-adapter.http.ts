@@ -272,23 +272,42 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
       const text = await res.text();
       const json = text ? (JSON.parse(text) as unknown) : null;
       const parsed = asRecord(json) ?? {};
+      const responseBodyRaw = parsed['responseBody'];
       // Apigee integrator gateway wraps the OSCU business payload as
       // { responseHeader, responseBody: { resultCd, resultMsg, resultDt, data } }.
       // Legacy/direct KRA responses are already flat -- unwrap here, once, so every
       // caller of postOscu() sees a consistent flat shape regardless of gateway style.
-      const raw = asRecord(parsed['responseBody']) ?? parsed;
+      const raw = asRecord(responseBodyRaw) ?? parsed;
+
+      // The gateway sometimes wraps a genuine business rejection
+      // (responseHeader.responseCode != 200/201) inside an OUTER HTTP 200 with
+      // responseBody: null -- confirmed live 2026-08-12 on saveStockMaster
+      // ("rsdQty mismatch..." sitting in responseHeader.debugMessage, silently
+      // treated as success because res.ok was true). Detect it explicitly rather
+      // than trusting the outer HTTP status alone.
+      const header = asRecord(parsed['responseHeader']);
+      const envelopeResponseCode = header?.['responseCode'];
+      const envelopeIndicatesFailure =
+        responseBodyRaw === null &&
+        typeof envelopeResponseCode === 'number' &&
+        envelopeResponseCode >= 300;
 
       const resultCd = safeString(raw['resultCd']);
       const isBusinessFailure = resultCd !== '' && resultCd !== '000';
-      if (!res.ok || isBusinessFailure) {
+      const ok = res.ok && !envelopeIndicatesFailure;
+      const status = envelopeIndicatesFailure
+        ? (envelopeResponseCode as number)
+        : res.status;
+
+      if (!ok || isBusinessFailure) {
         this.logger.warn(
-          `<- ${logCtx} status=${res.status} rejected: ${JSON.stringify(raw)}`,
+          `<- ${logCtx} status=${status} rejected: ${JSON.stringify(raw)}`,
         );
       } else {
-        this.logger.debug(`<- ${logCtx} status=${res.status} ok`);
+        this.logger.debug(`<- ${logCtx} status=${status} ok`);
       }
 
-      return { ok: res.ok, status: res.status, raw };
+      return { ok, status, raw };
     } catch (e) {
       // `.cause` is what actually disambiguates a real KRA rejection from local
       // sandbox network flakiness (e.g. ENETDOWN surfaces as a generic "fetch

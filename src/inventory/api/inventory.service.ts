@@ -142,7 +142,7 @@ export class InventoryService {
       item.merchantId,
       stock.branchId,
     );
-    if (!connection) return;
+    if (!connection || !connection.kraBhfId) return;
 
     const ocrnDt = this.formatYyyyMMddUtc(movement.createdAt);
     const sarNo = await this.allocateSarNo(connection.kraPin, connection.environment);
@@ -171,10 +171,10 @@ export class InventoryService {
       const result = await adapter.insertStockIO(
         {
           tin: connection.kraPin,
-          bhfId: stock.branchId,
+          bhfId: connection.kraBhfId,
           cmcKey: connection.cmcKey,
           sarNo,
-          orgSarNo: null,
+          orgSarNo: 0,
           regTyCd: this.mapRegTyCd(movement),
           custTin: null,
           custNm: null,
@@ -212,12 +212,13 @@ export class InventoryService {
               taxblAmt,
               taxTyCd: item.taxTyCd,
               taxAmt,
+              totAmt,
             },
           ],
         },
         {
           merchantId: item.merchantId,
-          branchId: stock.branchId,
+          branchId: connection.kraBhfId,
           kraPin: connection.kraPin,
           environment: connection.environment,
           cmcKey: connection.cmcKey,
@@ -259,13 +260,13 @@ export class InventoryService {
       item.merchantId,
       stock.branchId,
     );
-    if (!connection) return;
+    if (!connection || !connection.kraBhfId) return;
 
     try {
       const result = await adapter.saveStockMaster(
         {
           tin: connection.kraPin,
-          bhfId: stock.branchId,
+          bhfId: connection.kraBhfId,
           cmcKey: connection.cmcKey,
           itemCd,
           rsdQty: stock.quantityOnHand,
@@ -276,7 +277,7 @@ export class InventoryService {
         },
         {
           merchantId: item.merchantId,
-          branchId: stock.branchId,
+          branchId: connection.kraBhfId,
           kraPin: connection.kraPin,
           environment: connection.environment,
           cmcKey: connection.cmcKey,

@@ -140,6 +140,12 @@ describe('InventoryService eTIMS stock sync', () => {
     expect(req.itemList[0].taxblAmt).toBe(431.03);
     expect(req.itemList[0].taxAmt).toBe(68.97);
     expect(req.totAmt).toBe(500);
+    // Both confirmed live 2026-08-12 via a raw curl call direct to KRA's sandbox: a
+    // missing per-item totAmt and a null orgSarNo each independently caused KRA's
+    // backend to reject the request, sometimes with a specific message and
+    // sometimes with a vague, unrelated-looking error -- see stock-io-save.dto.ts.
+    expect(req.itemList[0].totAmt).toBe(500);
+    expect(req.orgSarNo).toBe(0);
 
     // saveStockMaster is reconciliation-only now.
     expect(saveStockMaster).toHaveBeenCalledTimes(0);

@@ -61,30 +61,67 @@ POST /saveItem
 ```
 Success: `{"resultCd":"000","resultMsg":"Successful"}`.
 
-## insertStockIO
+## insertStockIO — ROOT CAUSE FOUND AND FIXED 2026-08-12, confirmed working end-to-end live
 
-Confirmed the OSCU spec/DTO naming is misleading here: transaction-level fields belong at the **request
-root**, not nested inside each `itemList[]` entry (a request with them only nested gets
-`400 "regTyCd cannot be null"`). `ocrnDt` here is **8-digit `yyyyMMdd`**, not the 14-digit
-`yyyyMMddhhmmss` used elsewhere. `orgSarNo` must be a real integer (`0` for a first entry) — sending `null`
-(which is what its type signature implies is fine) causes a Java NPE-style error:
-`"Cannot invoke Integer.intValue() because ... getOrgSarNo() is null"`. `sarNo` needs the same
-strictly-incrementing-from-1 treatment as `itemCd`'s sequence, scoped per tin.
+**This spent nearly 24 hours (2026-08-11 evening through 2026-08-12 late morning) misdiagnosed as an
+unfixable KRA sandbox-side issue. It was three real client-side bugs the whole time.** If you're reading
+this because `insertStockIO` is failing, **do not conclude it's a KRA-side problem** — re-check the three
+things below first. The vague, generic-sounding `"Error occurred while validating item tax type: Please try
+again later"` error was a red herring that appeared for multiple *different* underlying causes, which is
+exactly what made this so hard to pin down: it never pointed at the real problem.
 
-Amounts cannot be a literal `0` — KRA rejects with `400 "Expected a value for totAmt... but it is empty or
-null"` (0 is apparently indistinguishable from "empty" to their validator). Use real tax-inclusive math:
-given a tax-inclusive total `T` and 16% VAT (`taxTyCd: "B"`):
-```
-taxblAmt = T / 1.16
-taxAmt   = T - taxblAmt
-```
-Same rule for `pkg` as `sendSalesTransaction` below — a real count, not `0`.
+**How it was actually found**: hit KRA's sandbox directly with raw `curl` (fetching a real OAuth token via
+`GET {tokenBaseUrl}/v1/token/generate?grant_type=client_credentials` with HTTP Basic, then calling
+`/insert/stockIO` by hand), bypassing this codebase entirely. Doing this immediately surfaced KRA's *actual*,
+specific validation messages instead of the generic error our own client had been getting — proving the
+issue was in our request construction, not KRA's backend. **When you're stuck on a persistent, vague OSCU
+error and have already checked the obvious payload fields, drop to raw `curl` before concluding it's
+KRA-side** — it strips away every layer of our own code at once and either reproduces the exact same vague
+error (pointing at something outside your control) or, as happened here, immediately shows you the real
+cause.
 
-The app's automatic sync (`InventoryService.syncStockMovementToEtims()`, triggered by `ETIMS_STOCK_SYNC=true`
-on `recordMovement()`/`adjustStock()`/`transferStock()`) implements exactly this — fixed 2026-08-11. It needs
-a `unitPrice` (pass it to `PUT /api/stock/adjust` / `POST /api/stock/transfer`) to compute `splyAmt`/
-`taxblAmt`/`taxAmt`; without one it now logs a `WARN` and skips the call rather than sending a doomed
-zero-amount request (previously it always sent one and always got rejected).
+**Bug 1 — wrong `bhfId` sent (the actual primary cause, found last).** `InventoryService.syncStockMovementToEtims()`
+/ `syncStockMasterToEtims()` built the `EtimsConnectionContext` (and the request's own `bhfId` field) using
+`stock.branchId` — the **sync2books-side** branch id (e.g. `"branch-1"`) — instead of `connection.kraBhfId`
+(the real KRA branch office code, e.g. `"00"`). For the integrator path style, `bhfId` is sent as an HTTP
+**header**, not in the JSON body (see `asJsonBody()` in `etims-adapter.http.ts`), so this was invisible in
+the logged request body — you had to know to check the header value specifically. Sending a nonexistent
+`bhfId` apparently makes KRA's backend fail some internal per-branch lookup (item-tax-type config?) and fall
+back to this generic, unrelated-sounding error instead of a clear "invalid bhfId" message — which is why it
+looked like a business-validation problem rather than an addressing problem. The `ComplianceConnection`
+entity's own doc comment already warned about exactly this mistake (`kraBhfId: string | null; /** ... NOT
+the KRA office code, use kraBhfId for OSCU calls. */`) — every other call site (`oscu-operations.service.ts`'s
+`resolveContext()`) already got this right; only the two `InventoryService` stock methods had the bug.
+Fixed by using `connection.kraBhfId` in both places, with a guard to skip the sync if it's unset.
+
+**Bug 2 — missing per-item `totAmt`.** The `OscuStockIOSaveReq` type's `itemList[]` entries only had
+`totDcAmt`, never `totAmt`. KRA's real endpoint wants a **per-item** `totAmt` in addition to the
+transaction-root `totAmt` (same value when there's one line): `400 "Expected a value for totAmt on item: 1
+but it is empty or null"`. Confirmed via raw curl — adding it cleared this specific error immediately.
+
+**Bug 3 — `orgSarNo: null`.** The type signature (`number | null`) implied `null` was a valid "no original"
+value. It isn't — KRA's Java backend calls `Integer.intValue()` on it and throws an NPE server-side:
+`"Expected a value but found null. Possible cause: Cannot invoke \"java.lang.Integer.intValue()\" because the
+return value of \"...getOrgSarNo()\" is null"`. Use `0`, never `null`. The type is now `orgSarNo: number`
+(non-nullable) to prevent this regressing.
+
+**A fourth, related finding while verifying the fix — Apigee sometimes wraps a genuine business rejection
+inside an outer HTTP 200.** `saveStockMaster` returned outer `res.ok === true` (HTTP 200) with
+`{responseHeader: {responseCode: 400, debugMessage: "rsdQty mismatch..."}, responseBody: null}` — a real
+rejection, silently treated as success because `postOscu()` only checked the outer HTTP status. Fixed in
+`postOscu()`: when `responseBody` is `null` and `responseHeader.responseCode >= 300`, treat the call as
+failed regardless of the outer HTTP status, so `describeHttpRejection()` and all downstream error handling
+correctly kick in.
+
+Two things that were already true and remain true: transaction-level fields belong at the **request root**,
+not nested inside `itemList[]` (`400 "regTyCd cannot be null"` otherwise); `ocrnDt` is **8-digit `yyyyMMdd`**,
+not 14-digit. Amounts still can't be a literal `0` (`400 "Expected a value for totAmt... but it is empty or
+null"`) — use real tax-inclusive math: given tax-inclusive total `T` and 16% VAT (`taxTyCd: "B"`),
+`taxblAmt = T / 1.16`, `taxAmt = T - taxblAmt`. `pkg` needs a real count, not `0`. `sarNo` is a
+strictly-incrementing-from-1 sequence per tin, same as `itemCd` — **it only advances on KRA's side when a
+call actually succeeds**, so if your local counter increments unconditionally (as `allocateSarNo` currently
+does) it will drift ahead after any failed attempt; there's no rollback for it the way `sendSalesTransaction`
+has for `invcNo` — worth adding if this keeps causing desync after failures.
 
 ```json
 POST /insert/stockIO
@@ -93,83 +130,44 @@ POST /insert/stockIO
   "orgSarNo": 0,
   "regTyCd": "M",
   "custTin": null, "custNm": null, "custBhfId": null,
-  "sarTyCd": "02",
-  "ocrnDt": "20260811",
+  "sarTyCd": "05",
+  "ocrnDt": "20260812",
   "totItemCnt": 1,
-  "totTaxblAmt": 8620.69,
-  "totTaxAmt": 1379.31,
-  "totAmt": 10000,
-  "remark": "Initial stock",
+  "totTaxblAmt": 862.07,
+  "totTaxAmt": 137.93,
+  "totAmt": 1000,
+  "remark": "MANUAL_ADJUST",
   "regrId": "sync2books", "regrNm": "sync2books", "modrId": "sync2books", "modrNm": "sync2books",
   "itemList": [
     {
       "itemSeq": 1,
-      "itemCd": "KE2NTNO0000001",
-      "itemClsCd": "1010150000",
-      "itemNm": "Test Item",
+      "itemCd": "KE2NTNO0000006",
+      "itemClsCd": "1010150100",
+      "itemNm": "Final Verify Item",
       "bcd": null,
       "pkgUnitCd": "NT",
-      "pkg": 100,
+      "pkg": 10,
       "qtyUnitCd": "NO",
-      "qty": 100,
+      "qty": 10,
       "itemExprDt": null,
       "prc": 100,
-      "splyAmt": 10000,
+      "splyAmt": 1000,
       "totDcAmt": 0,
-      "taxblAmt": 8620.69,
+      "taxblAmt": 862.07,
       "taxTyCd": "B",
-      "taxAmt": 1379.31
+      "taxAmt": 137.93,
+      "totAmt": 1000
     }
   ]
 }
 ```
+Confirmed working live end-to-end 2026-08-12 (`resultCd: "000"`), immediately followed by a successful
+`saveStockMaster` and a real `sendSalesTransaction` (`receiptNumber`, `receiptSignature`, `etimsUrl` all
+populated) for the same item — the full chain works now that the header bug is fixed.
+
 `sarTyCd` codes (OSCU code classification 12): incoming `01` import, `02` purchase, `03` return, `04` stock
 movement, `05` adjustment, `06` processing; outgoing `11` sale, `12` return, `13` stock movement,
 `14` processing, `15` discarding, `16` adjustment.
-
-**Status as of 2026-08-11: payload/code confirmed correct, but no live `resultCd: "000"` yet obtained.**
-Every attempt (across 3 different items, including two freshly registered with `resultCd: "000"` on
-`saveItem` moments earlier) got the exact same `400`:
-`"Error occurred while validating item tax type: Please try again later"` — reproduced consistently over a
-~10 minute window, not a one-off. Since it reproduces identically on brand-new items right after a successful
-registration, and the message is KRA's own "try again later" wording (not a validation complaint about the
-payload shape), this looks like a KRA sandbox-side degradation in their item-tax-type-validation service
-specifically for `insertStockIO`, not a client bug — but it hasn't been proven to *always* be transient the
-way `importedItemConvertedInfo`'s "999 unknown error" usually was (that one resolved on immediate retry; this one
-didn't resolve across ~10 minutes of retries). If you hit this again: confirm the item really did register
-(`resultCd: "000"` on `saveItem`/`items/sync`), then retry `insertStockIO` after a longer wait (many minutes,
-not seconds) before assuming it's a new payload bug.
-
-**Still reproducing 2026-08-12, now under a genuinely fresh device/Apigee-app session (the `JM9QLXNJ75`
-device-corruption bug from the main `SKILL.md` was fixed same-day by registering a new Apigee app — this is
-a *separate* issue).** Fresh item (`KE2NTNO0000001` under pin `P600004152A`), registered with `resultCd: 000`
-seconds earlier, still got `"Error occurred while validating item tax type: Please try again later"` on 3
-consecutive `insertStockIO` attempts a few minutes apart. This transitively blocked `sendSalesTransaction`
-too — KRA rejected the sale with `"Items provided under the itemList section do not exist in your stock.
-Consider adding them under Stock Information Management package to proceed."`, which is the expected
-consequence of `insertStockIO` never having succeeded (KRA's own stock records for this item are genuinely
-empty). This confirms the item-tax-type-validation issue is independent of the device/app corruption and is
-still unresolved as of this date — don't burn the test window retrying it more than once or twice per
-session; it hasn't cleared within any session tested so far.
-
-**2026-08-12, rigorous root-cause elimination — this is definitively NOT a payload bug.** Deliberately varied
-every dimension of the request across 6 distinct items to rule out a client-side cause, all with the
-identical `"Error occurred while validating item tax type: Please try again later"`:
-- **Tax type**: tried `taxTyCd: "B"` (16% standard, `itemClsCd: "1010150100"` "Cats") AND `taxTyCd: "C"`
-  (zero-rated, `itemClsCd: "9901200000"` "Zero Rated Goods") — both fail identically, ruling out any
-  tax-type/classification cross-validation as the cause.
-- **Quantity/packaging unit codes**: `qtyUnitCd: "NO"` and `pkgUnitCd: "NT"` both independently confirmed
-  valid against the live-synced `cdCls=10` (Quantity Unit) / `cdCls=17` (Packing Unit) code lists.
-- **HTTP status is 400 with a real OSCU business-validation message** (`responseHeader.debugMessage`), not a
-  401/403 gateway-level rejection — rules out an Apigee API-product/entitlement gap on the new app (that
-  class of failure would show up before reaching KRA's business logic, not as a domain-specific message).
-- Confirmed on items registered under **two different Apigee apps** and **6 different `itemCd`s** total
-  across this session.
-
-**Conclusion: this is a KRA sandbox-side service issue in `insertStockIO`'s item-tax-type validation step,
-not fixable from the client.** Every controllable payload variable has been isolated and ruled out. Don't
-re-debug the payload again — if this recurs, the next step is escalating to KRA support with this evidence,
-not further local investigation.
 
 ## saveStockMaster
 
@@ -185,14 +183,17 @@ POST /save/stockMaster
 }
 ```
 
-**Even after both of these return `resultCd: "000"`**, `sendSalesTransaction` for that item can persistently
-fail with `"Items provided under the itemList section do not exist in your stock"` for no apparent reason,
-no matter how many times you re-register stock or how long you wait. **We eventually confirmed this is not a
-propagation-lag issue — it's the same session/device corruption class of bug as the `/initialize` "2 results
-were returned" error** (see the device-corruption section in `SKILL.md`). It went away immediately after
-switching to a brand-new Apigee app (new consumer key/secret + new App ID) for the *same* device serial and
-pin — nothing about the request payload changed. If you hit this and stock registration is genuinely
-confirmed successful, don't keep tweaking the payload: register a new Apigee app instead (see SKILL.md).
+`rsdQty` must match KRA's own cumulative recorded stock for this `itemCd` at this branch (the sum of all
+prior successful `insertStockIO` quantities for it) — not just your local delta. Mismatch fails with
+`400 "rsdQty mismatch. Expected: N but found: M"`.
+
+**A previous version of this doc attributed persistent `sendSalesTransaction` "items not in stock" failures
+to the same device/Apigee-app corruption bug documented in `SKILL.md`. That was very likely wrong** — the
+real, now-confirmed cause is the `bhfId` bug documented in the `insertStockIO` section above: when stock is
+recorded against the wrong (nonexistent) branch, KRA correctly has no stock for the real branch `"00"`, so
+`sendSalesTransaction` correctly rejects it. The timing correlation with switching Apigee apps was
+coincidental with other fixes happening in the same session, not causal. If you see this failure, check the
+`bhfId` header being sent for `insertStockIO`/`saveStockMaster` before assuming it's session corruption.
 
 ## sendSalesTransaction
 

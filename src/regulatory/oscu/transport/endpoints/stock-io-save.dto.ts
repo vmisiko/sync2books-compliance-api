@@ -14,7 +14,15 @@ import type { OscuApiResponse, OscuRequestContext } from '../oscu-api.types';
 export interface OscuStockIOSaveReq extends OscuRequestContext {
   /** Stored released number */
   sarNo: number;
-  orgSarNo: number | null;
+  /**
+   * Original sarNo being corrected/reversed. KRA's backend deserializes this as a
+   * primitive `Integer.intValue()` -- sending `null` throws an NPE server-side and
+   * (inconsistently) surfaces as anything from a specific NPE message to a vague
+   * "item tax type... try again later" error, never a clean validation message.
+   * Confirmed empirically 2026-08-12: use `0` when there's no original to reference,
+   * never `null`.
+   */
+  orgSarNo: number;
   regTyCd: string;
   custTin: string | null;
   custNm: string | null;
@@ -49,6 +57,15 @@ export interface OscuStockIOSaveReq extends OscuRequestContext {
     taxblAmt: number;
     taxTyCd: string;
     taxAmt: number;
+    /**
+     * Per-item total amount. Missing this field fails with "Expected a value for
+     * totAmt on item: N but it is empty or null" -- confirmed empirically
+     * 2026-08-12 via a raw curl call direct to KRA's sandbox, bypassing this
+     * codebase entirely. Distinct from the request-root `totAmt` above (that one
+     * is the transaction total; this one is the per-line total, same value when
+     * there's exactly one line).
+     */
+    totAmt: number;
   }>;
 }
 
