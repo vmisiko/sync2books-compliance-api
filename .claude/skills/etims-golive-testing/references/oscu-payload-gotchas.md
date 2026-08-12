@@ -305,13 +305,30 @@ already fixed in `api-sales.controller.ts`'s `createExpressCreditNote` if you're
 Or, for a manual (non-express) credit note via the generic `sales` endpoint, set `receiptTypeCode: "R"` and
 supply `originalTraderInvoiceNumber` + `creditNoteReasonCode` directly.
 
+Reconfirmed live 2026-08-12 (`status: "completed"`, real `receiptNumber`/`receiptSignature`/`etimsUrl`) —
+this is the "Credit Note" Go-Live evidence screenshot.
+
+## selectInvoiceDetail (Look Up Invoice Details)
+
+No special payload gotchas — straightforward once you have a real `invcNo` from your own successful sale.
+
+```
+GET /oscu/sales/invoice-detail?merchantId=<id>&branchId=<sync2books branch id>&invcNo=<real invcNo>
+```
+
+Confirmed live 2026-08-12 with `resultCd: "000"` and the full `salesList[]` (receipt signature, item list,
+tax breakdown) returned. This is the "Look Up Invoice Details" Go-Live test case — it was showing "Not
+Executed" on the dashboard simply because no sale had ever succeeded yet to look up (same root dependency as
+`sendSalesTransaction`/`saveItemComposition` — see the `insertStockIO` `bhfId` bug).
+
 ## saveItemComposition
 
-`400 "Insufficient Stock"` here was a symptom of the same messy/corrupted session state as the
-`sendSalesTransaction` stock issue above, not a real problem with the composition request itself — it
-started returning `resultCd: "000"` cleanly once the underlying item had a clean, correctly-tracked stock
-trail (after switching Apigee apps). If you hit this, don't assume your composition payload is wrong; check
-whether `sendSalesTransaction` is also stuck on the same phantom "stock doesn't exist" issue first.
+`400 "Insufficient Stock" / "You dont have sufficient stock for this Transaction"` here just means the item
+genuinely has no recorded stock at KRA yet (same dependency as `sendSalesTransaction`) — not a problem with
+the composition request itself. Confirmed live 2026-08-12 with `resultCd: "000"` immediately after the
+`insertStockIO` `bhfId` bug (see that section) was fixed and real stock existed for the item. If you hit
+this, check whether `insertStockIO`/`saveStockMaster` actually succeeded for the item first, rather than
+assuming your composition payload is wrong.
 
 ## sendPurchaseTransactionInfo / getPurchaseTransactionInfo (real 2-party flow, solved)
 
