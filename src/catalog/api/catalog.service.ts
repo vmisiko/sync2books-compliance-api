@@ -80,6 +80,14 @@ export class CatalogService {
     return listItems({ merchantId }, this.itemRepo);
   }
 
+  async getItemById(itemId: string) {
+    return this.itemRepo.findById(itemId);
+  }
+
+  async findByExternalId(merchantId: string, externalId: string) {
+    return this.itemRepo.findByMerchantAndExternalId(merchantId, externalId);
+  }
+
   async syncItems(params: {
     merchantId: string;
     branchId: string;
