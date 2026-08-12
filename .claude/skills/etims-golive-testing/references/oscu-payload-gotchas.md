@@ -152,6 +152,25 @@ empty). This confirms the item-tax-type-validation issue is independent of the d
 still unresolved as of this date — don't burn the test window retrying it more than once or twice per
 session; it hasn't cleared within any session tested so far.
 
+**2026-08-12, rigorous root-cause elimination — this is definitively NOT a payload bug.** Deliberately varied
+every dimension of the request across 6 distinct items to rule out a client-side cause, all with the
+identical `"Error occurred while validating item tax type: Please try again later"`:
+- **Tax type**: tried `taxTyCd: "B"` (16% standard, `itemClsCd: "1010150100"` "Cats") AND `taxTyCd: "C"`
+  (zero-rated, `itemClsCd: "9901200000"` "Zero Rated Goods") — both fail identically, ruling out any
+  tax-type/classification cross-validation as the cause.
+- **Quantity/packaging unit codes**: `qtyUnitCd: "NO"` and `pkgUnitCd: "NT"` both independently confirmed
+  valid against the live-synced `cdCls=10` (Quantity Unit) / `cdCls=17` (Packing Unit) code lists.
+- **HTTP status is 400 with a real OSCU business-validation message** (`responseHeader.debugMessage`), not a
+  401/403 gateway-level rejection — rules out an Apigee API-product/entitlement gap on the new app (that
+  class of failure would show up before reaching KRA's business logic, not as a domain-specific message).
+- Confirmed on items registered under **two different Apigee apps** and **6 different `itemCd`s** total
+  across this session.
+
+**Conclusion: this is a KRA sandbox-side service issue in `insertStockIO`'s item-tax-type validation step,
+not fixable from the client.** Every controllable payload variable has been isolated and ruled out. Don't
+re-debug the payload again — if this recurs, the next step is escalating to KRA support with this evidence,
+not further local investigation.
+
 ## saveStockMaster
 
 Must be called **after** `insertStockIO` for the same `itemCd` — calling it first fails with
