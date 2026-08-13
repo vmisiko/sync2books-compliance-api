@@ -43,6 +43,33 @@ pattern has now repeated on every subsequent app.
    triggered for this app on your developer dashboard) → `/initialize` failed again:
    `"3 results were returned"`.
 4. Retried once more (same pin/app) → escalated to `"4 results were returned"`.
+5. **To rule out any possibility this is caused by our own application code**, we made a raw, minimal `curl`
+   request directly to your sandbox — no application logic, no custom headers beyond the required
+   `tin`/`bhfId`/`apigee_app_id`/bearer token, nothing but the bare HTTP call:
+
+   ```
+   POST https://sbx.kra.go.ke/etims-oscu/api/v1/initialize
+   Headers: tin: P600004165A, bhfId: 00, apigee_app_id: 0ada03d4-8b15-4c51-9a6b-7bdbe8ce2e78,
+            Authorization: Bearer <fresh token from /v1/token/generate>
+   Body: {"tin":"P600004165A","bhfId":"00","dvcSrlNo":"JM9QLXNJ75"}
+   ```
+
+   Response (responseRefID `fbb7b055-d08e-4cdd-85e5-74655fed4fbd`):
+   ```json
+   {
+     "responseHeader": {
+       "responseCode": 400,
+       "responseRefID": "fbb7b055-d08e-4cdd-85e5-74655fed4fbd",
+       "customerMessage": "Unable to process the request. Please try again",
+       "debugMessage": "Unable to process the request. Please try again. Possible cause: Query did not return a unique result: 4 results were returned"
+     },
+     "responseBody": null
+   }
+   ```
+   Identical error, same count as our application's own attempt moments earlier — this is conclusive proof
+   the issue is entirely server-side, not anything in our client. (Note: the count did *not* increment
+   further on this repeat call, staying at 4 — so it is not incrementing on literally every single request,
+   which may be a useful clue for your own investigation.)
 
 ## Separate, worse finding: the corruption has spread beyond `/initialize`
 
