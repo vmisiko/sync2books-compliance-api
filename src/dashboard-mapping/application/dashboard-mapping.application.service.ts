@@ -1,13 +1,14 @@
 import { randomUUID } from 'crypto';
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
-import {
-  TaxMappingOrmEntity,
-} from '../../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
-import {
-  UnitMappingOrmEntity,
-} from '../../regulatory/oscu/infrastructure/persistence/unit-mapping.orm-entity';
+import { TaxMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
+import { UnitMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/unit-mapping.orm-entity';
 import {
   ClassificationMappingOrmEntity,
   ClassificationMatchType,
@@ -103,7 +104,8 @@ const SOURCE_FILTER: Record<string, SourceSystem> = {
   xero: SourceSystem.XERO,
   sage: SourceSystem.SAGE,
   odoo: SourceSystem.ODOO,
-  'microsoft-dynamics-365-business-central': SourceSystem.MICROSOFT_DYNAMICS_365_BUSINESS_CENTRAL,
+  'microsoft-dynamics-365-business-central':
+    SourceSystem.MICROSOFT_DYNAMICS_365_BUSINESS_CENTRAL,
   manual: SourceSystem.MANUAL,
   api: SourceSystem.API,
 };
@@ -147,17 +149,23 @@ export class DashboardMappingApplicationService {
 
   async pullTaxRates(complianceTenantId: string) {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
-    const connection = await this.mainApiConnections.getForTenant(complianceTenantId);
-    const quickbooksConnectionId = connection.integrations?.quickbooks?.connectionId ?? null;
+    const connection =
+      await this.mainApiConnections.getForTenant(complianceTenantId);
+    const quickbooksConnectionId =
+      connection.integrations?.quickbooks?.connectionId ?? null;
     if (!quickbooksConnectionId) {
       throw new BadRequestException(
         'No connected QuickBooks connection for this tenant yet — connect QuickBooks before pulling tax rates.',
       );
     }
 
-    const response = await this.mainApiPull.getTaxRates(connection.mainApiApiKey, quickbooksConnectionId, {
-      status: 'Active',
-    });
+    const response = await this.mainApiPull.getTaxRates(
+      connection.mainApiApiKey,
+      quickbooksConnectionId,
+      {
+        status: 'Active',
+      },
+    );
 
     const results: Array<{
       externalId: string;
@@ -192,7 +200,11 @@ export class DashboardMappingApplicationService {
         continue;
       }
 
-      const row = await this.upsertTaxSuggestion(merchantId, externalValue, suggestion);
+      const row = await this.upsertTaxSuggestion(
+        merchantId,
+        externalValue,
+        suggestion,
+      );
       results.push({
         externalId: rate.id,
         externalValue,
@@ -206,9 +218,12 @@ export class DashboardMappingApplicationService {
     return {
       merchantId,
       attempted: results.length,
-      suggested: results.filter((r) => r.status === MappingStatus.NEEDS_REVIEW).length,
-      alreadyMapped: results.filter((r) => r.status === MappingStatus.MAPPED).length,
-      unmapped: results.filter((r) => r.status === MappingStatus.UNMAPPED).length,
+      suggested: results.filter((r) => r.status === MappingStatus.NEEDS_REVIEW)
+        .length,
+      alreadyMapped: results.filter((r) => r.status === MappingStatus.MAPPED)
+        .length,
+      unmapped: results.filter((r) => r.status === MappingStatus.UNMAPPED)
+        .length,
       results,
     };
   }
@@ -222,15 +237,27 @@ export class DashboardMappingApplicationService {
   private async upsertTaxSuggestion(
     merchantId: string,
     externalValue: string,
-    suggestion: { internalTaxCategory: string; taxTyCd: string; confidenceScore: number },
+    suggestion: {
+      internalTaxCategory: string;
+      taxTyCd: string;
+      confidenceScore: number;
+    },
   ): Promise<TaxMappingOrmEntity> {
     const approved = await this.taxRepo.findOne({
-      where: { merchantId, internalTaxCategory: suggestion.internalTaxCategory, active: true },
+      where: {
+        merchantId,
+        internalTaxCategory: suggestion.internalTaxCategory,
+        active: true,
+      },
     });
     if (approved) return approved;
 
     const pending = await this.taxRepo.findOne({
-      where: { merchantId, internalTaxCategory: suggestion.internalTaxCategory, active: false },
+      where: {
+        merchantId,
+        internalTaxCategory: suggestion.internalTaxCategory,
+        active: false,
+      },
     });
 
     const patch = {
@@ -247,14 +274,23 @@ export class DashboardMappingApplicationService {
     if (pending) {
       return this.taxRepo.save({ ...pending, ...patch });
     }
-    return this.taxRepo.save(this.taxRepo.create({ id: `taxmap-${randomUUID()}`, version: 1, ...patch }));
+    return this.taxRepo.save(
+      this.taxRepo.create({
+        id: `taxmap-${randomUUID()}`,
+        version: 1,
+        ...patch,
+      }),
+    );
   }
 
   // ---------------------------------------------------------------------
   // List / summary
   // ---------------------------------------------------------------------
 
-  async list(complianceTenantId: string, filters: MappingListFilters): Promise<MappingListItem[]> {
+  async list(
+    complianceTenantId: string,
+    filters: MappingListFilters,
+  ): Promise<MappingListItem[]> {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const sourceSystem = this.parseSourceFilter(filters.source);
     const status = this.parseStatusFilter(filters.status);
@@ -265,8 +301,16 @@ export class DashboardMappingApplicationService {
     if (!type || type === 'tax') {
       const rows = await this.taxRepo.find({
         where: [
-          { merchantId, ...(sourceSystem ? { sourceSystem } : {}), ...(status ? { status } : {}) },
-          { merchantId: IsNull(), ...(sourceSystem ? { sourceSystem } : {}), ...(status ? { status } : {}) },
+          {
+            merchantId,
+            ...(sourceSystem ? { sourceSystem } : {}),
+            ...(status ? { status } : {}),
+          },
+          {
+            merchantId: IsNull(),
+            ...(sourceSystem ? { sourceSystem } : {}),
+            ...(status ? { status } : {}),
+          },
         ],
       });
       items.push(...rows.map((r) => this.taxRowToListItem(r)));
@@ -274,8 +318,16 @@ export class DashboardMappingApplicationService {
     if (!type || type === 'unit') {
       const rows = await this.unitRepo.find({
         where: [
-          { merchantId, ...(sourceSystem ? { sourceSystem } : {}), ...(status ? { status } : {}) },
-          { merchantId: IsNull(), ...(sourceSystem ? { sourceSystem } : {}), ...(status ? { status } : {}) },
+          {
+            merchantId,
+            ...(sourceSystem ? { sourceSystem } : {}),
+            ...(status ? { status } : {}),
+          },
+          {
+            merchantId: IsNull(),
+            ...(sourceSystem ? { sourceSystem } : {}),
+            ...(status ? { status } : {}),
+          },
         ],
       });
       items.push(...rows.map((r) => this.unitRowToListItem(r)));
@@ -284,7 +336,11 @@ export class DashboardMappingApplicationService {
       // No global (merchantId: null) rows exist for classification today —
       // ClassificationResolverTypeOrm has no global fallback for it either.
       const rows = await this.clsRepo.find({
-        where: { merchantId, ...(sourceSystem ? { sourceSystem } : {}), ...(status ? { status } : {}) },
+        where: {
+          merchantId,
+          ...(sourceSystem ? { sourceSystem } : {}),
+          ...(status ? { status } : {}),
+        },
       });
       items.push(...rows.map((r) => this.clsRowToListItem(r)));
     }
@@ -302,12 +358,13 @@ export class DashboardMappingApplicationService {
       this.clsRepo.find({ where: { merchantId } }),
     ]);
 
-    const isMapped = (s: MappingStatus) => s === MappingStatus.MAPPED || s === MappingStatus.REVISED;
-    const all: Array<{ merchantId: string | null; sourceSystem: SourceSystem | null; status: MappingStatus }> = [
-      ...taxRows,
-      ...unitRows,
-      ...clsRows,
-    ];
+    const isMapped = (s: MappingStatus) =>
+      s === MappingStatus.MAPPED || s === MappingStatus.REVISED;
+    const all: Array<{
+      merchantId: string | null;
+      sourceSystem: SourceSystem | null;
+      status: MappingStatus;
+    }> = [...taxRows, ...unitRows, ...clsRows];
 
     const global = all.filter((r) => r.merchantId === null);
     const tenantRows = all.filter((r) => r.merchantId !== null);
@@ -322,9 +379,18 @@ export class DashboardMappingApplicationService {
     }
 
     return {
-      global: { mapped: global.filter((r) => isMapped(r.status)).length, total: global.length },
-      bySource: Array.from(bySourceMap.entries()).map(([sourceSystem, v]) => ({ sourceSystem, ...v })),
-      overall: { mapped: all.filter((r) => isMapped(r.status)).length, total: all.length },
+      global: {
+        mapped: global.filter((r) => isMapped(r.status)).length,
+        total: global.length,
+      },
+      bySource: Array.from(bySourceMap.entries()).map(([sourceSystem, v]) => ({
+        sourceSystem,
+        ...v,
+      })),
+      overall: {
+        mapped: all.filter((r) => isMapped(r.status)).length,
+        total: all.length,
+      },
     };
   }
 
@@ -332,7 +398,11 @@ export class DashboardMappingApplicationService {
   // Approve / edit / manual create
   // ---------------------------------------------------------------------
 
-  async approve(complianceTenantId: string, id: string, approvedBy: string): Promise<MappingListItem> {
+  async approve(
+    complianceTenantId: string,
+    id: string,
+    approvedBy: string,
+  ): Promise<MappingListItem> {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const found = await this.findRowById(id);
     if (!found || found.row.merchantId !== merchantId) {
@@ -342,7 +412,9 @@ export class DashboardMappingApplicationService {
     if (found.type === 'tax') {
       const row = found.row;
       if (!row.taxTyCd) {
-        throw new BadRequestException('Mapping has no target taxTyCd yet — PATCH one in before approving');
+        throw new BadRequestException(
+          'Mapping has no target taxTyCd yet — PATCH one in before approving',
+        );
       }
       row.status = MappingStatus.MAPPED;
       row.approvedBy = approvedBy;
@@ -354,7 +426,9 @@ export class DashboardMappingApplicationService {
     if (found.type === 'unit') {
       const row = found.row;
       if (!row.qtyUnitCd || !row.pkgUnitCd) {
-        throw new BadRequestException('Mapping has no target unit codes yet — PATCH some in before approving');
+        throw new BadRequestException(
+          'Mapping has no target unit codes yet — PATCH some in before approving',
+        );
       }
       row.status = MappingStatus.MAPPED;
       row.approvedBy = approvedBy;
@@ -365,7 +439,9 @@ export class DashboardMappingApplicationService {
 
     const row = found.row;
     if (!row.itemClsCd) {
-      throw new BadRequestException('Mapping has no target itemClsCd yet — PATCH one in before approving');
+      throw new BadRequestException(
+        'Mapping has no target itemClsCd yet — PATCH one in before approving',
+      );
     }
     row.status = MappingStatus.MAPPED;
     row.approvedBy = approvedBy;
@@ -388,12 +464,16 @@ export class DashboardMappingApplicationService {
     }
 
     const wasApproved =
-      found.row.status === MappingStatus.MAPPED || found.row.status === MappingStatus.REVISED;
-    const nextStatus = wasApproved ? MappingStatus.REVISED : MappingStatus.MAPPED;
+      found.row.status === MappingStatus.MAPPED ||
+      found.row.status === MappingStatus.REVISED;
+    const nextStatus = wasApproved
+      ? MappingStatus.REVISED
+      : MappingStatus.MAPPED;
 
     if (found.type === 'tax') {
       const row = found.row;
-      if (input.internalTaxCategory) row.internalTaxCategory = input.internalTaxCategory;
+      if (input.internalTaxCategory)
+        row.internalTaxCategory = input.internalTaxCategory;
       if (input.taxTyCd) row.taxTyCd = input.taxTyCd;
       if (!row.taxTyCd) throw new BadRequestException('taxTyCd is required');
       row.status = nextStatus;
@@ -408,7 +488,8 @@ export class DashboardMappingApplicationService {
       if (input.internalUnit) row.internalUnit = input.internalUnit;
       if (input.qtyUnitCd) row.qtyUnitCd = input.qtyUnitCd;
       if (input.pkgUnitCd) row.pkgUnitCd = input.pkgUnitCd;
-      if (!row.qtyUnitCd || !row.pkgUnitCd) throw new BadRequestException('qtyUnitCd and pkgUnitCd are required');
+      if (!row.qtyUnitCd || !row.pkgUnitCd)
+        throw new BadRequestException('qtyUnitCd and pkgUnitCd are required');
       row.status = nextStatus;
       row.approvedBy = approvedBy;
       row.approvedAt = new Date();
@@ -448,7 +529,9 @@ export class DashboardMappingApplicationService {
 
     if (input.type === 'tax') {
       if (!input.internalTaxCategory || !input.taxTyCd) {
-        throw new BadRequestException('internalTaxCategory and taxTyCd are required for a tax mapping');
+        throw new BadRequestException(
+          'internalTaxCategory and taxTyCd are required for a tax mapping',
+        );
       }
       const row = this.taxRepo.create({
         id: `taxmap-${randomUUID()}`,
@@ -470,7 +553,9 @@ export class DashboardMappingApplicationService {
 
     if (input.type === 'unit') {
       if (!input.internalUnit || !input.qtyUnitCd || !input.pkgUnitCd) {
-        throw new BadRequestException('internalUnit, qtyUnitCd and pkgUnitCd are required for a unit mapping');
+        throw new BadRequestException(
+          'internalUnit, qtyUnitCd and pkgUnitCd are required for a unit mapping',
+        );
       }
       const row = this.unitRepo.create({
         id: `unitmap-${randomUUID()}`,
@@ -492,7 +577,9 @@ export class DashboardMappingApplicationService {
     }
 
     if (!input.matchType || !input.matchValue || !input.itemClsCd) {
-      throw new BadRequestException('matchType, matchValue and itemClsCd are required for a classification mapping');
+      throw new BadRequestException(
+        'matchType, matchValue and itemClsCd are required for a classification mapping',
+      );
     }
     const row = this.clsRepo.create({
       id: `clsmap-${randomUUID()}`,
@@ -526,15 +613,19 @@ export class DashboardMappingApplicationService {
    * a transaction before activating this one, so the constraint is never
    * violated even momentarily.
    */
-  private async activateTaxRow(row: TaxMappingOrmEntity): Promise<TaxMappingOrmEntity> {
+  private async activateTaxRow(
+    row: TaxMappingOrmEntity,
+  ): Promise<TaxMappingOrmEntity> {
     return this.taxRepo.manager.transaction(async (manager) => {
       const repo = manager.getRepository(TaxMappingOrmEntity);
       await repo
         .createQueryBuilder()
         .update(TaxMappingOrmEntity)
         .set({ active: false })
-        .where('merchantId <=> :merchantId', { merchantId: row.merchantId })
-        .andWhere('internalTaxCategory = :cat', { cat: row.internalTaxCategory })
+        .where(...merchantIdEquals(row.merchantId))
+        .andWhere('internalTaxCategory = :cat', {
+          cat: row.internalTaxCategory,
+        })
         .andWhere('active = :active', { active: true })
         .andWhere('id != :id', { id: row.id })
         .execute();
@@ -544,14 +635,16 @@ export class DashboardMappingApplicationService {
   }
 
   /** Same idea as activateTaxRow, keyed by (merchantId, internalUnit) — see unit_mappings' unique index. */
-  private async activateUnitRow(row: UnitMappingOrmEntity): Promise<UnitMappingOrmEntity> {
+  private async activateUnitRow(
+    row: UnitMappingOrmEntity,
+  ): Promise<UnitMappingOrmEntity> {
     return this.unitRepo.manager.transaction(async (manager) => {
       const repo = manager.getRepository(UnitMappingOrmEntity);
       await repo
         .createQueryBuilder()
         .update(UnitMappingOrmEntity)
         .set({ active: false })
-        .where('merchantId <=> :merchantId', { merchantId: row.merchantId })
+        .where(...merchantIdEquals(row.merchantId))
         .andWhere('internalUnit = :unit', { unit: row.internalUnit })
         .andWhere('active = :active', { active: true })
         .andWhere('id != :id', { id: row.id })
@@ -629,7 +722,9 @@ export class DashboardMappingApplicationService {
     };
   }
 
-  private clsRowToListItem(row: ClassificationMappingOrmEntity): MappingListItem {
+  private clsRowToListItem(
+    row: ClassificationMappingOrmEntity,
+  ): MappingListItem {
     return {
       id: row.id,
       type: 'classification',
@@ -655,14 +750,16 @@ export class DashboardMappingApplicationService {
   private parseSourceFilter(source?: string): SourceSystem | undefined {
     if (!source) return undefined;
     const value = SOURCE_FILTER[source.toLowerCase()];
-    if (!value) throw new BadRequestException(`Unknown source filter: ${source}`);
+    if (!value)
+      throw new BadRequestException(`Unknown source filter: ${source}`);
     return value;
   }
 
   private parseStatusFilter(status?: string): MappingStatus | undefined {
     if (!status) return undefined;
     const value = STATUS_FILTER[status.toLowerCase()];
-    if (!value) throw new BadRequestException(`Unknown status filter: ${status}`);
+    if (!value)
+      throw new BadRequestException(`Unknown status filter: ${status}`);
     return value;
   }
 
@@ -685,4 +782,23 @@ export class DashboardMappingApplicationService {
     }
     return tenant.sync2booksCompanyId;
   }
+}
+
+/**
+ * `merchantId = :merchantId` doesn't match a NULL column under any SQL
+ * dialect's three-valued logic, and MySQL's null-safe `<=>` operator (the
+ * previous approach here) isn't portable to the sqlite/sqljs driver this
+ * repo's lightweight specs run against (see CatalogController's spec) — it
+ * throws a syntax error there. In practice activateTaxRow/activateUnitRow
+ * are only ever called with an already-resolved, non-null merchantId (both
+ * call sites go through resolveMerchantId(), which throws rather than
+ * returning null), so the IS NULL branch is defensive rather than reachable
+ * today, but kept for correctness against the entities' nullable merchantId type.
+ */
+function merchantIdEquals(
+  merchantId: string | null,
+): [string, Record<string, unknown>] {
+  return merchantId === null
+    ? ['merchantId IS NULL', {}]
+    : ['merchantId = :merchantId', { merchantId }];
 }
