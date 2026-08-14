@@ -16,7 +16,10 @@ import {
 import { MappingSuggestionService } from '../../regulatory/oscu/application/mapping-suggestion.service';
 import { OscuCodeOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-code.orm-entity';
 import { searchCodes } from '../../catalog/application/use-cases/search-codes.usecase';
-import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
+import {
+  MainApiItem,
+  MainApiPullClient,
+} from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
@@ -185,6 +188,21 @@ export class DashboardMappingApplicationService {
   // ---------------------------------------------------------------------
   // Pull + auto-suggest (Track B steps 1 + 3)
   // ---------------------------------------------------------------------
+
+  /**
+   * Single entry point for POST dashboard-api/mappings/pull — runs the
+   * tax/tax-code pull (unchanged, see pullTaxRates) and the item-derived
+   * unit + classification pull (see pullUnitsAndClassifications) together,
+   * so one dashboard click populates all three mapping types instead of
+   * requiring a separate action per tab.
+   */
+  async pullAll(complianceTenantId: string) {
+    const [tax, items] = await Promise.all([
+      this.pullTaxRates(complianceTenantId),
+      this.pullUnitsAndClassifications(complianceTenantId),
+    ]);
+    return { ...tax, units: items.units, classifications: items.classifications };
+  }
 
   async pullTaxRates(complianceTenantId: string) {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
@@ -355,6 +373,289 @@ export class DashboardMappingApplicationService {
         .length,
       results,
     };
+  }
+
+  /**
+   * Pulls items from the main API (paginated across every page, not just
+   * the first) and derives both unit mappings (from each item's
+   * unitOfMeasure) and classification placeholders (one per item) from the
+   * same fetch — items are the only source of either signal, so one fetch
+   * covers both rather than pulling items twice.
+   */
+  private async pullUnitsAndClassifications(complianceTenantId: string) {
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+    const connection =
+      await this.mainApiConnections.ensureCompany(complianceTenantId);
+    const quickbooksConnectionId =
+      connection.integrations?.quickbooks?.connectionId ?? null;
+    if (!quickbooksConnectionId) {
+      throw new BadRequestException(
+        'No connected QuickBooks connection for this tenant yet — connect QuickBooks before pulling items.',
+      );
+    }
+
+    const items = await this.fetchAllItems(connection.mainApiApiKey);
+
+    const units = await this.pullUnits(merchantId, items);
+    const classifications = await this.pullClassifications(merchantId, items);
+
+    return { units, classifications };
+  }
+
+  /** Loops GET /items across every page — a merchant's full catalog, not just the first page's worth. Capped at 50 pages (5,000 items at the default page size) as a sanity limit against a runaway loop. */
+  private async fetchAllItems(apiKey: string): Promise<MainApiItem[]> {
+    const items: MainApiItem[] = [];
+    let page = 1;
+    const limit = 100;
+    for (; page <= 50; page++) {
+      const response = await this.mainApiPull.getItems(apiKey, { page, limit });
+      items.push(...response.data);
+      if (page >= response.totalPages || response.data.length === 0) break;
+    }
+    return items;
+  }
+
+  /**
+   * Unit-of-measure labels are shared across many items (e.g. every "kg"
+   * item), unlike tax rates which are already distinct entities — so this
+   * dedupes by label first and creates/refreshes at most one unit_mappings
+   * row per distinct label per pull, rather than one per item.
+   */
+  private async pullUnits(merchantId: string, items: MainApiItem[]) {
+    const labels = new Set<string>();
+    for (const item of items) {
+      const label = (item.unitOfMeasure ?? '').trim();
+      if (label) labels.add(label);
+    }
+
+    const results: Array<{
+      externalValue: string;
+      mappingId: string;
+      status: MappingStatus;
+      confidenceScore: number | null;
+      internalUnit: string | null;
+    }> = [];
+
+    for (const label of labels) {
+      const suggestion = this.suggestions.suggestUnitMapping(label);
+
+      if (!suggestion) {
+        const row = await this.upsertUnmappedUnit(merchantId, label);
+        results.push({
+          externalValue: label,
+          mappingId: row.id,
+          status: row.status,
+          confidenceScore: row.confidenceScore,
+          internalUnit: row.internalUnit,
+        });
+        continue;
+      }
+
+      const row = await this.upsertUnitSuggestion(merchantId, label, suggestion);
+      results.push({
+        externalValue: label,
+        mappingId: row.id,
+        status: row.status,
+        confidenceScore: row.confidenceScore,
+        internalUnit: suggestion.internalUnit,
+      });
+    }
+
+    return {
+      attempted: results.length,
+      suggested: results.filter((r) => r.status === MappingStatus.NEEDS_REVIEW)
+        .length,
+      alreadyMapped: results.filter((r) => r.status === MappingStatus.MAPPED)
+        .length,
+      unmapped: results.filter((r) => r.status === MappingStatus.UNMAPPED)
+        .length,
+      results,
+    };
+  }
+
+  /** Same idea as upsertTaxSuggestion, keyed by (merchantId, internalUnit, active) per unit_mappings' unique index. Never touches an already-approved row. */
+  private async upsertUnitSuggestion(
+    merchantId: string,
+    externalValue: string,
+    suggestion: {
+      internalUnit: string;
+      qtyUnitCd: string;
+      pkgUnitCd: string;
+      confidenceScore: number;
+    },
+  ): Promise<UnitMappingOrmEntity> {
+    const approved = await this.unitRepo.findOne({
+      where: { merchantId, internalUnit: suggestion.internalUnit, active: true },
+    });
+    if (approved) return approved;
+
+    const pending = await this.unitRepo.findOne({
+      where: {
+        merchantId,
+        internalUnit: suggestion.internalUnit,
+        active: false,
+      },
+    });
+
+    const patch = {
+      merchantId,
+      internalUnit: suggestion.internalUnit,
+      qtyUnitCd: suggestion.qtyUnitCd,
+      pkgUnitCd: suggestion.pkgUnitCd,
+      sourceSystem: SourceSystem.QUICKBOOKS,
+      status: MappingStatus.NEEDS_REVIEW,
+      confidenceScore: suggestion.confidenceScore,
+      externalValue,
+      active: false,
+    };
+
+    if (pending) {
+      return this.unitRepo.save({ ...pending, ...patch });
+    }
+    return this.unitRepo.save(
+      this.unitRepo.create({ id: `unitmap-${randomUUID()}`, version: 1, ...patch }),
+    );
+  }
+
+  /**
+   * Persists an unrecognized unit-of-measure label so it shows up in the
+   * Mapping Center table (status UNMAPPED, no internalUnit/codes yet)
+   * instead of being silently dropped. Keyed by (merchantId, sourceSystem,
+   * externalValue) — unit_mappings has no externalId column, and the label
+   * itself is already the natural dedup key since pullUnits() dedupes
+   * before calling this.
+   */
+  private async upsertUnmappedUnit(
+    merchantId: string,
+    externalValue: string,
+  ): Promise<UnitMappingOrmEntity> {
+    const existing = await this.unitRepo.findOne({
+      where: { merchantId, sourceSystem: SourceSystem.QUICKBOOKS, externalValue },
+    });
+    if (existing) {
+      if (existing.active) return existing;
+      return existing;
+    }
+
+    return this.unitRepo.save(
+      this.unitRepo.create({
+        id: `unitmap-${randomUUID()}`,
+        merchantId,
+        // internalUnit/qtyUnitCd/pkgUnitCd are NOT NULL columns with no
+        // natural "unmapped" placeholder value the way tax's taxTyCd can
+        // just be null — reuse the raw label so the row round-trips (a
+        // human overwrites these via PATCH before approving; approve()
+        // already requires qtyUnitCd/pkgUnitCd to be real KRA codes, so an
+        // unreviewed label can never leak into an active/approved row).
+        internalUnit: externalValue,
+        qtyUnitCd: externalValue,
+        pkgUnitCd: externalValue,
+        version: 1,
+        active: false,
+        sourceSystem: SourceSystem.QUICKBOOKS,
+        status: MappingStatus.UNMAPPED,
+        confidenceScore: 0,
+        externalValue,
+      }),
+    );
+  }
+
+  /**
+   * One classification_mappings placeholder row per item — deliberately
+   * not deduped (unlike units), since classification is inherently
+   * per-item, not per-shared-value. Always NEEDS_REVIEW with no guessed
+   * itemClsCd (see MappingSuggestionService.suggestClassificationPlaceholder's
+   * doc comment for why automatic KRA-classification-tree matching is out
+   * of scope) — a human fills in itemClsCd via PATCH.
+   */
+  private async pullClassifications(merchantId: string, items: MainApiItem[]) {
+    const results: Array<{
+      externalId: string;
+      externalValue: string;
+      mappingId: string;
+      status: MappingStatus;
+    }> = [];
+
+    for (const item of items) {
+      const placeholder = this.suggestions.suggestClassificationPlaceholder({
+        externalId: item.id,
+        sku: item.sku,
+        itemName: item.name,
+      });
+      // item.id is always present on a real MainApiItem, so this should
+      // never actually be null — defensive skip rather than a thrown error
+      // if a future item shape ever lacks all three fields.
+      if (!placeholder) continue;
+
+      const row = await this.upsertClassificationPlaceholder(
+        merchantId,
+        item.id,
+        item.name,
+        placeholder,
+      );
+      results.push({
+        externalId: item.id,
+        externalValue: item.name,
+        mappingId: row.id,
+        status: row.status,
+      });
+    }
+
+    return {
+      attempted: results.length,
+      needsReview: results.filter((r) => r.status === MappingStatus.NEEDS_REVIEW)
+        .length,
+      results,
+    };
+  }
+
+  /**
+   * Keyed by (merchantId, sourceSystem, externalId=item.id) via matchValue —
+   * classification_mappings has no dedicated externalId column, but
+   * suggestClassificationPlaceholder is called with item.id first in
+   * precedence, so matchValue reliably holds it (EXTERNAL_ID match type)
+   * for every real QuickBooks item. Re-pulling a still-pending row
+   * refreshes externalValue (the display name); an already-approved
+   * (active) row is left untouched entirely, same as
+   * upsertUnmappedTaxRate/upsertUnmappedUnit.
+   */
+  private async upsertClassificationPlaceholder(
+    merchantId: string,
+    externalId: string,
+    externalValue: string,
+    placeholder: { matchType: ClassificationMatchType; matchValue: string },
+  ): Promise<ClassificationMappingOrmEntity> {
+    const existing = await this.clsRepo.findOne({
+      where: {
+        merchantId,
+        sourceSystem: SourceSystem.QUICKBOOKS,
+        matchType: placeholder.matchType,
+        matchValue: placeholder.matchValue,
+      },
+    });
+    if (existing) {
+      if (existing.active) return existing;
+      existing.externalValue = externalValue;
+      return this.clsRepo.save(existing);
+    }
+
+    return this.clsRepo.save(
+      this.clsRepo.create({
+        id: `clsmap-${randomUUID()}`,
+        merchantId,
+        matchType: placeholder.matchType,
+        matchValue: placeholder.matchValue,
+        itemType: null,
+        itemClsCd: null,
+        priority: 100,
+        source: 'merchant_override',
+        active: false,
+        sourceSystem: SourceSystem.QUICKBOOKS,
+        status: MappingStatus.NEEDS_REVIEW,
+        confidenceScore: null,
+        externalValue,
+      }),
+    );
   }
 
   /**

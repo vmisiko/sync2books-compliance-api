@@ -17,6 +17,7 @@ import type { MainApiConnection } from '../../integration/main-api-pull/domain/e
 import type {
   MainApiTaxRateListResponse,
   MainApiTaxCodeListResponse,
+  MainApiItem,
 } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 
 const TENANT_ID = 'tenant-1';
@@ -71,7 +72,8 @@ function fakeConnections(
 function fakeMainApiPull(
   taxRates: MainApiTaxRateListResponse['taxRates'],
   taxCodes: MainApiTaxCodeListResponse['taxCodes'] = [],
-): Pick<MainApiPullClient, 'getTaxRates' | 'getTaxCodes'> {
+  items: MainApiItem[] = [],
+): Pick<MainApiPullClient, 'getTaxRates' | 'getTaxCodes' | 'getItems'> {
   return {
     getTaxRates: () =>
       Promise.resolve({
@@ -89,6 +91,16 @@ function fakeMainApiPull(
         offset: 0,
         hasMore: false,
       }),
+    // Single-page fake: tests here use far fewer than 100 items, so
+    // fetchAllItems()'s pagination loop always exits after page 1.
+    getItems: () =>
+      Promise.resolve({
+        data: items,
+        total: items.length,
+        page: 1,
+        limit: 100,
+        totalPages: 1,
+      }),
   };
 }
 
@@ -102,7 +114,7 @@ describe('DashboardMappingApplicationService', () => {
   async function buildService(
     org: Pick<ComplianceOrganizationApplicationService, 'getTenantById'>,
     connections: Pick<MainApiConnectionApplicationService, 'ensureCompany'>,
-    mainApiPull: Pick<MainApiPullClient, 'getTaxRates' | 'getTaxCodes'>,
+    mainApiPull: Pick<MainApiPullClient, 'getTaxRates' | 'getTaxCodes' | 'getItems'>,
   ): Promise<DashboardMappingApplicationService> {
     module = await Test.createTestingModule({
       imports: [
@@ -459,7 +471,7 @@ describe('DashboardMappingApplicationService', () => {
       ];
       const mainApiPull: Pick<
         MainApiPullClient,
-        'getTaxRates' | 'getTaxCodes'
+        'getTaxRates' | 'getTaxCodes' | 'getItems'
       > = {
         getTaxRates: () =>
           Promise.resolve({
@@ -486,6 +498,11 @@ describe('DashboardMappingApplicationService', () => {
             offset: 0,
             hasMore: false,
           }),
+        // This test only calls pullTaxRates() directly, never pullAll(), so
+        // getItems() is never actually invoked -- present only to satisfy
+        // buildService()'s parameter type.
+        getItems: () =>
+          Promise.resolve({ data: [], total: 0, page: 1, limit: 100, totalPages: 1 }),
       };
 
       const service = await buildService(
@@ -521,6 +538,165 @@ describe('DashboardMappingApplicationService', () => {
       });
       expect(afterSecondPull?.taxCodeId).toBe('code-plain');
       expect(afterSecondPull?.taxCodeExternalValue).toBe('16.0% S');
+    });
+  });
+
+  describe('pullAll -> units and classifications (derived from items)', () => {
+    function item(overrides: Partial<MainApiItem>): MainApiItem {
+      return {
+        id: 'item-default',
+        itemCode: 'IC-default',
+        name: 'Item',
+        active: true,
+        ...overrides,
+      };
+    }
+
+    it('dedupes unit-of-measure labels across items into one NEEDS_REVIEW row each', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull([], [], [
+          item({ id: 'i1', name: 'Maize Flour 2kg', unitOfMeasure: 'kg' }),
+          item({ id: 'i2', name: 'Rice 2kg', unitOfMeasure: 'kg' }),
+          item({ id: 'i3', name: 'Cooking Oil 2L', unitOfMeasure: 'ltr' }),
+          item({ id: 'i4', name: 'Bolt', unitOfMeasure: 'Gross (144)' }),
+        ]),
+      );
+
+      const result = await service.pullAll(TENANT_ID);
+
+      expect(result.units.attempted).toBe(3); // kg, ltr, "Gross (144)" -- deduped from 4 items
+      expect(result.units.suggested).toBe(2); // kg, ltr recognized
+      expect(result.units.unmapped).toBe(1); // "Gross (144)" not recognized
+
+      const kgRow = await unitRepo.findOne({
+        where: { merchantId: MERCHANT_ID, externalValue: 'kg' },
+      });
+      expect(kgRow?.status).toBe(MappingStatus.NEEDS_REVIEW);
+      expect(kgRow?.internalUnit).toBe('KG');
+      expect(kgRow?.qtyUnitCd).toBe('KG');
+
+      const grossRow = await unitRepo.findOne({
+        where: { merchantId: MERCHANT_ID, externalValue: 'Gross (144)' },
+      });
+      expect(grossRow?.status).toBe(MappingStatus.UNMAPPED);
+      expect(grossRow?.confidenceScore).toBe(0);
+
+      // Only one row per label even though "kg" appeared on two items.
+      const allKgRows = await unitRepo.find({
+        where: { merchantId: MERCHANT_ID, externalValue: 'kg' },
+      });
+      expect(allKgRows).toHaveLength(1);
+    });
+
+    it('does not overwrite an already-approved unit mapping on re-pull', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull([], [], [
+          item({ id: 'i1', name: 'Maize Flour 2kg', unitOfMeasure: 'kg' }),
+        ]),
+      );
+
+      const first = await service.pullAll(TENANT_ID);
+      const mappingId = first.units.results[0].mappingId;
+      await service.approve(TENANT_ID, mappingId, 'reviewer@example.com');
+
+      const second = await service.pullAll(TENANT_ID);
+      expect(second.units.results[0].mappingId).toBe(mappingId);
+      expect(second.units.alreadyMapped).toBe(1);
+
+      const row = await unitRepo.findOne({ where: { id: mappingId } });
+      expect(row?.status).toBe(MappingStatus.MAPPED);
+      expect(row?.active).toBe(true);
+    });
+
+    it('creates one NEEDS_REVIEW classification placeholder per item, not deduped', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull([], [], [
+          item({ id: 'i1', name: 'Maize Flour 2kg', sku: 'MF-2KG' }),
+          item({ id: 'i2', name: 'Sukuma Wiki Bunch', sku: 'SW-1' }),
+        ]),
+      );
+
+      const result = await service.pullAll(TENANT_ID);
+
+      expect(result.classifications.attempted).toBe(2);
+      expect(result.classifications.needsReview).toBe(2);
+
+      const rows = await clsRepo.find({ where: { merchantId: MERCHANT_ID } });
+      expect(rows).toHaveLength(2);
+      expect(rows.every((r) => r.status === MappingStatus.NEEDS_REVIEW)).toBe(
+        true,
+      );
+      expect(rows.every((r) => r.itemClsCd === null)).toBe(true);
+      // suggestClassificationPlaceholder prefers externalId first.
+      expect(rows.map((r) => r.matchType)).toEqual([
+        'EXTERNAL_ID',
+        'EXTERNAL_ID',
+      ]);
+      expect(rows.map((r) => r.matchValue).sort()).toEqual(['i1', 'i2']);
+    });
+
+    it('re-pulling classifications refreshes externalValue without creating a duplicate or disturbing an approved row', async () => {
+      // A mutable getItems so the *same* service/DB can simulate the source
+      // system's item list changing between two pulls -- buildService()
+      // would otherwise give each call its own fresh in-memory sqljs DB,
+      // defeating the point of testing a re-pull against existing rows.
+      let currentItems: MainApiItem[] = [
+        item({ id: 'i1', name: 'Maize Flour 2kg', sku: 'MF-2KG' }),
+      ];
+      const service = await buildService(fakeOrg(), fakeConnections('qb-conn-1'), {
+        ...fakeMainApiPull([], []),
+        getItems: () =>
+          Promise.resolve({
+            data: currentItems,
+            total: currentItems.length,
+            page: 1,
+            limit: 100,
+            totalPages: 1,
+          }),
+      });
+
+      const first = await service.pullAll(TENANT_ID);
+      const mappingId = first.classifications.results[0].mappingId;
+      await service.update(
+        TENANT_ID,
+        mappingId,
+        { itemClsCd: '14111400' },
+        'reviewer@example.com',
+      );
+
+      // Renamed in the source system -- re-pull should refresh
+      // externalValue, not create a second row or reset the approval.
+      currentItems = [
+        item({ id: 'i1', name: 'Maize Flour 2kg (renamed)', sku: 'MF-2KG' }),
+      ];
+      await service.pullAll(TENANT_ID);
+
+      const rows = await clsRepo.find({ where: { merchantId: MERCHANT_ID } });
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe(MappingStatus.MAPPED);
+      expect(rows[0].itemClsCd).toBe('14111400');
+      // Approved (active) rows are left untouched on re-pull, same as
+      // upsertUnmappedTaxRate/upsertUnmappedUnit -- the point being tested
+      // here is "no duplicate row and the approval survives", not a name
+      // refresh on an already-resolved row.
+      expect(rows[0].externalValue).toBe('Maize Flour 2kg');
+    });
+
+    it('throws when the tenant has no connected QuickBooks connection', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null),
+        fakeMainApiPull([], [], []),
+      );
+      await expect(service.pullAll(TENANT_ID)).rejects.toThrow(
+        /No connected QuickBooks connection/,
+      );
     });
   });
 

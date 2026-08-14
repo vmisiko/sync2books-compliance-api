@@ -11,7 +11,7 @@ function reqFor(user: DashboardRequestUser): Request {
 describe('DashboardMappingsController', () => {
   let controller: DashboardMappingsController;
   let service: {
-    pullTaxRates: jest.Mock;
+    pullAll: jest.Mock;
     list: jest.Mock;
     summary: jest.Mock;
     approve: jest.Mock;
@@ -29,7 +29,7 @@ describe('DashboardMappingsController', () => {
 
   beforeEach(async () => {
     service = {
-      pullTaxRates: jest.fn(),
+      pullAll: jest.fn(),
       list: jest.fn(),
       summary: jest.fn(),
       approve: jest.fn(),
@@ -52,13 +52,13 @@ describe('DashboardMappingsController', () => {
     expect(controller).toBeDefined();
   });
 
-  it('pull() delegates to pullTaxRates with the tenant from the JWT', async () => {
-    service.pullTaxRates.mockResolvedValue({ attempted: 1 });
+  it('pull() delegates to pullAll with the tenant from the JWT', async () => {
+    service.pullAll.mockResolvedValue({ attempted: 1 });
     const result = await controller.pull(reqFor(user));
-    expect(service.pullTaxRates).toHaveBeenCalledWith('tenant-1');
+    expect(service.pullAll).toHaveBeenCalledWith('tenant-1');
     expect(result).toEqual({
       success: true,
-      message: 'Tax rates and tax codes pulled and scored',
+      message: 'Tax rates, tax codes, units, and classifications pulled and scored',
       data: { attempted: 1 },
     });
   });
