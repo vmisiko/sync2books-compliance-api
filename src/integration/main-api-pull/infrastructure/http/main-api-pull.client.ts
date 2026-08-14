@@ -48,6 +48,76 @@ export interface MainApiListResponse<T> {
 }
 
 /**
+ * Shape confirmed against the main API's own source
+ * (nest-sync-2-books-api/src/tax-rate/domain/entities/tax-rate.entity.ts +
+ * .../application/dtos/tax-rate-list-response.dto.ts) rather than assumed —
+ * note this is a real Tax Rate resource (status/effectiveTaxRate/etc), not
+ * the simpler {id,name,rate,status} shape a first guess might reach for.
+ */
+export interface MainApiTaxRate {
+  id: string;
+  /** Display name for generic use, e.g. "Standard VAT". */
+  name: string;
+  /** QuickBooks-specific display name, when present — often the more human-readable label (e.g. "16% Standard VAT"). */
+  displayName?: string | null;
+  status: 'Active' | 'Inactive' | 'Archived';
+  /** The effective tax rate percentage (e.g. 16 for 16%). */
+  effectiveTaxRate: number;
+  /** The total tax rate percentage across all components. */
+  totalTaxRate: number;
+  connectionId: string;
+  bookType?: string | null;
+}
+
+export interface MainApiTaxRateListResponse {
+  taxRates: MainApiTaxRate[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+/**
+ * Minimal shapes for /suppliers and /customers — not wired into any pull
+ * flow yet (see MainApiPullClient.getSuppliers/getCustomers doc comments).
+ * Confirmed against nest-sync-2-books-api's own list-response DTOs:
+ * src/supplier/application/dtos/supplier-list-response.dto.ts and
+ * src/customer/application/dtos/customer-list-response.dto.ts.
+ */
+export interface MainApiSupplier {
+  id: string;
+  supplierName?: string | null;
+  taxNumber?: string | null;
+  bookType?: string | null;
+}
+
+export interface MainApiSupplierListResponse {
+  suppliers: MainApiSupplier[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface MainApiCustomer {
+  id: string;
+  name: string;
+  companyName?: string | null;
+  givenName?: string | null;
+  familyName?: string | null;
+  taxId?: string | null;
+  bookType?: string | null;
+}
+
+export interface MainApiCustomerListResponse {
+  customers: MainApiCustomer[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+/**
  * compliance-api pulling from the main Sync2Books API as a registered
  * Application (its own x-api-key per compliance tenant) — see
  * THREE_SERVICE_TRUST_AND_CONNECTION_ARCHITECTURE.md. Mirrors the fetch-based
@@ -81,6 +151,55 @@ export class MainApiPullClient {
 
   async getInvoiceById(apiKey: string, invoiceId: string): Promise<MainApiInvoice> {
     return this.get<MainApiInvoice>(apiKey, `/invoices/${invoiceId}`, {});
+  }
+
+  /**
+   * GET /tax-rates?connectionId=... — real route confirmed against
+   * nest-sync-2-books-api/src/tax-rate/controllers/tax-rate.controller.ts
+   * (query-param filtered, same as getItems/getInvoices' page/limit style),
+   * not the /connections/{connectionId}/tax-rates path that a first read of
+   * the docs might suggest. connectionId is required by that controller's
+   * intent (a company can have more than one ERP connection) even though
+   * it's technically optional on the query DTO.
+   */
+  async getTaxRates(
+    apiKey: string,
+    connectionId: string,
+    params: { status?: 'Active' | 'Inactive' | 'Archived'; limit?: number; offset?: number } = {},
+  ): Promise<MainApiTaxRateListResponse> {
+    return this.get<MainApiTaxRateListResponse>(apiKey, '/tax-rates', {
+      connectionId,
+      status: params.status,
+      limit: params.limit,
+      offset: params.offset,
+    });
+  }
+
+  /**
+   * GET /suppliers?connectionId=... — not consumed anywhere yet. Kept here
+   * so a future pass can resolve sales-line supplier references to a real
+   * name/TIN instead of the raw QuickBooks ref; not needed for tax/unit/
+   * classification mapping (Track B's actual scope).
+   */
+  async getSuppliers(
+    apiKey: string,
+    connectionId: string,
+    params: { page?: number; limit?: number } = {},
+  ): Promise<MainApiSupplierListResponse> {
+    return this.get<MainApiSupplierListResponse>(apiKey, '/suppliers', { connectionId, ...params });
+  }
+
+  /**
+   * GET /customers?connectionId=... — same status as getSuppliers: wired up
+   * for later use resolving sales-line customerName/customerTin, not used by
+   * anything in this pass.
+   */
+  async getCustomers(
+    apiKey: string,
+    connectionId: string,
+    params: { page?: number; limit?: number } = {},
+  ): Promise<MainApiCustomerListResponse> {
+    return this.get<MainApiCustomerListResponse>(apiKey, '/customers', { connectionId, ...params });
   }
 
   /**

@@ -7,6 +7,7 @@ import { ComplianceOrganizationModule } from './compliance-organization/complian
 import { DashboardCatalogModule } from './dashboard-catalog/dashboard-catalog.module';
 import { DashboardIdentityModule } from './dashboard-identity/dashboard-identity.module';
 import { DashboardInvoicesModule } from './dashboard-invoices/dashboard-invoices.module';
+import { DashboardMappingModule } from './dashboard-mapping/dashboard-mapping.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { OscuMappingModule } from './regulatory/oscu/oscu-mapping.module';
 import { OscuOperationsModule } from './regulatory/oscu/presentation/oscu-operations.module';
@@ -76,6 +77,7 @@ import { PlatformCorrelationModule } from './integration/platform-correlation.mo
     DashboardCatalogModule,
     DashboardIdentityModule,
     DashboardInvoicesModule,
+    DashboardMappingModule,
     InventoryModule,
     MainApiPullModule,
     SalesModule,
