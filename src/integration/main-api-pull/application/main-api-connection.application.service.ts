@@ -57,6 +57,18 @@ export type MainApiLinkCredentials = {
 export class MainApiConnectionApplicationService {
   private readonly logger = new Logger(MainApiConnectionApplicationService.name);
 
+  /**
+   * Per-tenant serialization for ensureCompany(). Without this, two
+   * near-simultaneous calls for the same tenant (React StrictMode's double
+   * effect invocation, two browser tabs, a retried request, etc.) can both
+   * read `mainApiCompanyId: null` before either write lands, and each go on
+   * to create its own Company/webhook endpoint on the main API — only the
+   * last writer's id survives locally, orphaning the rest remotely. This
+   * chains calls per complianceTenantId so a call always observes the
+   * previous call's persisted result before deciding whether to create.
+   */
+  private readonly ensureCompanyChains = new Map<string, Promise<unknown>>();
+
   constructor(
     @Inject(MAIN_API_CONNECTION_REPO)
     private readonly repo: IMainApiConnectionRepository,
@@ -125,6 +137,21 @@ export class MainApiConnectionApplicationService {
    * pasting). Idempotent: returns the existing one if already created.
    */
   async ensureCompany(complianceTenantId: string): Promise<MainApiConnection> {
+    // Chain onto any in-flight/previous call for this tenant so concurrent
+    // callers can't both observe "not created yet" — see ensureCompanyChains.
+    const previous = this.ensureCompanyChains.get(complianceTenantId) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(() => this.ensureCompanyLocked(complianceTenantId));
+    this.ensureCompanyChains.set(complianceTenantId, run);
+    try {
+      return await run;
+    } finally {
+      if (this.ensureCompanyChains.get(complianceTenantId) === run) {
+        this.ensureCompanyChains.delete(complianceTenantId);
+      }
+    }
+  }
+
+  private async ensureCompanyLocked(complianceTenantId: string): Promise<MainApiConnection> {
     let connection = await this.getForTenant(complianceTenantId);
     if (!connection.mainApiCompanyId) {
       const tenant = await this.organization.getTenantById(complianceTenantId);
