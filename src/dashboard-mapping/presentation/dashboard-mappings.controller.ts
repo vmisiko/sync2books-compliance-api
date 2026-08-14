@@ -36,8 +36,9 @@ export class DashboardMappingsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Pull tax rates from the main API (QuickBooks) and run confidence-scored auto-suggestion, ' +
-      'creating/refreshing NEEDS_REVIEW tax_mappings rows',
+      'Pull tax rates AND tax codes from the main API (QuickBooks) and run confidence-scored ' +
+      'auto-suggestion, creating/refreshing NEEDS_REVIEW tax_mappings rows and resolving a ' +
+      'taxCodeId (the field actually assignable to a QuickBooks transaction line) where possible',
   })
   @ApiResponse({ status: 200, description: 'Pull + suggestion result' })
   async pull(@Req() req: Request) {
@@ -45,7 +46,7 @@ export class DashboardMappingsController {
     const result = await this.mappings.pullTaxRates(user.tenantId);
     return {
       success: true,
-      message: 'Tax rates pulled and scored',
+      message: 'Tax rates and tax codes pulled and scored',
       data: result,
     };
   }

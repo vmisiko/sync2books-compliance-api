@@ -39,6 +39,12 @@ export interface MappingListItem {
   updatedAt: Date;
   internalTaxCategory?: string;
   taxTyCd?: string;
+  /** QuickBooks TaxCode id — what actually gets written to a transaction's TaxCodeRef. Null until a TaxCode pull resolves one for this row's internalTaxCategory. */
+  taxCodeId?: string | null;
+  /** Raw TaxCode name that resolved taxCodeId, e.g. "16.0% S". */
+  taxCodeExternalValue?: string | null;
+  /** 0-100 confidence for taxCodeId specifically, independent of confidenceScore (which is TaxRate-derived). */
+  taxCodeConfidenceScore?: number | null;
   internalUnit?: string;
   qtyUnitCd?: string;
   pkgUnitCd?: string;
@@ -215,6 +221,12 @@ export class DashboardMappingApplicationService {
       });
     }
 
+    const taxCodes = await this.pullTaxCodes(
+      merchantId,
+      connection.mainApiApiKey,
+      quickbooksConnectionId,
+    );
+
     return {
       merchantId,
       attempted: results.length,
@@ -222,6 +234,81 @@ export class DashboardMappingApplicationService {
         .length,
       alreadyMapped: results.filter((r) => r.status === MappingStatus.MAPPED)
         .length,
+      unmapped: results.filter((r) => r.status === MappingStatus.UNMAPPED)
+        .length,
+      results,
+      taxCodes,
+    };
+  }
+
+  /**
+   * QuickBooks' SalesItemLineDetail.TaxCodeRef needs a TaxCode id, not a
+   * TaxRate id — TaxRate is only the percentage detail a TaxCode wraps, it
+   * isn't itself assignable to a transaction. Called from pullTaxRates()
+   * (same POST dashboard-api/mappings/pull action) so a single pull
+   * resolves both the TaxRate-derived internalTaxCategory/taxTyCd (existing
+   * behavior, unchanged above) and a real taxCodeId on the same
+   * tax_mappings row, via upsertTaxCodeSuggestion's confidence-preferring
+   * merge — see that method's doc comment for why a plain overwrite isn't
+   * safe here.
+   */
+  private async pullTaxCodes(
+    merchantId: string,
+    mainApiApiKey: string,
+    quickbooksConnectionId: string,
+  ) {
+    const response = await this.mainApiPull.getTaxCodes(
+      mainApiApiKey,
+      quickbooksConnectionId,
+      { isActive: true },
+    );
+
+    const results: Array<{
+      externalId: string;
+      externalValue: string;
+      mappingId: string | null;
+      status: MappingStatus | null;
+      confidenceScore: number | null;
+      internalTaxCategory: string | null;
+      taxCodeId: string | null;
+    }> = [];
+
+    for (const code of response.taxCodes) {
+      const suggestion = this.suggestions.suggestTaxCodeMapping(code.name);
+
+      if (!suggestion) {
+        results.push({
+          externalId: code.id,
+          externalValue: code.name,
+          mappingId: null,
+          status: MappingStatus.UNMAPPED,
+          confidenceScore: null,
+          internalTaxCategory: null,
+          taxCodeId: null,
+        });
+        continue;
+      }
+
+      const row = await this.upsertTaxCodeSuggestion(
+        merchantId,
+        code.id,
+        code.name,
+        suggestion,
+      );
+      results.push({
+        externalId: code.id,
+        externalValue: code.name,
+        mappingId: row.id,
+        status: row.status,
+        confidenceScore: suggestion.confidenceScore,
+        internalTaxCategory: suggestion.internalTaxCategory,
+        taxCodeId: row.taxCodeId,
+      });
+    }
+
+    return {
+      attempted: results.length,
+      resolved: results.filter((r) => r.taxCodeId !== null).length,
       unmapped: results.filter((r) => r.status === MappingStatus.UNMAPPED)
         .length,
       results,
@@ -279,6 +366,90 @@ export class DashboardMappingApplicationService {
         id: `taxmap-${randomUUID()}`,
         version: 1,
         ...patch,
+      }),
+    );
+  }
+
+  /**
+   * Resolves a taxCodeId onto the (merchantId, internalTaxCategory) row for
+   * this suggestion, active-row-first then pending-row, same lookup order
+   * as upsertTaxSuggestion. Never touches status/active/approval — enriching
+   * an existing row with taxCode metadata is not itself a review decision.
+   *
+   * The tricky part: tax_mappings has a unique (merchantId,
+   * internalTaxCategory, active) index, so at most one row (and therefore
+   * one taxCodeId) can exist per category — but several distinct QuickBooks
+   * TaxCodes legitimately share a category (e.g. "16.0% S", "16.0% S
+   * Import", "16.0% S - RC Imported Services" are all VAT_STANDARD). A
+   * naive last-write-wins upsert across a pull's TaxCode loop would let
+   * whichever code happens to be processed last silently clobber a better
+   * match. Instead this only overwrites taxCodeId when the incoming
+   * suggestion's confidence beats the confidence of whatever is already
+   * resolved there (taxCodeConfidenceScore), so the plain "<rate>% S" form
+   * (highest confidence) wins the slot over its Import/RC variants
+   * regardless of pull order.
+   *
+   * If no tax_mappings row exists yet for this category at all (no TaxRate
+   * pull has created one), this creates one sourced purely from the
+   * TaxCode data — internalTaxCategory/taxTyCd are derivable from the
+   * TaxCode name alone via MappingSuggestionService.suggestTaxCodeMapping.
+   */
+  private async upsertTaxCodeSuggestion(
+    merchantId: string,
+    taxCodeId: string,
+    taxCodeExternalValue: string,
+    suggestion: {
+      internalTaxCategory: string;
+      taxTyCd: string;
+      confidenceScore: number;
+    },
+  ): Promise<TaxMappingOrmEntity> {
+    const applyIfBetter = async (
+      row: TaxMappingOrmEntity,
+    ): Promise<TaxMappingOrmEntity> => {
+      const currentConfidence = row.taxCodeConfidenceScore ?? -1;
+      if (row.taxCodeId && suggestion.confidenceScore <= currentConfidence) {
+        return row;
+      }
+      row.taxCodeId = taxCodeId;
+      row.taxCodeExternalValue = taxCodeExternalValue;
+      row.taxCodeConfidenceScore = suggestion.confidenceScore;
+      return this.taxRepo.save(row);
+    };
+
+    const approved = await this.taxRepo.findOne({
+      where: {
+        merchantId,
+        internalTaxCategory: suggestion.internalTaxCategory,
+        active: true,
+      },
+    });
+    if (approved) return applyIfBetter(approved);
+
+    const pending = await this.taxRepo.findOne({
+      where: {
+        merchantId,
+        internalTaxCategory: suggestion.internalTaxCategory,
+        active: false,
+      },
+    });
+    if (pending) return applyIfBetter(pending);
+
+    return this.taxRepo.save(
+      this.taxRepo.create({
+        id: `taxmap-${randomUUID()}`,
+        merchantId,
+        internalTaxCategory: suggestion.internalTaxCategory,
+        taxTyCd: suggestion.taxTyCd,
+        version: 1,
+        active: false,
+        sourceSystem: SourceSystem.QUICKBOOKS,
+        status: MappingStatus.NEEDS_REVIEW,
+        confidenceScore: suggestion.confidenceScore,
+        externalValue: null,
+        taxCodeId,
+        taxCodeExternalValue,
+        taxCodeConfidenceScore: suggestion.confidenceScore,
       }),
     );
   }
@@ -697,6 +868,9 @@ export class DashboardMappingApplicationService {
       updatedAt: row.updatedAt,
       internalTaxCategory: row.internalTaxCategory,
       taxTyCd: row.taxTyCd,
+      taxCodeId: row.taxCodeId,
+      taxCodeExternalValue: row.taxCodeExternalValue,
+      taxCodeConfidenceScore: row.taxCodeConfidenceScore,
     };
   }
 

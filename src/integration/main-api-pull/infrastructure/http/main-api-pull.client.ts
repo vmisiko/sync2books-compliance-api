@@ -111,6 +111,58 @@ export interface MainApiTaxRateListResponse {
 }
 
 /**
+ * QuickBooks' SalesItemLineDetail.TaxCodeRef needs a TaxCode id, not a
+ * TaxRate id — a TaxRate is just the percentage detail a TaxCode wraps
+ * (`salesTaxRateRefs`/`purchaseTaxRateRefs`), it isn't itself assignable to
+ * a transaction line. This shape is built against the main API's TaxCode
+ * sync contract as frozen for this task (that sync is landing in a parallel
+ * task on nest-sync-2-books-api and was not live/confirmed at the time this
+ * was written) — mirrors the existing tax-rates endpoints' DTO shape:
+ * standard synced-entity fields (id/applicationId/companyId/connectionId/
+ * bookId/syncToken/bookResponseData/bookType/syncStatus/syncError/
+ * createdAt/updatedAt/lastSyncAt) plus TaxCode-specific fields below.
+ */
+export interface MainApiTaxCodeRateRef {
+  id: string;
+  name: string;
+}
+
+export interface MainApiTaxCode {
+  id: string;
+  applicationId?: string | null;
+  companyId?: string | null;
+  connectionId: string;
+  bookId?: string | null;
+  syncToken?: string | null;
+  bookResponseData?: unknown;
+  bookType?: string | null;
+  syncStatus?: string | null;
+  syncError?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  lastSyncAt?: string | null;
+  /** e.g. "16.0% S", "0.0% Z", "Exempt Sale", "No VAT". */
+  name: string;
+  /** e.g. "Standard", "Zero-rated", "Exempt from VAT", "Out of Scope of VAT". */
+  description?: string | null;
+  active: boolean;
+  taxable: boolean;
+  taxGroup: boolean;
+  /** Can be empty for purchase-only codes. */
+  salesTaxRateRefs: MainApiTaxCodeRateRef[];
+  /** Can be empty for sales-only codes. */
+  purchaseTaxRateRefs: MainApiTaxCodeRateRef[];
+}
+
+export interface MainApiTaxCodeListResponse {
+  taxCodes: MainApiTaxCode[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+/**
  * Minimal shapes for /suppliers and /customers — not wired into any pull
  * flow yet (see MainApiPullClient.getSuppliers/getCustomers doc comments).
  * Confirmed against nest-sync-2-books-api's own list-response DTOs:
@@ -214,6 +266,33 @@ export class MainApiPullClient {
     return this.get<MainApiTaxRateListResponse>(apiKey, '/tax-rates', {
       connectionId,
       status: params.status,
+      limit: params.limit,
+      offset: params.offset,
+    });
+  }
+
+  /**
+   * GET /tax-codes?connectionId=... — sibling to getTaxRates, added the same
+   * way (query-param filtered, connectionId required by intent though
+   * technically optional on the query DTO). Built against the frozen
+   * contract for the main API's TaxCode sync (see MainApiTaxCode's doc
+   * comment) rather than a confirmed-live route — the main API's TaxCode
+   * sync was landing in a parallel task, not done yet when this was written.
+   */
+  async getTaxCodes(
+    apiKey: string,
+    connectionId: string,
+    params: {
+      status?: 'Active' | 'Inactive' | 'Archived';
+      isActive?: boolean;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): Promise<MainApiTaxCodeListResponse> {
+    return this.get<MainApiTaxCodeListResponse>(apiKey, '/tax-codes', {
+      connectionId,
+      status: params.status,
+      isActive: params.isActive,
       limit: params.limit,
       offset: params.offset,
     });
@@ -521,7 +600,7 @@ export class MainApiPullClient {
   private async get<T>(
     apiKey: string,
     path: string,
-    params: Record<string, string | number | undefined>,
+    params: Record<string, string | number | boolean | undefined>,
   ): Promise<T> {
     const query = Object.entries(params)
       .filter(([, v]) => v !== undefined)

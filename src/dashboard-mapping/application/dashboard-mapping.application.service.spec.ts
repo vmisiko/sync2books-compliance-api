@@ -13,7 +13,10 @@ import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
 import { MappingStatus } from '../../shared/domain/enums/mapping-status.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
 import type { MainApiConnection } from '../../integration/main-api-pull/domain/entities/main-api-connection.entity';
-import type { MainApiTaxRateListResponse } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
+import type {
+  MainApiTaxRateListResponse,
+  MainApiTaxCodeListResponse,
+} from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 
 const TENANT_ID = 'tenant-1';
 const MERCHANT_ID = 'merchant-1';
@@ -66,12 +69,21 @@ function fakeConnections(
 
 function fakeMainApiPull(
   taxRates: MainApiTaxRateListResponse['taxRates'],
-): Pick<MainApiPullClient, 'getTaxRates'> {
+  taxCodes: MainApiTaxCodeListResponse['taxCodes'] = [],
+): Pick<MainApiPullClient, 'getTaxRates' | 'getTaxCodes'> {
   return {
     getTaxRates: () =>
       Promise.resolve({
         taxRates,
         total: taxRates.length,
+        limit: 100,
+        offset: 0,
+        hasMore: false,
+      }),
+    getTaxCodes: () =>
+      Promise.resolve({
+        taxCodes,
+        total: taxCodes.length,
         limit: 100,
         offset: 0,
         hasMore: false,
@@ -88,7 +100,7 @@ describe('DashboardMappingApplicationService', () => {
   async function buildService(
     org: Pick<ComplianceOrganizationApplicationService, 'getTenantById'>,
     connections: Pick<MainApiConnectionApplicationService, 'getForTenant'>,
-    mainApiPull: Pick<MainApiPullClient, 'getTaxRates'>,
+    mainApiPull: Pick<MainApiPullClient, 'getTaxRates' | 'getTaxCodes'>,
   ): Promise<DashboardMappingApplicationService> {
     module = await Test.createTestingModule({
       imports: [
@@ -208,6 +220,245 @@ describe('DashboardMappingApplicationService', () => {
       const second = await service.pullTaxRates(TENANT_ID);
       expect(second.results[0].mappingId).toBe(mappingId);
       expect(second.results[0].status).toBe(MappingStatus.MAPPED);
+    });
+  });
+
+  describe('pullTaxRates -> tax codes (taxCodeId resolution)', () => {
+    it('resolves taxCodeId onto the tax-rate-created row for the same category', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull(
+          [
+            {
+              id: 'rate-1',
+              name: '16% Standard VAT',
+              status: 'Active',
+              effectiveTaxRate: 16,
+              totalTaxRate: 16,
+              connectionId: 'qb-conn-1',
+            },
+          ],
+          [
+            {
+              id: 'code-1',
+              name: '16.0% S',
+              active: true,
+              taxable: true,
+              taxGroup: false,
+              connectionId: 'qb-conn-1',
+              salesTaxRateRefs: [{ id: '13', name: 'SS-16' }],
+              purchaseTaxRateRefs: [],
+            },
+          ],
+        ),
+      );
+
+      const result = await service.pullTaxRates(TENANT_ID);
+
+      expect(result.taxCodes.attempted).toBe(1);
+      expect(result.taxCodes.resolved).toBe(1);
+      const taxCodeResult = result.taxCodes.results[0];
+      expect(taxCodeResult.taxCodeId).toBe('code-1');
+      expect(taxCodeResult.internalTaxCategory).toBe(TaxCategory.VAT_STANDARD);
+
+      // Same row as the one the TaxRate suggestion created.
+      const rateMappingId = result.results[0].mappingId!;
+      expect(taxCodeResult.mappingId).toBe(rateMappingId);
+
+      const row = await taxRepo.findOne({ where: { id: rateMappingId } });
+      expect(row?.taxCodeId).toBe('code-1');
+      expect(row?.taxCodeExternalValue).toBe('16.0% S');
+      expect(row?.taxCodeConfidenceScore).toBeGreaterThanOrEqual(90);
+      // TaxRate-derived fields are untouched, still describing the rate.
+      expect(row?.internalTaxCategory).toBe(TaxCategory.VAT_STANDARD);
+      expect(row?.externalValue).toBe('16% Standard VAT');
+    });
+
+    it('prefers the higher-confidence TaxCode when several map to the same category, regardless of pull order', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull(
+          [],
+          [
+            // Lower-confidence Import variant pulled first...
+            {
+              id: 'code-import',
+              name: '16.0% S Import',
+              active: true,
+              taxable: true,
+              taxGroup: false,
+              connectionId: 'qb-conn-1',
+              salesTaxRateRefs: [],
+              purchaseTaxRateRefs: [{ id: '20', name: 'Import VAT' }],
+            },
+            // ...then the plain, higher-confidence standard code.
+            {
+              id: 'code-plain',
+              name: '16.0% S',
+              active: true,
+              taxable: true,
+              taxGroup: false,
+              connectionId: 'qb-conn-1',
+              salesTaxRateRefs: [{ id: '13', name: 'SS-16' }],
+              purchaseTaxRateRefs: [],
+            },
+          ],
+        ),
+      );
+
+      const result = await service.pullTaxRates(TENANT_ID);
+      const mappingId = result.taxCodes.results.find(
+        (r) => r.externalId === 'code-plain',
+      )!.mappingId!;
+
+      const row = await taxRepo.findOne({ where: { id: mappingId } });
+      expect(row?.taxCodeId).toBe('code-plain');
+      expect(row?.taxCodeExternalValue).toBe('16.0% S');
+    });
+
+    it('creates a new NEEDS_REVIEW row from TaxCode data alone when no TaxRate row exists for that category', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull(
+          [],
+          [
+            {
+              id: 'code-exempt',
+              name: 'Exempt Sale',
+              active: true,
+              taxable: false,
+              taxGroup: false,
+              connectionId: 'qb-conn-1',
+              salesTaxRateRefs: [],
+              purchaseTaxRateRefs: [],
+            },
+          ],
+        ),
+      );
+
+      const result = await service.pullTaxRates(TENANT_ID);
+      const taxCodeResult = result.taxCodes.results[0];
+      expect(taxCodeResult.internalTaxCategory).toBe(TaxCategory.EXEMPT);
+      expect(taxCodeResult.taxCodeId).toBe('code-exempt');
+
+      const row = await taxRepo.findOne({
+        where: { id: taxCodeResult.mappingId! },
+      });
+      expect(row?.taxTyCd).toBe('A');
+      expect(row?.status).toBe(MappingStatus.NEEDS_REVIEW);
+      expect(row?.active).toBe(false);
+      expect(row?.sourceSystem).toBe(SourceSystem.QUICKBOOKS);
+    });
+
+    it('reports an unrecognized TaxCode name as unmapped without persisting a row', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull(
+          [],
+          [
+            {
+              id: 'code-weird',
+              name: 'Custom Weird Code',
+              active: true,
+              taxable: true,
+              taxGroup: false,
+              connectionId: 'qb-conn-1',
+              salesTaxRateRefs: [],
+              purchaseTaxRateRefs: [],
+            },
+          ],
+        ),
+      );
+
+      const result = await service.pullTaxRates(TENANT_ID);
+      expect(result.taxCodes.unmapped).toBe(1);
+      expect(result.taxCodes.results[0].mappingId).toBeNull();
+      expect(result.taxCodes.results[0].taxCodeId).toBeNull();
+    });
+
+    it('does not overwrite taxCodeId on an already-resolved row with a lower-confidence match on re-pull', async () => {
+      // A mutable getTaxCodes so the *same* service/DB can be re-pulled with
+      // a different TaxCode response, unlike fakeMainApiPull's fixed closure.
+      let taxCodes: MainApiTaxCodeListResponse['taxCodes'] = [
+        {
+          id: 'code-plain',
+          name: '16.0% S',
+          active: true,
+          taxable: true,
+          taxGroup: false,
+          connectionId: 'qb-conn-1',
+          salesTaxRateRefs: [{ id: '13', name: 'SS-16' }],
+          purchaseTaxRateRefs: [],
+        },
+      ];
+      const mainApiPull: Pick<
+        MainApiPullClient,
+        'getTaxRates' | 'getTaxCodes'
+      > = {
+        getTaxRates: () =>
+          Promise.resolve({
+            taxRates: [
+              {
+                id: 'rate-1',
+                name: '16% Standard VAT',
+                status: 'Active',
+                effectiveTaxRate: 16,
+                totalTaxRate: 16,
+                connectionId: 'qb-conn-1',
+              },
+            ],
+            total: 1,
+            limit: 100,
+            offset: 0,
+            hasMore: false,
+          }),
+        getTaxCodes: () =>
+          Promise.resolve({
+            taxCodes,
+            total: taxCodes.length,
+            limit: 100,
+            offset: 0,
+            hasMore: false,
+          }),
+      };
+
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        mainApiPull,
+      );
+
+      const first = await service.pullTaxRates(TENANT_ID);
+      const mappingId = first.results[0].mappingId!;
+      const afterFirstPull = await taxRepo.findOne({
+        where: { id: mappingId },
+      });
+      expect(afterFirstPull?.taxCodeId).toBe('code-plain');
+
+      // Re-pull where this time only a lower-confidence Import variant comes back.
+      taxCodes = [
+        {
+          id: 'code-import',
+          name: '16.0% S Import',
+          active: true,
+          taxable: true,
+          taxGroup: false,
+          connectionId: 'qb-conn-1',
+          salesTaxRateRefs: [],
+          purchaseTaxRateRefs: [{ id: '20', name: 'Import VAT' }],
+        },
+      ];
+      await service.pullTaxRates(TENANT_ID);
+
+      const afterSecondPull = await taxRepo.findOne({
+        where: { id: mappingId },
+      });
+      expect(afterSecondPull?.taxCodeId).toBe('code-plain');
+      expect(afterSecondPull?.taxCodeExternalValue).toBe('16.0% S');
     });
   });
 

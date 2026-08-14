@@ -56,6 +56,41 @@ export class TaxMappingOrmEntity {
   @Column('varchar', { nullable: true })
   externalValue!: string | null;
 
+  // --- QuickBooks TaxCode fields (additive; see MainApiTaxCode in
+  // main-api-pull.client.ts) ---
+  //
+  // The fields above this block are all derived from QuickBooks' TaxRate
+  // entity, which is NOT assignable to a transaction line — QuickBooks'
+  // SalesItemLineDetail.TaxCodeRef needs a TaxCode id, a separate entity
+  // that wraps one-or-more TaxRates. taxCodeId is therefore the field that
+  // actually represents "what would get written to a QuickBooks
+  // transaction"; internalTaxCategory/taxTyCd/externalValue above stay as
+  // supporting/reporting detail (the percentage detail lives on TaxRate,
+  // not TaxCode) rather than being replaced.
+  //
+  // Kept as three separate columns rather than reusing confidenceScore/
+  // externalValue above, because a single tax_mappings row is keyed by
+  // (merchantId, internalTaxCategory) — and several QuickBooks TaxCodes can
+  // legitimately map to the same broad KRA category (e.g. "16.0% S",
+  // "16.0% S Import", "16.0% S - RC Imported Services" are all
+  // VAT_STANDARD). Only one taxCodeId can live on this row, so
+  // taxCodeConfidenceScore lets the upsert path keep whichever pulled
+  // TaxCode scored highest for this category rather than just last-write-
+  // wins, without disturbing the TaxRate-derived confidenceScore semantics
+  // that already existed.
+
+  /** The QuickBooks TaxCode id to actually write onto a transaction line's TaxCodeRef — null until a TaxCode pull resolves one. */
+  @Column('varchar', { nullable: true })
+  taxCodeId!: string | null;
+
+  /** Raw TaxCode name as pulled from the main API, e.g. "16.0% S", "Exempt Sale", "No VAT". */
+  @Column('varchar', { nullable: true })
+  taxCodeExternalValue!: string | null;
+
+  /** 0-100 confidence for taxCodeId specifically (independent of confidenceScore above) — see the block comment for why this needs its own score. */
+  @Column('int', { nullable: true })
+  taxCodeConfidenceScore!: number | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

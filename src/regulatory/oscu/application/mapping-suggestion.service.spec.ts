@@ -51,6 +51,91 @@ describe('MappingSuggestionService', () => {
     });
   });
 
+  describe('suggestTaxCodeMapping', () => {
+    // Tuned against real TaxCode names confirmed live against a KRA org
+    // today (see MappingSuggestionService.suggestTaxCodeMapping's doc
+    // comment).
+    it('maps "16.0% S" (current standard rate + S suffix) to VAT_STANDARD at the top of the band', () => {
+      const result = service.suggestTaxCodeMapping('16.0% S');
+      expect(result).toEqual({
+        internalTaxCategory: TaxCategory.VAT_STANDARD,
+        taxTyCd: 'B',
+        confidenceScore: 96,
+      });
+    });
+
+    it('maps "14.0% S" (old standard rate + S suffix) to VAT_STANDARD too', () => {
+      const result = service.suggestTaxCodeMapping('14.0% S');
+      expect(result?.internalTaxCategory).toBe(TaxCategory.VAT_STANDARD);
+      expect(result?.taxTyCd).toBe('B');
+      expect(result?.confidenceScore).toBe(96);
+    });
+
+    it('maps "16.0% S Import" to VAT_STANDARD at a capped, lower confidence than the plain form', () => {
+      const result = service.suggestTaxCodeMapping('16.0% S Import');
+      expect(result?.internalTaxCategory).toBe(TaxCategory.VAT_STANDARD);
+      expect(result?.confidenceScore).toBeLessThanOrEqual(85);
+      const plain = service.suggestTaxCodeMapping('16.0% S');
+      expect(result!.confidenceScore).toBeLessThan(plain!.confidenceScore);
+    });
+
+    it('maps "16.0% S - RC Imported Services" to VAT_STANDARD at a capped, lower confidence', () => {
+      const result = service.suggestTaxCodeMapping(
+        '16.0% S - RC Imported Services',
+      );
+      expect(result?.internalTaxCategory).toBe(TaxCategory.VAT_STANDARD);
+      expect(result?.confidenceScore).toBeLessThanOrEqual(85);
+    });
+
+    it('maps "8.0% Petrol" to VAT_STANDARD (positive rate, no exempt/zero keyword)', () => {
+      const result = service.suggestTaxCodeMapping('8.0% Petrol');
+      expect(result?.internalTaxCategory).toBe(TaxCategory.VAT_STANDARD);
+      expect(result?.taxTyCd).toBe('B');
+    });
+
+    it('maps "0.0% Z" to VAT_ZERO at the top of the band', () => {
+      const result = service.suggestTaxCodeMapping('0.0% Z');
+      expect(result).toEqual({
+        internalTaxCategory: TaxCategory.VAT_ZERO,
+        taxTyCd: 'C',
+        confidenceScore: 98,
+      });
+    });
+
+    it('maps "Exempt Sale" and "Exempt Purchase" to EXEMPT', () => {
+      expect(service.suggestTaxCodeMapping('Exempt Sale')).toEqual({
+        internalTaxCategory: TaxCategory.EXEMPT,
+        taxTyCd: 'A',
+        confidenceScore: 95,
+      });
+      expect(service.suggestTaxCodeMapping('Exempt Purchase')).toEqual({
+        internalTaxCategory: TaxCategory.EXEMPT,
+        taxTyCd: 'A',
+        confidenceScore: 95,
+      });
+    });
+
+    it('maps "No VAT" to OTHER (out of scope of VAT)', () => {
+      const result = service.suggestTaxCodeMapping('No VAT');
+      expect(result).toEqual({
+        internalTaxCategory: TaxCategory.OTHER,
+        taxTyCd: 'D',
+        confidenceScore: 95,
+      });
+    });
+
+    it('maps an unrecognized name to no suggestion', () => {
+      expect(service.suggestTaxCodeMapping('Custom Weird Code')).toBeNull();
+    });
+
+    it('returns null for an empty/undefined name', () => {
+      expect(service.suggestTaxCodeMapping('')).toBeNull();
+      expect(
+        service.suggestTaxCodeMapping(undefined as unknown as string),
+      ).toBeNull();
+    });
+  });
+
   describe('suggestUnitMapping', () => {
     it('matches an exact alias with high confidence', () => {
       const result = service.suggestUnitMapping('kg');

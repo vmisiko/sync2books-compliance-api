@@ -127,6 +127,90 @@ export class MappingSuggestionService {
     return null;
   }
 
+  /**
+   * Same scoring intent as suggestTaxMapping, but tuned against QuickBooks
+   * TaxCode names (MainApiTaxCode.name) rather than TaxRate names — TaxCode
+   * is the entity actually assignable to a transaction line
+   * (SalesItemLineDetail.TaxCodeRef), so this is what resolves a mapping
+   * row's taxCodeId. Tuned against real TaxCode names confirmed live on a
+   * KRA org today: "0.0% Z" (Zero-rated), "14.0% S"/"16.0% S" (Standard —
+   * both old and current KRA VAT rates), "14.0% S - RC Imported Services"/
+   * "16.0% S - RC Imported Services" (reverse-charge imported services),
+   * "14.0% S Import"/"16.0% S Import" (standard-rated imports), "8.0%
+   * Petrol" (petroleum, still standard-rated for this 4-category scheme),
+   * "Exempt Purchase"/"Exempt Sale" (exempt), "No VAT" (out of scope of
+   * VAT -> OTHER). Import/reverse-charge variants still resolve to
+   * VAT_STANDARD (the rate is what determines the KRA category, not the
+   * import/RC bookkeeping treatment) but at a capped, lower confidence
+   * since they're a less direct match than the plain "<rate>% S" form.
+   * @param name Raw TaxCode name/label as it appeared in the source system.
+   */
+  suggestTaxCodeMapping(name: string): TaxMappingSuggestion | null {
+    const raw = name ?? '';
+    const n = raw.toLowerCase();
+    if (!n.trim()) return null;
+
+    if (n.includes('exempt')) {
+      return {
+        internalTaxCategory: TaxCategory.EXEMPT,
+        taxTyCd: TAX_CATEGORY_CODE[TaxCategory.EXEMPT],
+        confidenceScore: 95,
+      };
+    }
+
+    if (n.includes('no vat') || n.includes('out of scope')) {
+      return {
+        internalTaxCategory: TaxCategory.OTHER,
+        taxTyCd: TAX_CATEGORY_CODE[TaxCategory.OTHER],
+        confidenceScore: 95,
+      };
+    }
+
+    const percentMatch = raw.match(/(\d+(?:\.\d+)?)\s*%/);
+    const ratePercent = percentMatch ? parseFloat(percentMatch[1]) : null;
+    const isZeroRate = ratePercent !== null && Math.abs(ratePercent) < 0.001;
+    // KRA's own convention embeds a one-letter suffix in the code label
+    // (S=standard, Z=zero, E=exempt) — e.g. "0.0% Z", "16.0% S".
+    const hasZeroSuffix = /\bz\b/.test(n);
+    const hasStandardSuffix = /\bs\b/.test(n);
+
+    if (isZeroRate || n.includes('zero')) {
+      let confidenceScore = 90;
+      if (isZeroRate && (hasZeroSuffix || n.includes('zero')))
+        confidenceScore = 98;
+      else if (isZeroRate) confidenceScore = 92;
+      return {
+        internalTaxCategory: TaxCategory.VAT_ZERO,
+        taxTyCd: TAX_CATEGORY_CODE[TaxCategory.VAT_ZERO],
+        confidenceScore,
+      };
+    }
+
+    const isPositiveRate = ratePercent !== null && ratePercent > 0;
+    if (isPositiveRate || hasStandardSuffix || n.includes('standard')) {
+      let confidenceScore = 88;
+      if (isPositiveRate && hasStandardSuffix) confidenceScore = 96;
+      else if (hasStandardSuffix || n.includes('standard'))
+        confidenceScore = 90;
+
+      const isImportOrReverseCharge =
+        n.includes('import') ||
+        n.includes(' rc ') ||
+        n.includes('reverse charge');
+      if (isImportOrReverseCharge)
+        confidenceScore = Math.min(confidenceScore, 85);
+
+      return {
+        internalTaxCategory: TaxCategory.VAT_STANDARD,
+        taxTyCd: TAX_CATEGORY_CODE[TaxCategory.VAT_STANDARD],
+        confidenceScore,
+      };
+    }
+
+    // Anything else — don't guess wildly. Caller reports this code as unmapped.
+    return null;
+  }
+
   /** @param label Raw unit-of-measure label from the source system, e.g. MainApiItem.unitOfMeasure. */
   suggestUnitMapping(
     label: string | null | undefined,
