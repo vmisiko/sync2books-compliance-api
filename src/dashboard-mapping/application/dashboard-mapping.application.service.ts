@@ -139,7 +139,7 @@ export class DashboardMappingApplicationService {
   async pullTaxRates(complianceTenantId: string) {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const connection = await this.mainApiConnections.getForTenant(complianceTenantId);
-    const quickbooksConnectionId = connection.integrations['quickbooks']?.connectionId;
+    const quickbooksConnectionId = connection.quickbooksConnectionId;
     if (!quickbooksConnectionId) {
       throw new BadRequestException(
         'No connected QuickBooks connection for this tenant yet — connect QuickBooks before pulling tax rates.',
