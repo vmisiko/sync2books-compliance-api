@@ -39,9 +39,9 @@ function fakeOrg(): Pick<
 
 function fakeConnections(
   quickbooksConnectionId: string | null,
-): Pick<MainApiConnectionApplicationService, 'getForTenant'> {
+): Pick<MainApiConnectionApplicationService, 'ensureCompany'> {
   return {
-    getForTenant: () =>
+    ensureCompany: () =>
       Promise.resolve({
         id: 'conn-1',
         complianceTenantId: TENANT_ID,
@@ -99,7 +99,7 @@ describe('DashboardMappingApplicationService', () => {
 
   async function buildService(
     org: Pick<ComplianceOrganizationApplicationService, 'getTenantById'>,
-    connections: Pick<MainApiConnectionApplicationService, 'getForTenant'>,
+    connections: Pick<MainApiConnectionApplicationService, 'ensureCompany'>,
     mainApiPull: Pick<MainApiPullClient, 'getTaxRates' | 'getTaxCodes'>,
   ): Promise<DashboardMappingApplicationService> {
     module = await Test.createTestingModule({

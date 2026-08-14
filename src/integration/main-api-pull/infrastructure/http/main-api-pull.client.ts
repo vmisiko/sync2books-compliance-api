@@ -284,7 +284,7 @@ export class MainApiPullClient {
     connectionId: string,
     params: {
       status?: 'Active' | 'Inactive' | 'Archived';
-      isActive?: boolean;
+      active?: boolean;
       limit?: number;
       offset?: number;
     } = {},
@@ -292,7 +292,7 @@ export class MainApiPullClient {
     return this.get<MainApiTaxCodeListResponse>(apiKey, '/tax-codes', {
       connectionId,
       status: params.status,
-      isActive: params.isActive,
+      active: params.active,
       limit: params.limit,
       offset: params.offset,
     });

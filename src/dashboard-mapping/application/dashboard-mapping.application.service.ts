@@ -155,8 +155,11 @@ export class DashboardMappingApplicationService {
 
   async pullTaxRates(complianceTenantId: string) {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
+    // ensureCompany(), not getForTenant() -- self-heals a mainApiCompanyId
+    // that no longer exists on the main API (see 195869c) instead of just
+    // reading a stale reference and failing.
     const connection =
-      await this.mainApiConnections.getForTenant(complianceTenantId);
+      await this.mainApiConnections.ensureCompany(complianceTenantId);
     const quickbooksConnectionId =
       connection.integrations?.quickbooks?.connectionId ?? null;
     if (!quickbooksConnectionId) {
@@ -260,7 +263,7 @@ export class DashboardMappingApplicationService {
     const response = await this.mainApiPull.getTaxCodes(
       mainApiApiKey,
       quickbooksConnectionId,
-      { isActive: true },
+      { active: true },
     );
 
     const results: Array<{
