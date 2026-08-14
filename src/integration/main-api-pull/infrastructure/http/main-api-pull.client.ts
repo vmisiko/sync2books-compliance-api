@@ -60,7 +60,11 @@ export interface MainApiConnectionRecord {
   integrationKey: MainApiIntegrationKey;
   companyId: string;
   bookCompanyId: string;
-  status: 'pending' | 'awaiting_company_selection' | 'connected' | 'disconnected';
+  status:
+    | 'pending'
+    | 'awaiting_company_selection'
+    | 'connected'
+    | 'disconnected';
 }
 
 export interface MainApiDynamicsCompany {
@@ -175,10 +179,17 @@ export class MainApiPullClient {
     apiKey: string,
     params: { page?: number; limit?: number } = {},
   ): Promise<MainApiListResponse<MainApiInvoice>> {
-    return this.get<MainApiListResponse<MainApiInvoice>>(apiKey, '/invoices', params);
+    return this.get<MainApiListResponse<MainApiInvoice>>(
+      apiKey,
+      '/invoices',
+      params,
+    );
   }
 
-  async getInvoiceById(apiKey: string, invoiceId: string): Promise<MainApiInvoice> {
+  async getInvoiceById(
+    apiKey: string,
+    invoiceId: string,
+  ): Promise<MainApiInvoice> {
     return this.get<MainApiInvoice>(apiKey, `/invoices/${invoiceId}`, {});
   }
 
@@ -194,7 +205,11 @@ export class MainApiPullClient {
   async getTaxRates(
     apiKey: string,
     connectionId: string,
-    params: { status?: 'Active' | 'Inactive' | 'Archived'; limit?: number; offset?: number } = {},
+    params: {
+      status?: 'Active' | 'Inactive' | 'Archived';
+      limit?: number;
+      offset?: number;
+    } = {},
   ): Promise<MainApiTaxRateListResponse> {
     return this.get<MainApiTaxRateListResponse>(apiKey, '/tax-rates', {
       connectionId,
@@ -215,7 +230,10 @@ export class MainApiPullClient {
     connectionId: string,
     params: { page?: number; limit?: number } = {},
   ): Promise<MainApiSupplierListResponse> {
-    return this.get<MainApiSupplierListResponse>(apiKey, '/suppliers', { connectionId, ...params });
+    return this.get<MainApiSupplierListResponse>(apiKey, '/suppliers', {
+      connectionId,
+      ...params,
+    });
   }
 
   /**
@@ -228,7 +246,10 @@ export class MainApiPullClient {
     connectionId: string,
     params: { page?: number; limit?: number } = {},
   ): Promise<MainApiCustomerListResponse> {
-    return this.get<MainApiCustomerListResponse>(apiKey, '/customers', { connectionId, ...params });
+    return this.get<MainApiCustomerListResponse>(apiKey, '/customers', {
+      connectionId,
+      ...params,
+    });
   }
 
   /**
@@ -237,8 +258,41 @@ export class MainApiPullClient {
    * returns a QuickBooks authUrl by default, which we ignore here — the
    * dashboard drives auth via the Sync2BooksLink widget instead.
    */
-  async createCompany(apiKey: string, name: string): Promise<{ company: { id: string; name: string } }> {
-    return this.postJson<{ company: { id: string; name: string } }>(apiKey, '/companies', { name });
+  async createCompany(
+    apiKey: string,
+    name: string,
+  ): Promise<{ company: { id: string; name: string } }> {
+    return this.postJson<{ company: { id: string; name: string } }>(
+      apiKey,
+      '/companies',
+      { name },
+    );
+  }
+
+  /**
+   * GET /companies/:id, treating 404 as "doesn't exist" rather than an error —
+   * lets ensureCompanyLocked() tell a stale/deleted mainApiCompanyId apart
+   * from a genuinely live one instead of trusting the cached id blindly.
+   */
+  async companyExists(apiKey: string, companyId: string): Promise<boolean> {
+    const url = `${this.baseUrl()}/companies/${companyId}`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'x-api-key': apiKey },
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (res.status === 404) return false;
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      this.logger.warn(
+        `Main API GET /companies/${companyId} failed: ${res.status} ${text.slice(0, 300)}`,
+      );
+      throw new BadGatewayException(
+        `Main API request failed (${res.status}): ${text.slice(0, 200)}`,
+      );
+    }
+    return true;
   }
 
   /**
@@ -248,12 +302,24 @@ export class MainApiPullClient {
    * Best-effort by design: the caller decides whether a failure here should
    * block the read (see DashboardItemsApplicationService).
    */
-  async syncItemsFromBookkeeping(apiKey: string, connectionId: string): Promise<unknown> {
-    return this.post(apiKey, `/items/connection/${connectionId}/sync-from-bookkeeping`);
+  async syncItemsFromBookkeeping(
+    apiKey: string,
+    connectionId: string,
+  ): Promise<unknown> {
+    return this.post(
+      apiKey,
+      `/items/connection/${connectionId}/sync-from-bookkeeping`,
+    );
   }
 
-  async syncInvoicesFromBookkeeping(apiKey: string, connectionId: string): Promise<unknown> {
-    return this.post(apiKey, `/invoices/connection/${connectionId}/sync-from-bookkeeping`);
+  async syncInvoicesFromBookkeeping(
+    apiKey: string,
+    connectionId: string,
+  ): Promise<unknown> {
+    return this.post(
+      apiKey,
+      `/invoices/connection/${connectionId}/sync-from-bookkeeping`,
+    );
   }
 
   // --- Sync2Books Link (ERP connect widget) proxy calls ---
@@ -266,10 +332,14 @@ export class MainApiPullClient {
     integrationKey: MainApiIntegrationKey,
     connectionId?: string,
   ): Promise<{ authUrl: string }> {
-    return this.get<{ authUrl: string }>(apiKey, `/companies/${companyId}/auth-url`, {
-      integrationKey,
-      connectionId,
-    });
+    return this.get<{ authUrl: string }>(
+      apiKey,
+      `/companies/${companyId}/auth-url`,
+      {
+        integrationKey,
+        connectionId,
+      },
+    );
   }
 
   async getConnectionByIntegration(
@@ -284,8 +354,15 @@ export class MainApiPullClient {
     );
   }
 
-  async listDynamicsCompanies(apiKey: string, connectionId: string): Promise<MainApiDynamicsCompany[]> {
-    return this.get<MainApiDynamicsCompany[]>(apiKey, `/connections/${connectionId}/dynamics/companies`, {});
+  async listDynamicsCompanies(
+    apiKey: string,
+    connectionId: string,
+  ): Promise<MainApiDynamicsCompany[]> {
+    return this.get<MainApiDynamicsCompany[]>(
+      apiKey,
+      `/connections/${connectionId}/dynamics/companies`,
+      {},
+    );
   }
 
   async finalizeDynamicsConnection(
@@ -293,9 +370,13 @@ export class MainApiPullClient {
     connectionId: string,
     bookCompanyId: string,
   ): Promise<MainApiConnectionRecord> {
-    return this.postJson<MainApiConnectionRecord>(apiKey, `/connections/${connectionId}/dynamics/finalize`, {
-      bookCompanyId,
-    });
+    return this.postJson<MainApiConnectionRecord>(
+      apiKey,
+      `/connections/${connectionId}/dynamics/finalize`,
+      {
+        bookCompanyId,
+      },
+    );
   }
 
   async connectOdoo(
@@ -304,14 +385,25 @@ export class MainApiPullClient {
     credentials: MainApiOdooCredentials,
     connectionId?: string,
   ): Promise<MainApiConnectionRecord> {
-    return this.postJson<MainApiConnectionRecord>(apiKey, `/companies/${companyId}/odoo/connect`, {
-      ...credentials,
-      connectionId,
-    });
+    return this.postJson<MainApiConnectionRecord>(
+      apiKey,
+      `/companies/${companyId}/odoo/connect`,
+      {
+        ...credentials,
+        connectionId,
+      },
+    );
   }
 
-  async disconnectConnection(apiKey: string, connectionId: string): Promise<{ status: string }> {
-    return this.postJson<{ status: string }>(apiKey, `/connections/${connectionId}/disconnect`, undefined);
+  async disconnectConnection(
+    apiKey: string,
+    connectionId: string,
+  ): Promise<{ status: string }> {
+    return this.postJson<{ status: string }>(
+      apiKey,
+      `/connections/${connectionId}/disconnect`,
+      undefined,
+    );
   }
 
   // --- Webhooks (outbound from the main API's perspective, inbound to us) ---
@@ -321,7 +413,12 @@ export class MainApiPullClient {
   async createWebhookEndpoint(
     apiKey: string,
     input: { name: string; url: string; eventTypes: string[] },
-  ): Promise<{ id: string; secret: string; url: string; eventTypes: string[] }> {
+  ): Promise<{
+    id: string;
+    secret: string;
+    url: string;
+    eventTypes: string[];
+  }> {
     return this.postJson(apiKey, '/webhooks/endpoints', input);
   }
 
@@ -339,8 +436,13 @@ export class MainApiPullClient {
    * environment to its runtime NODE_ENV rather than leaving it null. PUT
    * does respect an explicit null, so we always follow creation with this.
    */
-  async setWebhookEndpointEnvironmentToAny(apiKey: string, endpointId: string): Promise<void> {
-    await this.putJson(apiKey, `/webhooks/endpoints/${endpointId}`, { environment: null });
+  async setWebhookEndpointEnvironmentToAny(
+    apiKey: string,
+    endpointId: string,
+  ): Promise<void> {
+    await this.putJson(apiKey, `/webhooks/endpoints/${endpointId}`, {
+      environment: null,
+    });
   }
 
   private async post<T>(apiKey: string, path: string): Promise<T> {
@@ -353,7 +455,9 @@ export class MainApiPullClient {
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      this.logger.warn(`Main API ${path} failed: ${res.status} ${text.slice(0, 300)}`);
+      this.logger.warn(
+        `Main API ${path} failed: ${res.status} ${text.slice(0, 300)}`,
+      );
       throw new BadGatewayException(
         `Main API request failed (${res.status}): ${text.slice(0, 200)}`,
       );
@@ -362,7 +466,11 @@ export class MainApiPullClient {
     return res.json() as Promise<T>;
   }
 
-  private async postJson<T>(apiKey: string, path: string, body: unknown): Promise<T> {
+  private async postJson<T>(
+    apiKey: string,
+    path: string,
+    body: unknown,
+  ): Promise<T> {
     const url = `${this.baseUrl()}${path}`;
     const res = await fetch(url, {
       method: 'POST',
@@ -373,7 +481,9 @@ export class MainApiPullClient {
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      this.logger.warn(`Main API ${path} failed: ${res.status} ${text.slice(0, 300)}`);
+      this.logger.warn(
+        `Main API ${path} failed: ${res.status} ${text.slice(0, 300)}`,
+      );
       throw new BadGatewayException(
         `Main API request failed (${res.status}): ${text.slice(0, 200)}`,
       );
@@ -382,7 +492,11 @@ export class MainApiPullClient {
     return res.json() as Promise<T>;
   }
 
-  private async putJson<T>(apiKey: string, path: string, body: unknown): Promise<T> {
+  private async putJson<T>(
+    apiKey: string,
+    path: string,
+    body: unknown,
+  ): Promise<T> {
     const url = `${this.baseUrl()}${path}`;
     const res = await fetch(url, {
       method: 'PUT',
@@ -393,7 +507,9 @@ export class MainApiPullClient {
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      this.logger.warn(`Main API ${path} failed: ${res.status} ${text.slice(0, 300)}`);
+      this.logger.warn(
+        `Main API ${path} failed: ${res.status} ${text.slice(0, 300)}`,
+      );
       throw new BadGatewayException(
         `Main API request failed (${res.status}): ${text.slice(0, 200)}`,
       );
@@ -409,7 +525,9 @@ export class MainApiPullClient {
   ): Promise<T> {
     const query = Object.entries(params)
       .filter(([, v]) => v !== undefined)
-      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+      .map(
+        ([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`,
+      )
       .join('&');
     const url = `${this.baseUrl()}${path}${query ? `?${query}` : ''}`;
 
@@ -421,7 +539,9 @@ export class MainApiPullClient {
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      this.logger.warn(`Main API ${path} failed: ${res.status} ${text.slice(0, 300)}`);
+      this.logger.warn(
+        `Main API ${path} failed: ${res.status} ${text.slice(0, 300)}`,
+      );
       throw new BadGatewayException(
         `Main API request failed (${res.status}): ${text.slice(0, 200)}`,
       );

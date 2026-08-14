@@ -18,7 +18,8 @@ const SUBSCRIBED_EVENT_TYPES = [
   'connection.failed',
   'connection.deleted',
 ] as const;
-export type ConnectionWebhookEventType = (typeof SUBSCRIBED_EVENT_TYPES)[number];
+export type ConnectionWebhookEventType =
+  (typeof SUBSCRIBED_EVENT_TYPES)[number];
 
 /** Cards shown on the ERP Connection page — see Sync2BooksLink's own selectable set. */
 export const SUPPORTED_INTEGRATION_KEYS = [
@@ -26,7 +27,8 @@ export const SUPPORTED_INTEGRATION_KEYS = [
   'odoo',
   'microsoft-dynamics-365-business-central',
 ] as const;
-export type SupportedIntegrationKey = (typeof SUPPORTED_INTEGRATION_KEYS)[number];
+export type SupportedIntegrationKey =
+  (typeof SUPPORTED_INTEGRATION_KEYS)[number];
 
 export type IntegrationStatus = {
   integrationKey: string;
@@ -55,7 +57,9 @@ export type MainApiLinkCredentials = {
 
 @Injectable()
 export class MainApiConnectionApplicationService {
-  private readonly logger = new Logger(MainApiConnectionApplicationService.name);
+  private readonly logger = new Logger(
+    MainApiConnectionApplicationService.name,
+  );
 
   /**
    * Per-tenant serialization for ensureCompany(). Without this, two
@@ -134,13 +138,19 @@ export class MainApiConnectionApplicationService {
    * Auto-creates the main-API Company the first time it's needed, per the
    * documented flow (concepts/companies-and-connections.mdx: "Create a
    * company" is a discrete step using just a display name — no manual id
-   * pasting). Idempotent: returns the existing one if already created.
+   * pasting). Idempotent: returns the existing one if already created, and
+   * self-heals if the cached id was created then deleted on the main API
+   * side (e.g. manual cleanup, or a company recreated under a new id) —
+   * see ensureCompanyLocked.
    */
   async ensureCompany(complianceTenantId: string): Promise<MainApiConnection> {
     // Chain onto any in-flight/previous call for this tenant so concurrent
     // callers can't both observe "not created yet" — see ensureCompanyChains.
-    const previous = this.ensureCompanyChains.get(complianceTenantId) ?? Promise.resolve();
-    const run = previous.catch(() => undefined).then(() => this.ensureCompanyLocked(complianceTenantId));
+    const previous =
+      this.ensureCompanyChains.get(complianceTenantId) ?? Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(() => this.ensureCompanyLocked(complianceTenantId));
     this.ensureCompanyChains.set(complianceTenantId, run);
     try {
       return await run;
@@ -151,13 +161,34 @@ export class MainApiConnectionApplicationService {
     }
   }
 
-  private async ensureCompanyLocked(complianceTenantId: string): Promise<MainApiConnection> {
+  private async ensureCompanyLocked(
+    complianceTenantId: string,
+  ): Promise<MainApiConnection> {
     let connection = await this.getForTenant(complianceTenantId);
-    if (!connection.mainApiCompanyId) {
+    const registered =
+      !!connection.mainApiCompanyId &&
+      (await this.mainApiPull.companyExists(
+        connection.mainApiApiKey,
+        connection.mainApiCompanyId,
+      ));
+
+    if (!registered) {
+      if (connection.mainApiCompanyId) {
+        this.logger.warn(
+          `mainApiCompanyId ${connection.mainApiCompanyId} for tenant ${complianceTenantId} no longer exists on the main API — recreating`,
+        );
+      }
       const tenant = await this.organization.getTenantById(complianceTenantId);
       const name = tenant?.displayName || `Tenant ${complianceTenantId}`;
-      const { company } = await this.mainApiPull.createCompany(connection.mainApiApiKey, name);
-      connection = await this.repo.save({ ...connection, mainApiCompanyId: company.id, updatedAt: new Date() });
+      const { company } = await this.mainApiPull.createCompany(
+        connection.mainApiApiKey,
+        name,
+      );
+      connection = await this.repo.save({
+        ...connection,
+        mainApiCompanyId: company.id,
+        updatedAt: new Date(),
+      });
     }
 
     return this.ensureWebhookEndpoint(connection);
@@ -169,23 +200,33 @@ export class MainApiConnectionApplicationService {
    * (e.g. a fresh ngrok tunnel in local dev). Best-effort: a registration
    * failure here must not block the connect flow, since polling still works.
    */
-  private async ensureWebhookEndpoint(connection: MainApiConnection): Promise<MainApiConnection> {
+  private async ensureWebhookEndpoint(
+    connection: MainApiConnection,
+  ): Promise<MainApiConnection> {
     const targetUrl = this.webhookUrlFor(connection.complianceTenantId);
 
     try {
       if (!connection.webhookEndpointId) {
-        const endpoint = await this.mainApiPull.createWebhookEndpoint(connection.mainApiApiKey, {
-          name: 'Compliance Dashboard — connection status',
-          url: targetUrl,
-          eventTypes: [...SUBSCRIBED_EVENT_TYPES],
-        });
+        const endpoint = await this.mainApiPull.createWebhookEndpoint(
+          connection.mainApiApiKey,
+          {
+            name: 'Compliance Dashboard — connection status',
+            url: targetUrl,
+            eventTypes: [...SUBSCRIBED_EVENT_TYPES],
+          },
+        );
         // Scope to "any environment" — this endpoint cares about connection
         // lifecycle regardless of which NODE_ENV the main API is deployed
         // under, not just whichever one happened to be active at registration.
         await this.mainApiPull
-          .setWebhookEndpointEnvironmentToAny(connection.mainApiApiKey, endpoint.id)
+          .setWebhookEndpointEnvironmentToAny(
+            connection.mainApiApiKey,
+            endpoint.id,
+          )
           .catch((error) =>
-            this.logger.warn(`Failed to widen webhook endpoint environment: ${(error as Error).message}`),
+            this.logger.warn(
+              `Failed to widen webhook endpoint environment: ${(error as Error).message}`,
+            ),
           );
         return await this.repo.save({
           ...connection,
@@ -224,7 +265,9 @@ export class MainApiConnectionApplicationService {
   }
 
   private webhookUrlFor(complianceTenantId: string): string {
-    const base = (process.env.COMPLIANCE_API_PUBLIC_URL || 'http://localhost:3001').replace(/\/?$/, '');
+    const base = (
+      process.env.COMPLIANCE_API_PUBLIC_URL || 'http://localhost:3001'
+    ).replace(/\/?$/, '');
     return `${base}/webhooks/main-api/connections/${complianceTenantId}`;
   }
 
@@ -246,7 +289,9 @@ export class MainApiConnectionApplicationService {
       return 'unknown_tenant';
     }
 
-    if (!this.verifySignature(rawBody, connection.webhookSecret, signatureHeader)) {
+    if (
+      !this.verifySignature(rawBody, connection.webhookSecret, signatureHeader)
+    ) {
       return 'bad_signature';
     }
 
@@ -255,13 +300,22 @@ export class MainApiConnectionApplicationService {
       return 'ok';
     }
 
-    const integrationKey = (payload.integrationKey as string | undefined) ?? 'quickbooks';
+    const integrationKey =
+      (payload.integrationKey as string | undefined) ?? 'quickbooks';
     const companyId = payload.companyId as string | undefined;
-    if (companyId && connection.mainApiCompanyId && companyId !== connection.mainApiCompanyId) {
+    if (
+      companyId &&
+      connection.mainApiCompanyId &&
+      companyId !== connection.mainApiCompanyId
+    ) {
       this.logger.warn(
         `Ignoring ${eventType} for tenant ${complianceTenantId}: companyId ${companyId} != ${connection.mainApiCompanyId}`,
       );
-      await this.repo.save({ ...connection, lastWebhookEventId: eventId, updatedAt: new Date() });
+      await this.repo.save({
+        ...connection,
+        lastWebhookEventId: eventId,
+        updatedAt: new Date(),
+      });
       return 'ok';
     }
 
@@ -278,20 +332,36 @@ export class MainApiConnectionApplicationService {
       case 'connection.connected':
       case 'connection.reconnected':
         next = {
-          connectionId: (payload.connectionId as string) ?? current.connectionId,
+          connectionId:
+            (payload.connectionId as string) ?? current.connectionId,
           status: 'connected',
           reason: null,
           updatedAt: now,
         };
         break;
       case 'connection.disconnected':
-        next = { ...current, status: 'disconnected', reason: (payload.reason as string) ?? null, updatedAt: now };
+        next = {
+          ...current,
+          status: 'disconnected',
+          reason: (payload.reason as string) ?? null,
+          updatedAt: now,
+        };
         break;
       case 'connection.failed':
-        next = { ...current, status: 'error', reason: (payload.errorMessage as string) ?? null, updatedAt: now };
+        next = {
+          ...current,
+          status: 'error',
+          reason: (payload.errorMessage as string) ?? null,
+          updatedAt: now,
+        };
         break;
       case 'connection.deleted':
-        next = { connectionId: null, status: null, reason: null, updatedAt: now };
+        next = {
+          connectionId: null,
+          status: null,
+          reason: null,
+          updatedAt: now,
+        };
         break;
       case 'connection.created':
         // No-op: created-but-not-yet-authorized isn't a state the dashboard shows separately.
@@ -307,7 +377,11 @@ export class MainApiConnectionApplicationService {
     return 'ok';
   }
 
-  private verifySignature(rawBody: Buffer, secret: string, signatureHeader: string | undefined): boolean {
+  private verifySignature(
+    rawBody: Buffer,
+    secret: string,
+    signatureHeader: string | undefined,
+  ): boolean {
     if (!signatureHeader) return false;
     const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
     const a = Buffer.from(signatureHeader.trim());
@@ -317,10 +391,14 @@ export class MainApiConnectionApplicationService {
   }
 
   /** Unmasked — only for building the Sync2BooksLink widget config server-side/at request time. */
-  async getLinkCredentials(complianceTenantId: string): Promise<MainApiLinkCredentials> {
+  async getLinkCredentials(
+    complianceTenantId: string,
+  ): Promise<MainApiLinkCredentials> {
     const connection = await this.ensureCompany(complianceTenantId);
     if (!connection.mainApiCompanyId) {
-      throw new NotFoundException('Failed to resolve a main-API company for this tenant');
+      throw new NotFoundException(
+        'Failed to resolve a main-API company for this tenant',
+      );
     }
     return {
       apiKey: connection.mainApiApiKey,
@@ -340,7 +418,9 @@ export class MainApiConnectionApplicationService {
     return connection;
   }
 
-  async getStatus(complianceTenantId: string): Promise<MainApiConnectionStatus> {
+  async getStatus(
+    complianceTenantId: string,
+  ): Promise<MainApiConnectionStatus> {
     const connection = await this.repo.findByTenantId(complianceTenantId);
     const emptyIntegrations = (): IntegrationStatus[] =>
       SUPPORTED_INTEGRATION_KEYS.map((key) => ({

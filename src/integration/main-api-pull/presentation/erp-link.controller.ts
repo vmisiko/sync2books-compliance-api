@@ -1,5 +1,21 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { MainApiConnectionApplicationService } from '../application/main-api-connection.application.service';
 import {
@@ -31,7 +47,9 @@ export class ErpLinkController {
   ) {}
 
   @Get('auth-url')
-  @ApiOperation({ summary: 'Get the OAuth authorization URL for an integration' })
+  @ApiOperation({
+    summary: 'Get the OAuth authorization URL for an integration',
+  })
   @ApiQuery({ name: 'integrationKey', required: true })
   @ApiQuery({ name: 'connectionId', required: false })
   async getAuthUrl(
@@ -40,53 +58,86 @@ export class ErpLinkController {
     @Query('connectionId') connectionId?: string,
   ) {
     const { apiKey, companyId } = await this.resolve(req);
-    return this.mainApiPull.getAuthUrl(apiKey, companyId, integrationKey, connectionId);
+    return this.mainApiPull.getAuthUrl(
+      apiKey,
+      companyId,
+      integrationKey,
+      connectionId,
+    );
   }
 
   @Get('connection')
-  @ApiOperation({ summary: 'Get the current connection for an integration (or null)' })
+  @ApiOperation({
+    summary: 'Get the current connection for an integration (or null)',
+  })
   @ApiQuery({ name: 'integrationKey', required: true })
   async getConnection(
     @Req() req: Request,
     @Query('integrationKey') integrationKey: MainApiIntegrationKey,
   ) {
     const { apiKey, companyId } = await this.resolve(req);
-    return this.mainApiPull.getConnectionByIntegration(apiKey, companyId, integrationKey);
+    return this.mainApiPull.getConnectionByIntegration(
+      apiKey,
+      companyId,
+      integrationKey,
+    );
   }
 
   @Get('dynamics/:connectionId/companies')
-  @ApiOperation({ summary: 'List Business Central companies for a Dynamics connection' })
-  async listDynamicsCompanies(@Req() req: Request, @Param('connectionId') connectionId: string) {
+  @ApiOperation({
+    summary: 'List Business Central companies for a Dynamics connection',
+  })
+  async listDynamicsCompanies(
+    @Req() req: Request,
+    @Param('connectionId') connectionId: string,
+  ) {
     const { apiKey } = await this.resolve(req);
     return this.mainApiPull.listDynamicsCompanies(apiKey, connectionId);
   }
 
   @Post('dynamics/:connectionId/finalize')
-  @ApiOperation({ summary: 'Finish a Dynamics connection by choosing a Business Central company' })
+  @ApiOperation({
+    summary:
+      'Finish a Dynamics connection by choosing a Business Central company',
+  })
   async finalizeDynamics(
     @Req() req: Request,
     @Param('connectionId') connectionId: string,
     @Body() body: FinalizeDynamicsDto,
   ) {
     const { apiKey } = await this.resolve(req);
-    return this.mainApiPull.finalizeDynamicsConnection(apiKey, connectionId, body.bookCompanyId);
+    return this.mainApiPull.finalizeDynamicsConnection(
+      apiKey,
+      connectionId,
+      body.bookCompanyId,
+    );
   }
 
   @Post('odoo/connect')
-  @ApiOperation({ summary: 'Connect Odoo (no OAuth — credentials validated synchronously)' })
+  @ApiOperation({
+    summary: 'Connect Odoo (no OAuth — credentials validated synchronously)',
+  })
   async connectOdoo(@Req() req: Request, @Body() body: ConnectOdooDto) {
     const { apiKey, companyId } = await this.resolve(req);
     return this.mainApiPull.connectOdoo(
       apiKey,
       companyId,
-      { url: body.url, database: body.database, username: body.username, apiKey: body.apiKey },
+      {
+        url: body.url,
+        database: body.database,
+        username: body.username,
+        apiKey: body.apiKey,
+      },
       body.connectionId,
     );
   }
 
   @Post(':connectionId/disconnect')
   @ApiOperation({ summary: 'Disconnect a connection' })
-  async disconnect(@Req() req: Request, @Param('connectionId') connectionId: string) {
+  async disconnect(
+    @Req() req: Request,
+    @Param('connectionId') connectionId: string,
+  ) {
     const { apiKey } = await this.resolve(req);
     return this.mainApiPull.disconnectConnection(apiKey, connectionId);
   }
@@ -94,22 +145,37 @@ export class ErpLinkController {
   @Post('record-connection')
   @ApiOperation({
     summary:
-      "Remember the connectionId from a successful Sync2BooksLink connect, so items/invoices pulls can trigger a fresh bookkeeping sync",
+      'Remember the connectionId from a successful Sync2BooksLink connect, so items/invoices pulls can trigger a fresh bookkeeping sync',
   })
-  async recordConnection(@Req() req: Request, @Body() body: RecordConnectionDto) {
+  async recordConnection(
+    @Req() req: Request,
+    @Body() body: RecordConnectionDto,
+  ) {
     const user = req.user as DashboardRequestUser;
-    await this.connections.recordConnection(user.tenantId, body.integrationKey, body.connectionId);
+    await this.connections.recordConnection(
+      user.tenantId,
+      body.integrationKey,
+      body.connectionId,
+    );
     return { success: true, message: 'Connection recorded' };
   }
 
-  private async resolve(req: Request): Promise<{ apiKey: string; companyId: string }> {
+  private async resolve(
+    req: Request,
+  ): Promise<{ apiKey: string; companyId: string }> {
     const user = req.user as DashboardRequestUser;
-    const connection = await this.connections.getForTenant(user.tenantId);
+    // ensureCompany (not getForTenant) so a mainApiCompanyId that was deleted
+    // or never created on the main API side gets (re)created here, before
+    // any auth-url/connect call is attempted against it.
+    const connection = await this.connections.ensureCompany(user.tenantId);
     if (!connection.mainApiCompanyId) {
       throw new BadRequestException(
         'This tenant has no mainApiCompanyId configured — set it on the ERP connection before connecting an integration',
       );
     }
-    return { apiKey: connection.mainApiApiKey, companyId: connection.mainApiCompanyId };
+    return {
+      apiKey: connection.mainApiApiKey,
+      companyId: connection.mainApiCompanyId,
+    };
   }
 }

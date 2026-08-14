@@ -9,6 +9,7 @@ type FakeMainApiPull = Pick<
   | 'createCompany'
   | 'createWebhookEndpoint'
   | 'setWebhookEndpointEnvironmentToAny'
+  | 'companyExists'
 >;
 type FakeOrg = Pick<ComplianceOrganizationApplicationService, 'getTenantById'>;
 
@@ -37,12 +38,18 @@ class FakeRepo implements IMainApiConnectionRepository {
 function fakeMainApiPull(
   createCompanyCalls: string[],
   createWebhookCalls: string[],
+  /** company ids the fake main API currently considers live — defaults to
+   * none, matching the pre-existing tests below (they all start from a
+   * fresh tenant with no mainApiCompanyId, so companyExists is never even
+   * reached — see the `!!connection.mainApiCompanyId &&` short-circuit). */
+  existingCompanyIds: Set<string> = new Set(),
 ): FakeMainApiPull {
   return {
     async createCompany(_apiKey: string, name: string) {
       await new Promise((r) => setTimeout(r, 20)); // simulate the main API round trip
       const id = `company-${createCompanyCalls.length + 1}`;
       createCompanyCalls.push(id);
+      existingCompanyIds.add(id);
       return { company: { id, name } };
     },
     async createWebhookEndpoint(
@@ -60,6 +67,10 @@ function fakeMainApiPull(
       };
     },
     setWebhookEndpointEnvironmentToAny: () => Promise.resolve(undefined),
+    async companyExists(_apiKey: string, companyId: string) {
+      await new Promise((r) => setTimeout(r, 5));
+      return existingCompanyIds.has(companyId);
+    },
   };
 }
 
@@ -164,5 +175,76 @@ describe('MainApiConnectionApplicationService.ensureCompany', () => {
 
     expect(createCompanyCalls.length).toBe(2);
     expect(createWebhookCalls.length).toBe(2);
+  });
+
+  it('recreates the main-API company when the cached mainApiCompanyId no longer exists there', async () => {
+    // Regression test: a company can be removed on the main API side (e.g.
+    // direct DB cleanup of duplicate test companies) without compliance-api
+    // ever finding out, leaving a stale mainApiCompanyId that 404s downstream
+    // (auth-url, connect, etc). ensureCompany must notice and recreate.
+    const createCompanyCalls: string[] = [];
+    const createWebhookCalls: string[] = [];
+    const existingCompanyIds = new Set<string>(); // the cached id is NOT among these
+    const repo = new FakeRepo();
+    const svc = new MainApiConnectionApplicationService(
+      repo,
+      fakeMainApiPull(
+        createCompanyCalls,
+        createWebhookCalls,
+        existingCompanyIds,
+      ) as MainApiPullClient,
+      fakeOrg() as ComplianceOrganizationApplicationService,
+    );
+
+    await svc.upsert('tenant-1', {
+      mainApiApplicationId: 'app-1',
+      mainApiApiKey: 'key-1',
+    });
+    const seeded = await repo.findByTenantId('tenant-1');
+    await repo.save({
+      ...seeded!,
+      mainApiCompanyId: 'deleted-company-id',
+      webhookEndpointId: 'webhook-existing',
+      webhookSecret: 'secret',
+    });
+
+    const result = await svc.ensureCompany('tenant-1');
+
+    expect(createCompanyCalls.length).toBe(1);
+    expect(result.mainApiCompanyId).toBe(createCompanyCalls[0]);
+    expect(result.mainApiCompanyId).not.toBe('deleted-company-id');
+  });
+
+  it('does not recreate the company when the cached mainApiCompanyId still exists on the main API', async () => {
+    const createCompanyCalls: string[] = [];
+    const createWebhookCalls: string[] = [];
+    const existingCompanyIds = new Set<string>(['live-company-id']);
+    const repo = new FakeRepo();
+    const svc = new MainApiConnectionApplicationService(
+      repo,
+      fakeMainApiPull(
+        createCompanyCalls,
+        createWebhookCalls,
+        existingCompanyIds,
+      ) as MainApiPullClient,
+      fakeOrg() as ComplianceOrganizationApplicationService,
+    );
+
+    await svc.upsert('tenant-1', {
+      mainApiApplicationId: 'app-1',
+      mainApiApiKey: 'key-1',
+    });
+    const seeded = await repo.findByTenantId('tenant-1');
+    await repo.save({
+      ...seeded!,
+      mainApiCompanyId: 'live-company-id',
+      webhookEndpointId: 'webhook-existing',
+      webhookSecret: 'secret',
+    });
+
+    const result = await svc.ensureCompany('tenant-1');
+
+    expect(createCompanyCalls.length).toBe(0);
+    expect(result.mainApiCompanyId).toBe('live-company-id');
   });
 });
