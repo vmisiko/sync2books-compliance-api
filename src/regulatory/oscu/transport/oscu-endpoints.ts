@@ -34,6 +34,7 @@ export const OSCU_ENDPOINTS = {
     sendPurchaseTransactionInfo: 'sendPurchaseTransactionInfo',
     selectInvoiceDetail: 'selectInvoiceDetail',
     selectSalesTransactions: 'selectSalesTransactions',
+    selectCustomerList: 'selectCustomerList',
   },
   integrator: {
     submitSales: 'sendSalesTransaction',
@@ -54,7 +55,15 @@ export const OSCU_ENDPOINTS = {
     selectTaxpayerInfo: 'selectTaxpayerInfo',
     selectNoticeList: 'selectNoticeList',
     importedItemInfo: 'importedItemInfo',
-    importedItemConvertedInfo: 'importedItemConvertedInfo',
+    // The KRA Go-Live dashboard's "Update Imported Items" test case tracks calls to the
+    // literal path `/updateImportItem`, not `/importedItemConvertedInfo` -- confirmed live
+    // 2026-08-12 via raw curl: both paths return identical, specific validation errors for
+    // the same bad input (e.g. "taskCd 'N' not found."), meaning they're either aliases of
+    // the same backend handler or share validation logic. Our own client had only ever
+    // called `importedItemConvertedInfo`, so the dashboard never saw a matching call and
+    // showed this test case as failed/not-executed regardless of how many times our calls
+    // to the other path succeeded. Switched to the path the dashboard actually watches.
+    importedItemConvertedInfo: 'updateImportItem',
     initialize: 'initialize',
     itemInfo: 'itemInfo',
     saveItemComposition: 'saveItemComposition',
@@ -62,6 +71,9 @@ export const OSCU_ENDPOINTS = {
     sendPurchaseTransactionInfo: 'sendPurchaseTransactionInfo',
     selectInvoiceDetail: 'selectInvoiceDetail',
     selectSalesTransactions: 'selectSalesTransactions',
+    // Confirmed live 2026-08-11 against the Apigee integrator gateway: same name as
+    // legacy, resultCd 000 with a real custList.
+    selectCustomerList: 'selectCustomerList',
   },
 } as const;
 

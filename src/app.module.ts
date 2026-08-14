@@ -4,6 +4,10 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CatalogModule } from './catalog/catalog.module';
 import { ComplianceOrganizationModule } from './compliance-organization/compliance-organization.module';
+import { DashboardCatalogModule } from './dashboard-catalog/dashboard-catalog.module';
+import { DashboardIdentityModule } from './dashboard-identity/dashboard-identity.module';
+import { DashboardInvoicesModule } from './dashboard-invoices/dashboard-invoices.module';
+import { DashboardMappingModule } from './dashboard-mapping/dashboard-mapping.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { OscuMappingModule } from './regulatory/oscu/oscu-mapping.module';
 import { OscuOperationsModule } from './regulatory/oscu/presentation/oscu-operations.module';
@@ -25,6 +29,9 @@ import { UnitMappingOrmEntity } from './regulatory/oscu/infrastructure/persisten
 import { ComplianceDocumentOrmEntity } from './sales/infrastructure/persistence/compliance-document.orm-entity';
 import { ComplianceEventOrmEntity } from './sales/infrastructure/persistence/compliance-event.orm-entity';
 import { ComplianceLineOrmEntity } from './sales/infrastructure/persistence/compliance-line.orm-entity';
+import { DashboardUserOrmEntity } from './dashboard-identity/infrastructure/persistence/dashboard-user.orm-entity';
+import { MainApiConnectionOrmEntity } from './integration/main-api-pull/infrastructure/persistence/main-api-connection.orm-entity';
+import { MainApiPullModule } from './integration/main-api-pull/main-api-pull.module';
 import { PlatformCorrelationModule } from './integration/platform-correlation.module';
 
 @Module({
@@ -47,6 +54,8 @@ import { PlatformCorrelationModule } from './integration/platform-correlation.mo
         ComplianceEventOrmEntity,
         ComplianceLineOrmEntity,
         ComplianceTenantOrmEntity,
+        DashboardUserOrmEntity,
+        MainApiConnectionOrmEntity,
         OscuCodeClassOrmEntity,
         OscuCodeOrmEntity,
         OscuItemClassificationOrmEntity,
@@ -65,7 +74,12 @@ import { PlatformCorrelationModule } from './integration/platform-correlation.mo
     PlatformCorrelationModule,
     CatalogModule,
     ComplianceOrganizationModule,
+    DashboardCatalogModule,
+    DashboardIdentityModule,
+    DashboardInvoicesModule,
+    DashboardMappingModule,
     InventoryModule,
+    MainApiPullModule,
     SalesModule,
   ],
   controllers: [AppController],

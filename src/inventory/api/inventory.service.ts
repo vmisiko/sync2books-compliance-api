@@ -23,6 +23,7 @@ import type { ComplianceItem } from '../../shared/domain/entities/compliance-ite
 import type { InventoryStock } from '../domain/entities/inventory-stock.entity';
 import type { StockMovement } from '../domain/entities/stock-movement.entity';
 import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
+import { splitTaxInclusiveAmount, round2 } from '../../regulatory/oscu/mapping/oscu-tax-rates';
 
 @Injectable()
 export class InventoryService {
@@ -119,6 +120,7 @@ export class InventoryService {
   private async syncStockMovementToEtims(params: {
     movement: StockMovement;
     stock: InventoryStock;
+    unitPrice?: number;
   }): Promise<void> {
     if (!this.shouldSyncMovementsToEtims()) return;
     if (!this.itemRepo || !this.connectionRepo || !this.etimsAdapter) return;
@@ -140,25 +142,39 @@ export class InventoryService {
       item.merchantId,
       stock.branchId,
     );
-    if (!connection) return;
+    if (!connection || !connection.kraBhfId) return;
 
-    // Note: qty-only adjustments carry no unit price, so tot*/taxblAmt/taxAmt
-    // are 0 here. KRA's sandbox rejects a literal 0 on `totAmt` ("Expected a
-    // value ... but it is empty or null"), so this call will still fail
-    // validation until item pricing is modeled -- logged below instead of
-    // swallowed, so that gap is visible rather than silent.
     const ocrnDt = this.formatYyyyMMddUtc(movement.createdAt);
     const sarNo = await this.allocateSarNo(connection.kraPin, connection.environment);
     const qty = Math.abs(movement.quantity);
+
+    // KRA's sandbox rejects a literal 0 on `totAmt` ("Expected a value ... but it
+    // is empty or null") and treats the line total as tax-INCLUSIVE (same rule as
+    // sendSalesTransaction -- see oscu-tax-rates.ts). Without a real unit price we
+    // can't build a valid request; log clearly instead of silently sending zeros
+    // that are guaranteed to be rejected.
+    const hasPricing = typeof params.unitPrice === 'number' && params.unitPrice > 0;
+    if (!hasPricing) {
+      this.logger.warn(
+        `eTIMS insertStockIO skipped for ${item.id}: no unitPrice supplied for this ` +
+          `movement, and KRA requires a real (non-zero) amount. Pass unitPrice to ` +
+          `recordMovement()/adjustStock() to sync this movement to eTIMS.`,
+      );
+      return;
+    }
+    const unitPrice = params.unitPrice as number;
+    const splyAmt = round2(qty * unitPrice);
+    const { taxblAmt, taxAmt } = splitTaxInclusiveAmount(splyAmt, item.taxTyCd);
+    const totAmt = splyAmt;
 
     try {
       const result = await adapter.insertStockIO(
         {
           tin: connection.kraPin,
-          bhfId: stock.branchId,
+          bhfId: connection.kraBhfId,
           cmcKey: connection.cmcKey,
           sarNo,
-          orgSarNo: null,
+          orgSarNo: 0,
           regTyCd: this.mapRegTyCd(movement),
           custTin: null,
           custNm: null,
@@ -166,9 +182,9 @@ export class InventoryService {
           sarTyCd: this.mapSarTyCd(movement),
           ocrnDt,
           totItemCnt: 1,
-          totTaxblAmt: 0,
-          totTaxAmt: 0,
-          totAmt: 0,
+          totTaxblAmt: taxblAmt,
+          totTaxAmt: taxAmt,
+          totAmt,
           remark: movement.referenceId
             ? `${movement.referenceType ?? 'REF'}:${movement.referenceId}`
             : movement.referenceType,
@@ -184,22 +200,25 @@ export class InventoryService {
               itemNm: item.name,
               bcd: item.sku ?? null,
               pkgUnitCd: item.packagingUnitCode,
-              pkg: 0,
+              // KRA rejects pkg: 0 ("Invalid pkg for ItemList N") -- see
+              // oscu-sales-request.builder.ts for the same rule on sales.
+              pkg: qty,
               qtyUnitCd: item.unitCode,
               qty,
               itemExprDt: null,
-              prc: 0,
-              splyAmt: 0,
+              prc: unitPrice,
+              splyAmt,
               totDcAmt: 0,
-              taxblAmt: 0,
+              taxblAmt,
               taxTyCd: item.taxTyCd,
-              taxAmt: 0,
+              taxAmt,
+              totAmt,
             },
           ],
         },
         {
           merchantId: item.merchantId,
-          branchId: stock.branchId,
+          branchId: connection.kraBhfId,
           kraPin: connection.kraPin,
           environment: connection.environment,
           cmcKey: connection.cmcKey,
@@ -207,11 +226,17 @@ export class InventoryService {
         },
       );
       if (!result.success) {
-        this.logger.warn(`eTIMS insertStockIO rejected: ${result.error}`);
+        this.logger.warn(
+          `eTIMS insertStockIO rejected: itemCd=${itemCd} sarNo=${sarNo} ` +
+            `movement=${movement.id} error=${result.error}`,
+        );
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      this.logger.warn(`eTIMS insertStockIO failed: ${msg}`);
+      this.logger.warn(
+        `eTIMS insertStockIO failed: itemCd=${itemCd} sarNo=${sarNo} ` +
+          `movement=${movement.id} error=${msg}`,
+      );
     }
   }
 
@@ -235,13 +260,13 @@ export class InventoryService {
       item.merchantId,
       stock.branchId,
     );
-    if (!connection) return;
+    if (!connection || !connection.kraBhfId) return;
 
     try {
       const result = await adapter.saveStockMaster(
         {
           tin: connection.kraPin,
-          bhfId: stock.branchId,
+          bhfId: connection.kraBhfId,
           cmcKey: connection.cmcKey,
           itemCd,
           rsdQty: stock.quantityOnHand,
@@ -252,7 +277,7 @@ export class InventoryService {
         },
         {
           merchantId: item.merchantId,
-          branchId: stock.branchId,
+          branchId: connection.kraBhfId,
           kraPin: connection.kraPin,
           environment: connection.environment,
           cmcKey: connection.cmcKey,
@@ -260,11 +285,17 @@ export class InventoryService {
         },
       );
       if (!result.success) {
-        this.logger.warn(`eTIMS saveStockMaster rejected: ${result.error}`);
+        this.logger.warn(
+          `eTIMS saveStockMaster rejected: itemCd=${itemCd} branch=${stock.branchId} ` +
+            `rsdQty=${stock.quantityOnHand} error=${result.error}`,
+        );
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      this.logger.warn(`eTIMS saveStockMaster failed: ${msg}`);
+      this.logger.warn(
+        `eTIMS saveStockMaster failed: itemCd=${itemCd} branch=${stock.branchId} ` +
+          `rsdQty=${stock.quantityOnHand} error=${msg}`,
+      );
     }
   }
 
@@ -275,13 +306,18 @@ export class InventoryService {
     quantity: number;
     referenceType?: string | null;
     referenceId?: string | null;
+    /** Unit price for this movement -- required for the eTIMS insertStockIO sync
+     * (KRA needs a real, non-zero amount). Not needed for the stock-quantity math
+     * itself; omit it and the movement still records locally, it just won't sync. */
+    unitPrice?: number;
   }) {
+    const { unitPrice, ...movementParams } = params;
     const result = await recordMovement(
-      params,
+      movementParams,
       this.stockRepo,
       this.movementRepo,
     );
-    await this.syncStockMovementToEtims(result);
+    await this.syncStockMovementToEtims({ ...result, unitPrice });
     await this.syncStockMasterToEtims(result.stock);
     return result;
   }
@@ -293,6 +329,7 @@ export class InventoryService {
     action: 'ADD' | 'DEDUCT';
     movementTypeCode?: string;
     referenceId?: string;
+    unitPrice?: number;
   }) {
     const signedQty =
       params.action === 'DEDUCT'
@@ -307,6 +344,7 @@ export class InventoryService {
         ? `MANUAL_ADJUST:${params.movementTypeCode}`
         : 'MANUAL_ADJUST',
       referenceId: params.referenceId ?? null,
+      unitPrice: params.unitPrice,
     });
   }
 
@@ -317,6 +355,7 @@ export class InventoryService {
     toBranchId: string;
     quantity: number;
     referenceId?: string;
+    unitPrice?: number;
   }) {
     const refId = params.referenceId ?? `xfer-${Date.now()}`;
     const out = await this.recordMovement({
@@ -326,6 +365,7 @@ export class InventoryService {
       quantity: params.quantity,
       referenceType: 'TRANSFER',
       referenceId: refId,
+      unitPrice: params.unitPrice,
     });
 
     try {
@@ -336,6 +376,7 @@ export class InventoryService {
         quantity: params.quantity,
         referenceType: 'TRANSFER',
         referenceId: refId,
+        unitPrice: params.unitPrice,
       });
       return { referenceId: refId, from: out.stock, to: into.stock };
     } catch (e) {

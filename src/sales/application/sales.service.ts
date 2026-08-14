@@ -2,6 +2,10 @@ import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
 import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
+import {
+  OSCU_TAX_RATE_BY_TAX_TY_CD,
+  oscuTaxRateForCode,
+} from '../../regulatory/oscu/mapping/oscu-tax-rates';
 import type {
   CreateDocumentInput,
   CreateDocumentResult,
@@ -162,6 +166,7 @@ export class SalesService {
         quantity: line.quantity,
         referenceType: 'COMPLIANCE_DOCUMENT',
         referenceId: document.id,
+        unitPrice: line.unitPrice,
       });
     }
   }
@@ -497,18 +502,8 @@ function mapComplianceStatusToDigitax(status: ComplianceStatus): string {
   }
 }
 
-const TAX_RATE_BY_TAX_TY_CD: Record<string, number> = {
-  A: 0,
-  B: 16,
-  C: 0,
-  D: 0,
-  // Confirmed live against the sandbox 2026-08-11 (see oscu-sales-request.builder.ts).
-  E: 0,
-};
-
 function taxRateByTaxTypeCode(code: string | null): number {
-  if (!code) return 0;
-  return TAX_RATE_BY_TAX_TY_CD[code] ?? 0;
+  return oscuTaxRateForCode(code);
 }
 
 function resolveTaxTypeCode(
@@ -597,11 +592,11 @@ function computeTaxBuckets(document: ComplianceDocument): {
     taxAmountC: round2(buckets.taxAmountC),
     taxAmountD: round2(buckets.taxAmountD),
     taxAmountE: round2(buckets.taxAmountE),
-    taxRateA: TAX_RATE_BY_TAX_TY_CD.A,
-    taxRateB: TAX_RATE_BY_TAX_TY_CD.B,
-    taxRateC: TAX_RATE_BY_TAX_TY_CD.C,
-    taxRateD: TAX_RATE_BY_TAX_TY_CD.D,
-    taxRateE: TAX_RATE_BY_TAX_TY_CD.E,
+    taxRateA: OSCU_TAX_RATE_BY_TAX_TY_CD.A,
+    taxRateB: OSCU_TAX_RATE_BY_TAX_TY_CD.B,
+    taxRateC: OSCU_TAX_RATE_BY_TAX_TY_CD.C,
+    taxRateD: OSCU_TAX_RATE_BY_TAX_TY_CD.D,
+    taxRateE: OSCU_TAX_RATE_BY_TAX_TY_CD.E,
   };
 }
 

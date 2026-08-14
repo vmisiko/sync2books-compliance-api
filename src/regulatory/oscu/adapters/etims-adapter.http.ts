@@ -37,6 +37,7 @@ import {
   type FetchEtimsApigeeAccessTokenResult,
 } from '../transport/apigee-client-credentials';
 import { createHash } from 'crypto';
+import { Logger } from '@nestjs/common';
 
 type EtimsAdapterHttpConfig = {
   sandboxBaseUrl?: string;
@@ -73,6 +74,24 @@ function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 429 || (status >= 500 && status <= 599);
 }
 
+/**
+ * On a non-2xx HTTP response, `postOscu()`'s `raw` is the whole parsed body
+ * (since `responseBody` is null), which for Apigee integrator errors looks
+ * like `{ responseHeader: { responseCode, customerMessage, debugMessage }, responseBody: null }`.
+ * Without this, every HTTP-level rejection collapsed into an undiagnosable
+ * "HTTP 400 calling OSCU" -- confirmed live 2026-08-11 debugging insertStockIO,
+ * where the real cause ("Incorrect Quantity Unit Code...") was sitting right
+ * there in the response body the whole time.
+ */
+function describeHttpRejection(status: number, raw: Record<string, unknown>): string {
+  const header = asRecord(raw['responseHeader']);
+  const detail =
+    (header && safeString(header['debugMessage'])) ||
+    (header && safeString(header['customerMessage'])) ||
+    '';
+  return detail ? `HTTP ${status} calling OSCU: ${detail}` : `HTTP ${status} calling OSCU`;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object') return null;
   if (Array.isArray(value)) return null;
@@ -102,6 +121,7 @@ function asJsonBody<T extends OscuRequestContext>(
 }
 
 export class EtimsAdapterHttp implements IEtimsAdapter {
+  private readonly logger = new Logger(EtimsAdapterHttp.name);
   private readonly sandboxBaseUrl: string;
   private readonly productionBaseUrl: string;
   private readonly timeoutMs: number;
@@ -216,6 +236,15 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
       : this.sandboxBaseUrl;
   }
 
+  /**
+   * Single choke point every OSCU call goes through (both the generic
+   * `postOscuEnvelope` dispatch and the bespoke typed methods like
+   * `insertStockIO`). Centralizing request/response/error logging here means
+   * it's always on -- we spent a lot of this project debugging KRA sandbox
+   * errors ("Please try again later" on insertStockIO, ENETDOWN vs real
+   * rejection) by hand-adding `console.error` and reverting it afterward.
+   * That's a sign the logging belongs here permanently, not in the caller.
+   */
   private async postOscu(
     pathSegment: string,
     body: Record<string, unknown>,
@@ -225,7 +254,10 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
       this.resolveBaseUrl(connectionContext.environment),
       pathSegment,
     );
+    const logCtx = `${pathSegment} merchant=${connectionContext.merchantId} branch=${connectionContext.branchId} env=${connectionContext.environment}`;
     const headers = await this.buildHeaders(connectionContext);
+
+    this.logger.debug(`-> ${logCtx} body=${JSON.stringify(body)}`);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -240,12 +272,53 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
       const text = await res.text();
       const json = text ? (JSON.parse(text) as unknown) : null;
       const parsed = asRecord(json) ?? {};
+      const responseBodyRaw = parsed['responseBody'];
       // Apigee integrator gateway wraps the OSCU business payload as
       // { responseHeader, responseBody: { resultCd, resultMsg, resultDt, data } }.
       // Legacy/direct KRA responses are already flat -- unwrap here, once, so every
       // caller of postOscu() sees a consistent flat shape regardless of gateway style.
-      const raw = asRecord(parsed['responseBody']) ?? parsed;
-      return { ok: res.ok, status: res.status, raw };
+      const raw = asRecord(responseBodyRaw) ?? parsed;
+
+      // The gateway sometimes wraps a genuine business rejection
+      // (responseHeader.responseCode != 200/201) inside an OUTER HTTP 200 with
+      // responseBody: null -- confirmed live 2026-08-12 on saveStockMaster
+      // ("rsdQty mismatch..." sitting in responseHeader.debugMessage, silently
+      // treated as success because res.ok was true). Detect it explicitly rather
+      // than trusting the outer HTTP status alone.
+      const header = asRecord(parsed['responseHeader']);
+      const envelopeResponseCode = header?.['responseCode'];
+      const envelopeIndicatesFailure =
+        responseBodyRaw === null &&
+        typeof envelopeResponseCode === 'number' &&
+        envelopeResponseCode >= 300;
+
+      const resultCd = safeString(raw['resultCd']);
+      const isBusinessFailure = resultCd !== '' && resultCd !== '000';
+      const ok = res.ok && !envelopeIndicatesFailure;
+      const status = envelopeIndicatesFailure
+        ? (envelopeResponseCode as number)
+        : res.status;
+
+      if (!ok || isBusinessFailure) {
+        this.logger.warn(
+          `<- ${logCtx} status=${status} rejected: ${JSON.stringify(raw)}`,
+        );
+      } else {
+        this.logger.debug(`<- ${logCtx} status=${status} ok`);
+      }
+
+      return { ok, status, raw };
+    } catch (e) {
+      // `.cause` is what actually disambiguates a real KRA rejection from local
+      // sandbox network flakiness (e.g. ENETDOWN surfaces as a generic "fetch
+      // failed" without it) -- confirmed live 2026-08-11/12. Log it every time
+      // instead of re-adding this inspection by hand next time something looks flaky.
+      const cause = e instanceof Error ? (e as Error & { cause?: unknown }).cause : undefined;
+      this.logger.error(
+        `x ${logCtx} threw: ${e instanceof Error ? e.message : safeString(e)}` +
+          (cause ? ` cause=${safeString(cause) || JSON.stringify(cause)}` : ''),
+      );
+      throw e;
     } finally {
       clearTimeout(timeout);
     }
@@ -272,8 +345,8 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         return {
           success: false,
           error: retryable
-            ? `retryable: HTTP ${status} calling OSCU`
-            : `HTTP ${status} calling OSCU`,
+            ? `retryable: ${describeHttpRejection(status, raw)}`
+            : describeHttpRejection(status, raw),
           rawResponse,
         };
       }
@@ -344,8 +417,8 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         return {
           success: false,
           error: retryable
-            ? `retryable: HTTP ${status} calling OSCU`
-            : `HTTP ${status} calling OSCU`,
+            ? `retryable: ${describeHttpRejection(status, raw)}`
+            : describeHttpRejection(status, raw),
           rawResponse: responseSnapshot,
         };
       }
@@ -410,8 +483,8 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         return {
           success: false,
           error: retryable
-            ? `retryable: HTTP ${status} calling OSCU`
-            : `HTTP ${status} calling OSCU`,
+            ? `retryable: ${describeHttpRejection(status, raw)}`
+            : describeHttpRejection(status, raw),
           rawResponse,
         };
       }
@@ -471,8 +544,8 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         return {
           success: false,
           error: retryable
-            ? `retryable: HTTP ${status} calling OSCU`
-            : `HTTP ${status} calling OSCU`,
+            ? `retryable: ${describeHttpRejection(status, raw)}`
+            : describeHttpRejection(status, raw),
           rawResponse,
         };
       }
@@ -532,8 +605,8 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         return {
           success: false,
           error: retryable
-            ? `retryable: HTTP ${status} calling OSCU`
-            : `HTTP ${status} calling OSCU`,
+            ? `retryable: ${describeHttpRejection(status, raw)}`
+            : describeHttpRejection(status, raw),
           rawResponse,
         };
       }
@@ -572,11 +645,14 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
     error?: string;
   }> {
     const path = resolveOscuPath(this.pathStyle, 'selectStockMoveList');
-    const body = asJsonBody(this.pathStyle, request);
+    // Unlike the write-style endpoints, this lookup rejects a body with tin/bhfId
+    // stripped out ("tin cannot be Null") even though they're already in the
+    // headers -- confirmed live 2026-08-11. Pass the request through as-is instead
+    // of running it through asJsonBody's integrator-style stripping.
     try {
       const { ok, status, raw } = await this.postOscu(
         path,
-        body,
+        { ...request },
         connectionContext,
       );
       const dataRaw = asRecord(raw['data']);
@@ -600,8 +676,8 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         return {
           success: false,
           error: retryable
-            ? `retryable: HTTP ${status} calling OSCU`
-            : `HTTP ${status} calling OSCU`,
+            ? `retryable: ${describeHttpRejection(status, raw)}`
+            : describeHttpRejection(status, raw),
           rawResponse,
         };
       }
@@ -679,6 +755,13 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
     connectionContext: EtimsConnectionContext,
   ): Promise<OscuEnvelopeResponse> {
     return this.postOscuEnvelope('customerPinInfo', body, connectionContext);
+  }
+
+  selectCustomerList(
+    body: Record<string, unknown>,
+    connectionContext: EtimsConnectionContext,
+  ): Promise<OscuEnvelopeResponse> {
+    return this.postOscuEnvelope('selectCustomerList', body, connectionContext);
   }
 
   selectItemClsList(

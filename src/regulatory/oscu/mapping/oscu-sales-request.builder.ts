@@ -1,15 +1,10 @@
 import type { EtimsInvoicePayload } from './etims-payload.types';
 import type { OscuTrnsSalesSaveWrReq } from '../transport/endpoints/trns-sales-save.dto';
-
-const TAX_RATE_BY_TAX_TY_CD: Record<string, number> = {
-  A: 0,
-  B: 16,
-  C: 0,
-  D: 0,
-  // Confirmed live against the sandbox 2026-08-11: KRA rejects taxRtE: 8 with
-  // "Rule taxRtE failed: Tax rate mismatch. Expected: 0.00, Found: 8".
-  E: 0,
-};
+import {
+  OSCU_TAX_RATE_BY_TAX_TY_CD,
+  round2,
+  splitTaxInclusiveAmount,
+} from './oscu-tax-rates';
 
 export class OscuSalesRequestBuilder {
   static build(params: {
@@ -34,9 +29,7 @@ export class OscuSalesRequestBuilder {
       // with "Invalid taxblAmt on item: N. Expected: <splyAmt/rate>, But Found: <splyAmt>".
       // Same rule as insertStockIO (see oscu-payload-gotchas.md).
       const splyAmt = round2(l.quantity * l.unitPrice);
-      const rate = TAX_RATE_BY_TAX_TY_CD[l.taxTyCd.toUpperCase()] ?? 0;
-      const taxblAmt = rate > 0 ? round2(splyAmt / (1 + rate / 100)) : splyAmt;
-      const taxAmt = round2(splyAmt - taxblAmt);
+      const { taxblAmt, taxAmt } = splitTaxInclusiveAmount(splyAmt, l.taxTyCd);
       const totAmt = splyAmt;
       return {
         itemSeq: idx + 1,
@@ -114,11 +107,11 @@ export class OscuSalesRequestBuilder {
       taxblAmtC: taxBuckets.taxblAmtC,
       taxblAmtD: taxBuckets.taxblAmtD,
       taxblAmtE: taxBuckets.taxblAmtE,
-      taxRtA: TAX_RATE_BY_TAX_TY_CD.A,
-      taxRtB: TAX_RATE_BY_TAX_TY_CD.B,
-      taxRtC: TAX_RATE_BY_TAX_TY_CD.C,
-      taxRtD: TAX_RATE_BY_TAX_TY_CD.D,
-      taxRtE: TAX_RATE_BY_TAX_TY_CD.E,
+      taxRtA: OSCU_TAX_RATE_BY_TAX_TY_CD.A,
+      taxRtB: OSCU_TAX_RATE_BY_TAX_TY_CD.B,
+      taxRtC: OSCU_TAX_RATE_BY_TAX_TY_CD.C,
+      taxRtD: OSCU_TAX_RATE_BY_TAX_TY_CD.D,
+      taxRtE: OSCU_TAX_RATE_BY_TAX_TY_CD.E,
       taxAmtA: taxBuckets.taxAmtA,
       taxAmtB: taxBuckets.taxAmtB,
       taxAmtC: taxBuckets.taxAmtC,
@@ -254,8 +247,4 @@ function safeParseInt(s: string): number | null {
   if (!m) return null;
   const n = Number(m[1]);
   return Number.isFinite(n) ? n : null;
-}
-
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
 }

@@ -139,7 +139,10 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
         },
         order: { priority: 'ASC', updatedAt: 'DESC' },
       });
-      if (m) return m.itemClsCd;
+      // itemClsCd can be null on Mapping Center's NEEDS_REVIEW placeholder
+      // rows; those are always created with active: false so this shouldn't
+      // trigger, but guard anyway rather than resolve a sale to a null code.
+      if (m && m.itemClsCd) return m.itemClsCd;
     }
 
     if (params.sku) {
@@ -153,7 +156,7 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
         },
         order: { priority: 'ASC', updatedAt: 'DESC' },
       });
-      if (m) return m.itemClsCd;
+      if (m && m.itemClsCd) return m.itemClsCd;
     }
 
     if (params.itemName) {
@@ -167,14 +170,14 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
         },
         order: { priority: 'ASC', updatedAt: 'DESC' },
       });
-      if (m) return m.itemClsCd;
+      if (m && m.itemClsCd) return m.itemClsCd;
     }
 
     const fallback = await this.clsRepo.findOne({
       where: { merchantId, source: 'default', active: true },
       order: { priority: 'ASC', updatedAt: 'DESC' },
     });
-    if (fallback) return fallback.itemClsCd;
+    if (fallback && fallback.itemClsCd) return fallback.itemClsCd;
 
     throw new Error(
       `Missing classification mapping for item (merchantId=${merchantId}). Provide classificationCode or configure classification_mappings.`,

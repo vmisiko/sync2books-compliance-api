@@ -37,6 +37,65 @@ flow (it exercises the same code paths a real integration would). Fall back to c
 `sync2books-compliance-api` directly, or raw `curl` against KRA's sandbox, when isolating whether a bug is
 in our code or in KRA's backend.
 
+**⚠️ NOT RESOLVED — `JM9QLXNJ75` "Query did not return a unique result" is a real, ongoing, escalating
+KRA-side corruption tied to the device serial itself. Every theory below claiming this was "fixed" (new
+Apigee app, new pin) was superseded by later evidence. Read this whole entry before touching `/initialize`.**
+
+**Confirmed root behavior (2026-08-13, most rigorous evidence yet, gathered after eliminating every other
+possible cause):**
+- `/initialize` fails with `"N results were returned"` where `N` **increments by one on every single
+  `/initialize` call against this device serial** — confirmed across 2026-08-11 and 2026-08-12/13,
+  regardless of which Application Test Pin or Apigee app is used. A pin's *first* `/initialize` call under a
+  fresh app pairing can succeed (this is what created the false "switching apps fixed it" belief on
+  2026-08-12) — but that's luck of the count, not a fix. The 2nd, 3rd, etc. calls under the same device
+  serial reliably fail.
+- **This has now spread beyond `/initialize` itself**: on 2026-08-13, `saveItem` (new item registration)
+  started failing with the identical error, on the *previously fully-working* pin `P600004152A`, without
+  that pin ever being re-initialized. Confirmed in a fully clean, single-process, freshly-verified
+  environment (see the process-management gotcha below — this was re-verified specifically to rule out
+  stale-process artifacts as the cause, and the error persisted identically).
+- **Not everything is affected.** `branchList`, `insertStockIO`, `saveStockMaster`, and presumably other
+  operations that don't need whatever internal device-record lookup `saveItem`/`/initialize` share, continue
+  to work fine on `P600004152A` for *already-registered* items. **Practical workaround: don't register new
+  items right now — everything else (stock movements, sales, credit notes, lookups, branch writes, purchase
+  transactions) still works using items registered earlier.**
+- **Do not call `/initialize` again on this device serial without explicit user confirmation** — it only
+  makes the count worse, never better. If a future session needs a working connection, use the currently
+  active one (check `compliance_etims_connections` for `dvcSrlNo='JM9QLXNJ75'` — as of 2026-08-13 that's
+  `P600004152A`) rather than provisioning a new pin.
+- This is a genuine KRA sandbox bug requiring their intervention (device serial reissue or server-side
+  session cleanup) — see `KRA_SUPPORT_TICKET_DRAFT_2.md` for the evidence trail. Don't re-debug this locally
+  again; there is nothing left to find client-side.
+
+**⚠️ Process management gotcha (2026-08-12): `pkill -f "node_modules/.bin/nest start"` does NOT kill a
+running compliance-api/nest-api server.** `nest start` (non-watch mode, i.e. `pnpm start`) execs into
+`node dist/main` — the process's command line changes, so a pattern match on the original `nest start`
+invocation stops matching it after the exec. A "restart" that pkills by that pattern and then relaunches
+silently fails: the new process crashes with `EADDRINUSE` (port already held by the old one), while curl
+health checks against `/docs` or `/health` keep returning 200 because the **old** process, with its old env
+vars (old Apigee app id, old client id/secret, etc.), was never actually killed and is still the one serving
+traffic. This produced a false "still corrupted with a new Apigee app" result earlier in this project — the
+user had to catch it by asking "are you sure you used the new .env?". To restart correctly: find the actual
+listening PID with `lsof -ti :3001 -sTCP:LISTEN` (or `:3000` for nest-api), `kill -TERM` that exact PID,
+confirm `lsof` shows nothing on the port, then relaunch. After relaunching, verify the new env actually took
+effect *before trusting any test result against it*:
+`ps eww -p $(lsof -ti :3001 -sTCP:LISTEN) | tr ' ' '\n' | grep ETIMS_OSCU_APIGEE` and check it matches the
+current `.env`. The new centralized `postOscu()` logging (see below) also helps catch this class of mistake
+going forward — check the `merchant=... branch=... env=...` line actually reflects what you expect before
+trusting a result.
+
+**⚠️⚠️ Much worse version of the same class of bug (2026-08-13): a background `pnpm start:dev` (watch mode)
+process can be silently running from an earlier session/tool call and nobody remembers starting it.** Unlike
+`pnpm start`, watch mode auto-rebuilds and **respawns a brand-new `dist/main` child on every source file
+save** — so simply editing a `.ts` file while investigating a bug creates yet another overlapping process,
+each with whatever env it inherited at its own start time. Over one session this produced **6+ simultaneous
+node processes** for these two apps, several going back hours, competing for the same ports. This makes
+every "verify the PID's env" check from the gotcha above unreliable *unless you also check for and kill any
+watch-mode process first* — `ps aux | grep -iE "start:dev|nest.js start --watch"`, kill every match (the
+shell wrapper AND its child), confirm nothing remains, **then** restart cleanly with plain `nest start`
+(no watch) and re-verify. If you see a `dist/main` process with a start time you can't account for, or curl
+health checks keep succeeding right after a kill you thought was clean, suspect this first.
+
 ## Step 1 — Get credentials from the user
 
 Ask for whatever you don't already have, from the KRA Go-Live page (`developer.go.ke`) or the credentials
@@ -211,16 +270,33 @@ against compliance-api, then `GET /catalog/item-classifications?limit=5`.
 Stock Information Management (gates their `sendSalesTransaction` check):
 
 ```bash
-# Local (compliance-api)
+# Local (compliance-api) -- pass unitPrice or the eTIMS sync below is skipped, not sent with zeros
 curl -s -X PUT http://localhost:3001/api/stock/adjust -H "Content-Type: application/json" \
-  -d '{"itemId":"<item id>","branchId":"00","quantity":100,"action":"ADD"}'
+  -d '{"itemId":"<item id>","branchId":"00","quantity":100,"action":"ADD","unitPrice":100}'
 ```
 
-This also *attempts* to push `insertStockIO`/`saveStockMaster` to KRA automatically
-(`ETIMS_STOCK_SYNC`/`ETIMS_STOCK_MASTER_SYNC`), but that path has no pricing data to work with (generic
-stock adjustments carry no unit price) and KRA rejects zero amounts — check for a `WARN` in
-`compliance-api.log` and if it failed, push the KRA-side registration manually per
-`references/oscu-payload-gotchas.md` before trying a sale.
+This also pushes `insertStockIO`/`saveStockMaster` to KRA automatically
+(`ETIMS_STOCK_SYNC`/`ETIMS_STOCK_MASTER_SYNC`). It used to be unconditionally broken because generic stock
+adjustments carry no unit price and KRA rejects a zero `totAmt` -- fixed 2026-08-11 by adding an optional
+`unitPrice` to `PUT /api/stock/adjust` / `POST /api/stock/transfer` (and to `recordMovement()` internally).
+With a `unitPrice`, `InventoryService.syncStockMovementToEtims()` computes real tax-inclusive `splyAmt`/
+`taxblAmt`/`taxAmt` (same `splitTaxInclusiveAmount()` rule as sales, see below) and sends a valid request.
+Without one, it now logs a clear `WARN` and skips the call entirely instead of sending a doomed zero-amount
+request. If you still see a `WARN` with `unitPrice` supplied, it's a real KRA-side rejection -- check
+`compliance-api.log` (see note on reading `HTTP 400 calling OSCU` below) and cross-reference
+`references/oscu-payload-gotchas.md`.
+
+**✅ RESOLVED 2026-08-12: `insertStockIO`/`saveStockMaster` confirmed working live end-to-end**, including a
+real downstream `sendSalesTransaction` success (`receiptNumber`, `receiptSignature`, `etimsUrl` all
+populated). This had been misdiagnosed for nearly 24 hours as an unfixable KRA sandbox-side issue -- it was
+actually three real client-side bugs, found by dropping to raw `curl` direct against KRA's sandbox
+(bypassing this codebase) when the error kept looking too vague to be a genuine payload problem. **The
+primary cause: `InventoryService`'s stock sync methods were sending the wrong `bhfId` HTTP header** (the
+sync2books-side branch id instead of KRA's real `kraBhfId`) -- see `references/oscu-payload-gotchas.md`'s
+`insertStockIO` section for the full writeup (also two smaller payload bugs, and a related `postOscu()` fix
+for Apigee wrapping business rejections in an outer HTTP 200). **If you hit a persistent, vague OSCU error
+that doesn't budge across retries, try raw `curl` against KRA's sandbox directly before concluding it's
+KRA-side** -- that's what actually cracked this.
 
 Then the sale, and — once `complianceStatus` is `ACCEPTED` — a credit note referencing it:
 
@@ -243,9 +319,28 @@ SELECT eventType, responseSnapshot FROM compliance_events
 WHERE documentId LIKE '%<traderInvoiceNumber>%' ORDER BY createdAt DESC LIMIT 1\G"
 ```
 
-Get the *real* raw KRA error from `responseSnapshot`/`oscu_operation_logs`, not the generic
-`"HTTP 400 calling OSCU"` the HTTP wrapper surfaces at the API boundary — the wrapper strips detail on
-purpose, but you need it for debugging.
+The `WARN` line in `compliance-api.log` (e.g. `eTIMS insertStockIO rejected: HTTP 400 calling OSCU: <detail>`)
+now includes KRA's actual `debugMessage`/`customerMessage` when the rejection is HTTP-level (not just a
+KRA-envelope `resultCd`/`resultMsg`) -- fixed 2026-08-11 in `etims-adapter.http.ts`'s `describeHttpRejection()`
+after repeatedly having to re-derive it by hand from `responseSnapshot`/`oscu_operation_logs`. If you still
+need the full raw payload, it's there too.
+
+**Logging is now centralized in `postOscu()` (2026-08-12) — don't hand-add `console.error` again.** Every
+single OSCU call, both the generic envelope dispatch and the bespoke typed methods (`insertStockIO`,
+`saveStockMaster`, `saveItem`, `selectStockMoveList`, `submitInvoice`), funnels through one private method
+in `etims-adapter.http.ts`. That method now:
+- logs every outgoing request at `debug` (`-> insertStockIO merchant=... branch=... env=... body={...}`) —
+  set `NODE_ENV`/log level to see full request payloads without adding anything.
+- logs every rejected response (`!res.ok` OR `resultCd !== '000'`) at `warn` with the **full raw KRA
+  response body**, not just a derived string.
+- logs thrown exceptions (network failures) at `error`, **including `error.cause`** — this is exactly what
+  disambiguated the local `ENETDOWN`/"fetch failed" sandbox flakiness from a real KRA-side rejection during
+  this project's `insertStockIO` debugging, and previously required temporarily adding `console.error` to
+  inspect `.cause` and then reverting it. Don't re-add that by hand; it's already logged every time.
+
+`InventoryService`'s own `insertStockIO`/`saveStockMaster` warn logs (in `inventory.service.ts`) were also
+enriched to include `itemCd`/`sarNo`/`movement id` (or `branch`/`rsdQty` for stock master), so you can
+correlate a domain-level failure with the adapter-level request/response log lines above by timestamp.
 
 ## Step 5 — Work through the rest of the checklist
 
@@ -256,6 +351,15 @@ these directly with `merchantId` (the sync2books company id) and `branchId` (the
 prior correspondence on this integration confirmed that; don't waste time trying to make lookups return
 non-empty data. The compliance-api HTTP wrapper surfaces both as an error though, so check
 `oscu_operation_logs` for the real `resultCd` rather than trusting the HTTP status code.
+
+`selectCustomerList` (`GET /oscu/customers?merchantId=...&branchId=...`) was missing entirely until
+2026-08-11 — every other lookup in the dashboard checklist had a route, this one didn't. Added following the
+exact same generic-envelope pattern as `branchList`/`selectNoticeList`/`customerPinInfo` (no special-casing
+needed, unlike `selectStockMoveList`); confirmed live with `resultCd: "000"` and a real `custList` entry. If
+a *different* Go-Live test case 404s the same way, it's very likely the same gap: check
+`oscu-operations.controller.ts` for a matching route before assuming it's a payload bug, and wire it the same
+way if it's missing (port interface → http adapter one-liner via `postOscuEnvelope` → stub adapter → service
+dispatch entry → controller route).
 
 ## The developer.go.ke test-case dashboard
 

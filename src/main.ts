@@ -8,6 +8,20 @@ applyDnsOverrideIfConfigured();
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Mode B — Compliance Dashboard UI is a separate origin and sends
+  // credentials (Authorization header) cross-origin, so it needs an explicit
+  // allow-list (not '*') plus credentials: true.
+  const dashboardOrigins = (
+    process.env.COMPLIANCE_DASHBOARD_ORIGINS || 'http://localhost:3002'
+  )
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  app.enableCors({
+    origin: dashboardOrigins,
+    credentials: true,
+  });
+
   const config = new DocumentBuilder()
     .setTitle('Sync2Books Compliance API')
     .setDescription('Unified compliance abstraction layer for eTIMS (OSCU).')

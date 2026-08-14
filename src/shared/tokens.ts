@@ -8,3 +8,5 @@ export const CATALOG_ITEM_REPO = 'ICatalogItemRepository';
 export const CLASSIFICATION_RESOLVER = 'IClassificationResolver';
 export const STOCK_REPO = 'IStockRepository';
 export const STOCK_MOVEMENT_REPO = 'IStockMovementRepository';
+export const DASHBOARD_USER_REPO = 'IDashboardUserRepository';
+export const MAIN_API_CONNECTION_REPO = 'IMainApiConnectionRepository';
