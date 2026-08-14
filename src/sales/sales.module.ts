@@ -4,6 +4,7 @@ import { CatalogModule } from '../catalog/catalog.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { EtimsModule } from '../regulatory/oscu/etims.module';
 import { ComplianceOrganizationModule } from '../compliance-organization/compliance-organization.module';
+import { DashboardIdentityModule } from '../dashboard-identity/dashboard-identity.module';
 import { DOCUMENT_REPO, EVENT_REPO } from '../shared/tokens';
 import { ApiSalesController } from './controller/api-sales.controller';
 import { DashboardSalesController } from './controller/dashboard-sales.controller';
@@ -24,6 +25,7 @@ import { OscuSyncStateOrmEntity } from '../regulatory/oscu/infrastructure/persis
     CatalogModule,
     InventoryModule,
     ComplianceOrganizationModule,
+    DashboardIdentityModule,
     EtimsModule,
     TypeOrmModule.forFeature([
       ComplianceDocumentOrmEntity,

@@ -47,6 +47,35 @@ export interface MainApiListResponse<T> {
   totalPages: number;
 }
 
+/** IntegrationKeyType values the main API's connection/company endpoints accept. */
+export type MainApiIntegrationKey =
+  | 'quickbooks'
+  | 'xero'
+  | 'sage'
+  | 'microsoft-dynamics-365-business-central'
+  | 'odoo';
+
+export interface MainApiConnectionRecord {
+  id: string;
+  integrationKey: MainApiIntegrationKey;
+  companyId: string;
+  bookCompanyId: string;
+  status: 'pending' | 'awaiting_company_selection' | 'connected' | 'disconnected';
+}
+
+export interface MainApiDynamicsCompany {
+  id: string;
+  name: string;
+  displayName: string;
+}
+
+export interface MainApiOdooCredentials {
+  url: string;
+  database: string;
+  username: string;
+  apiKey: string;
+}
+
 /**
  * Shape confirmed against the main API's own source
  * (nest-sync-2-books-api/src/tax-rate/domain/entities/tax-rate.entity.ts +
@@ -203,6 +232,16 @@ export class MainApiPullClient {
   }
 
   /**
+   * Companies & connections: POST /companies (see
+   * concepts/companies-and-connections.mdx in sync2BooksDocumentation). Also
+   * returns a QuickBooks authUrl by default, which we ignore here — the
+   * dashboard drives auth via the Sync2BooksLink widget instead.
+   */
+  async createCompany(apiKey: string, name: string): Promise<{ company: { id: string; name: string } }> {
+    return this.postJson<{ company: { id: string; name: string } }>(apiKey, '/companies', { name });
+  }
+
+  /**
    * Triggers a fresh QuickBooks fetch on the main API side before listing —
    * without this, getItems()/getInvoices() only return whatever the main API
    * already happened to have cached, not what's currently in QuickBooks.
@@ -217,12 +256,139 @@ export class MainApiPullClient {
     return this.post(apiKey, `/invoices/connection/${connectionId}/sync-from-bookkeeping`);
   }
 
+  // --- Sync2Books Link (ERP connect widget) proxy calls ---
+  // Mirrors src/lib/sync2books-link/client.ts in sync2books-react, but kept
+  // server-side here so the main-API key never reaches the browser.
+
+  async getAuthUrl(
+    apiKey: string,
+    companyId: string,
+    integrationKey: MainApiIntegrationKey,
+    connectionId?: string,
+  ): Promise<{ authUrl: string }> {
+    return this.get<{ authUrl: string }>(apiKey, `/companies/${companyId}/auth-url`, {
+      integrationKey,
+      connectionId,
+    });
+  }
+
+  async getConnectionByIntegration(
+    apiKey: string,
+    companyId: string,
+    integrationKey: MainApiIntegrationKey,
+  ): Promise<MainApiConnectionRecord | null> {
+    return this.get<MainApiConnectionRecord | null>(
+      apiKey,
+      `/connections/company/${companyId}/integration/${integrationKey}`,
+      {},
+    );
+  }
+
+  async listDynamicsCompanies(apiKey: string, connectionId: string): Promise<MainApiDynamicsCompany[]> {
+    return this.get<MainApiDynamicsCompany[]>(apiKey, `/connections/${connectionId}/dynamics/companies`, {});
+  }
+
+  async finalizeDynamicsConnection(
+    apiKey: string,
+    connectionId: string,
+    bookCompanyId: string,
+  ): Promise<MainApiConnectionRecord> {
+    return this.postJson<MainApiConnectionRecord>(apiKey, `/connections/${connectionId}/dynamics/finalize`, {
+      bookCompanyId,
+    });
+  }
+
+  async connectOdoo(
+    apiKey: string,
+    companyId: string,
+    credentials: MainApiOdooCredentials,
+    connectionId?: string,
+  ): Promise<MainApiConnectionRecord> {
+    return this.postJson<MainApiConnectionRecord>(apiKey, `/companies/${companyId}/odoo/connect`, {
+      ...credentials,
+      connectionId,
+    });
+  }
+
+  async disconnectConnection(apiKey: string, connectionId: string): Promise<{ status: string }> {
+    return this.postJson<{ status: string }>(apiKey, `/connections/${connectionId}/disconnect`, undefined);
+  }
+
+  // --- Webhooks (outbound from the main API's perspective, inbound to us) ---
+  // See WEBHOOK_SYSTEM.md in nest-sync-2-books-api. compliance-api registers
+  // itself as a subscriber, same as any third-party integrator would.
+
+  async createWebhookEndpoint(
+    apiKey: string,
+    input: { name: string; url: string; eventTypes: string[] },
+  ): Promise<{ id: string; secret: string; url: string; eventTypes: string[] }> {
+    return this.postJson(apiKey, '/webhooks/endpoints', input);
+  }
+
+  async updateWebhookEndpointUrl(
+    apiKey: string,
+    endpointId: string,
+    url: string,
+  ): Promise<{ id: string; url: string }> {
+    return this.putJson(apiKey, `/webhooks/endpoints/${endpointId}`, { url });
+  }
+
+  /**
+   * POST /webhooks/endpoints can't create an endpoint scoped to "any
+   * environment" — the main API's own controller defaults a missing
+   * environment to its runtime NODE_ENV rather than leaving it null. PUT
+   * does respect an explicit null, so we always follow creation with this.
+   */
+  async setWebhookEndpointEnvironmentToAny(apiKey: string, endpointId: string): Promise<void> {
+    await this.putJson(apiKey, `/webhooks/endpoints/${endpointId}`, { environment: null });
+  }
+
   private async post<T>(apiKey: string, path: string): Promise<T> {
     const url = `${this.baseUrl()}${path}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(60_000),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      this.logger.warn(`Main API ${path} failed: ${res.status} ${text.slice(0, 300)}`);
+      throw new BadGatewayException(
+        `Main API request failed (${res.status}): ${text.slice(0, 200)}`,
+      );
+    }
+
+    return res.json() as Promise<T>;
+  }
+
+  private async postJson<T>(apiKey: string, path: string, body: unknown): Promise<T> {
+    const url = `${this.baseUrl()}${path}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      this.logger.warn(`Main API ${path} failed: ${res.status} ${text.slice(0, 300)}`);
+      throw new BadGatewayException(
+        `Main API request failed (${res.status}): ${text.slice(0, 200)}`,
+      );
+    }
+
+    return res.json() as Promise<T>;
+  }
+
+  private async putJson<T>(apiKey: string, path: string, body: unknown): Promise<T> {
+    const url = `${this.baseUrl()}${path}`;
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!res.ok) {

@@ -5,8 +5,13 @@ import { DashboardRole } from '../../../shared/domain/enums/dashboard-role.enum'
 
 /** Same dev tenant seeded by ComplianceOrganizationSeed. */
 const DEV_MERCHANT_ID = 'merchant-1';
-const DEV_EMAIL = 'dev@sync2books.local';
 const DEV_PASSWORD = 'DevPassword123!';
+
+const DEV_USERS: Array<{ email: string; displayName: string; role: DashboardRole }> = [
+  { email: 'dev@sync2books.local', displayName: 'Dev Admin', role: DashboardRole.ADMIN },
+  { email: 'cfo@sync2books.local', displayName: 'Dev CFO', role: DashboardRole.CFO },
+  { email: 'accountant@sync2books.local', displayName: 'Dev Accountant', role: DashboardRole.ACCOUNTANT },
+];
 
 @Injectable()
 export class DashboardUserSeed {
@@ -18,11 +23,6 @@ export class DashboardUserSeed {
   ) {}
 
   async runIfEmpty(): Promise<void> {
-    const existing = await this.auth.findByEmail(DEV_EMAIL);
-    if (existing) {
-      return;
-    }
-
     const tenant = await this.organization.getTenantBySync2booksCompanyId(DEV_MERCHANT_ID);
     if (!tenant) {
       this.logger.warn(
@@ -31,14 +31,21 @@ export class DashboardUserSeed {
       return;
     }
 
-    await this.auth.createUser({
-      email: DEV_EMAIL,
-      password: DEV_PASSWORD,
-      displayName: 'Dev Admin',
-      role: DashboardRole.ADMIN,
-      complianceTenantId: tenant.id,
-    });
+    for (const user of DEV_USERS) {
+      const existing = await this.auth.findByEmail(user.email);
+      if (existing) {
+        continue;
+      }
 
-    this.logger.log(`Seeded dev dashboard user ${DEV_EMAIL} / ${DEV_PASSWORD} for tenant ${tenant.id}`);
+      await this.auth.createUser({
+        email: user.email,
+        password: DEV_PASSWORD,
+        displayName: user.displayName,
+        role: user.role,
+        complianceTenantId: tenant.id,
+      });
+
+      this.logger.log(`Seeded dev dashboard user ${user.email} / ${DEV_PASSWORD} (${user.role}) for tenant ${tenant.id}`);
+    }
   }
 }

@@ -38,11 +38,12 @@ export class DashboardItemsApplicationService {
     // Best-effort: refresh the main API's own cache from QuickBooks first, so
     // the list below isn't stale. A failure here (e.g. QuickBooks token expired)
     // shouldn't block reading whatever the main API already has.
-    if (connection.quickbooksConnectionId) {
+    const quickbooksConnectionId = connection.integrations['quickbooks']?.connectionId;
+    if (quickbooksConnectionId) {
       try {
         await this.mainApiPull.syncItemsFromBookkeeping(
           connection.mainApiApiKey,
-          connection.quickbooksConnectionId,
+          quickbooksConnectionId,
         );
       } catch (error) {
         this.logger.warn(

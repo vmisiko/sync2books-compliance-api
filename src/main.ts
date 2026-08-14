@@ -6,7 +6,10 @@ import { applyDnsOverrideIfConfigured } from './dns-override';
 applyDnsOverrideIfConfigured();
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: true — the inbound main-API webhook receiver needs the exact
+  // request bytes to verify the HMAC signature; a re-serialized JSON body
+  // could differ in key order and silently break verification.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // Mode B — Compliance Dashboard UI is a separate origin and sends
   // credentials (Authorization header) cross-origin, so it needs an explicit

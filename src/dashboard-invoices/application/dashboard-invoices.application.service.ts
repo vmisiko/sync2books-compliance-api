@@ -56,11 +56,12 @@ export class DashboardInvoicesApplicationService {
   ) {
     const connection = await this.mainApiConnections.getForTenant(complianceTenantId);
 
-    if (connection.quickbooksConnectionId) {
+    const quickbooksConnectionId = connection.integrations['quickbooks']?.connectionId;
+    if (quickbooksConnectionId) {
       try {
         await this.mainApiPull.syncInvoicesFromBookkeeping(
           connection.mainApiApiKey,
-          connection.quickbooksConnectionId,
+          quickbooksConnectionId,
         );
       } catch (error) {
         this.logger.warn(

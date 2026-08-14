@@ -6,9 +6,11 @@ import {
   Param,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
+  ApiBearerAuth,
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -23,9 +25,18 @@ import {
 } from './dto/sales-report.dto';
 import { CreateExpressCreditNoteDto } from './dto/create-express-credit-note.dto';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
+import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
 
+/**
+ * Guarded (previously open to any caller). Still trusts merchantId/branchId
+ * from the request body/query rather than deriving them from the verified
+ * token — that's a separate, larger fix (see the "Guard DashboardSalesController
+ * with Mode B auth" follow-up) since it touches this controller's contract.
+ */
 @Controller('dashboard-api/sales')
 @ApiTags('Dashboard Sales')
+@UseGuards(DashboardJwtAuthGuard)
+@ApiBearerAuth()
 export class DashboardSalesController {
   constructor(private readonly salesService: SalesService) {}
 

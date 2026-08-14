@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 
 export class UpsertMainApiConnectionDto {
   @ApiProperty({
@@ -13,10 +13,12 @@ export class UpsertMainApiConnectionDto {
     example: 'sk_development_...',
   })
   mainApiApiKey!: string;
+}
 
-  @ApiPropertyOptional({
-    description:
-      'Main-API connectionId once QuickBooks (or another ERP) has been connected to that Application',
-  })
-  quickbooksConnectionId?: string;
+export class RecordIntegrationConnectionDto {
+  @ApiProperty({ description: 'Which accounting tool was connected', example: 'quickbooks' })
+  integrationKey!: string;
+
+  @ApiProperty({ description: 'Main-API connectionId returned by the Sync2BooksLink widget' })
+  connectionId!: string;
 }

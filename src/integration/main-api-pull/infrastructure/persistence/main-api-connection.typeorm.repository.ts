@@ -2,19 +2,51 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { IMainApiConnectionRepository } from '../../application/ports/main-api-connection.repository.port';
-import type { MainApiConnection } from '../../domain/entities/main-api-connection.entity';
+import type {
+  IntegrationConnectionState,
+  MainApiConnection,
+} from '../../domain/entities/main-api-connection.entity';
 import { MainApiConnectionOrmEntity } from './main-api-connection.orm-entity';
 
 function toDomain(e: MainApiConnectionOrmEntity): MainApiConnection {
+  const integrations: Record<string, IntegrationConnectionState> = {};
+  for (const [key, v] of Object.entries(e.integrations ?? {})) {
+    integrations[key] = {
+      connectionId: v.connectionId,
+      status: v.status as IntegrationConnectionState['status'],
+      reason: v.reason,
+      updatedAt: v.updatedAt ? new Date(v.updatedAt) : null,
+    };
+  }
   return {
     id: e.id,
     complianceTenantId: e.complianceTenantId,
     mainApiApplicationId: e.mainApiApplicationId,
     mainApiApiKey: e.mainApiApiKey,
-    quickbooksConnectionId: e.quickbooksConnectionId,
+    mainApiCompanyId: e.mainApiCompanyId,
+    integrations,
+    webhookEndpointId: e.webhookEndpointId,
+    webhookSecret: e.webhookSecret,
+    lastWebhookEventId: e.lastWebhookEventId,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
   };
+}
+
+function toOrmIntegrations(
+  integrations: MainApiConnection['integrations'],
+): MainApiConnectionOrmEntity['integrations'] {
+  const out: NonNullable<MainApiConnectionOrmEntity['integrations']> = {};
+  for (const [key, v] of Object.entries(integrations)) {
+    if (!v) continue;
+    out[key] = {
+      connectionId: v.connectionId,
+      status: v.status,
+      reason: v.reason,
+      updatedAt: v.updatedAt ? v.updatedAt.toISOString() : null,
+    };
+  }
+  return out;
 }
 
 @Injectable()
@@ -39,7 +71,11 @@ export class MainApiConnectionTypeOrmRepository
       complianceTenantId: connection.complianceTenantId,
       mainApiApplicationId: connection.mainApiApplicationId,
       mainApiApiKey: connection.mainApiApiKey,
-      quickbooksConnectionId: connection.quickbooksConnectionId,
+      mainApiCompanyId: connection.mainApiCompanyId,
+      integrations: toOrmIntegrations(connection.integrations),
+      webhookEndpointId: connection.webhookEndpointId,
+      webhookSecret: connection.webhookSecret,
+      lastWebhookEventId: connection.lastWebhookEventId,
       createdAt: connection.createdAt,
       updatedAt: connection.updatedAt,
     });
