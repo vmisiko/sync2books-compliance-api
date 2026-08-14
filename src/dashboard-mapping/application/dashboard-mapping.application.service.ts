@@ -92,9 +92,18 @@ type FoundRow =
   | { type: 'unit'; row: UnitMappingOrmEntity }
   | { type: 'classification'; row: ClassificationMappingOrmEntity };
 
+/**
+ * Query-param keys mirror the main API's IntegrationKeyType string values
+ * (nest-sync-2-books-api/src/connection/domain/entities/connection.ts)
+ * exactly, so a caller who already knows a connection's integrationKey can
+ * pass it straight through as ?source= without translating casing/format.
+ */
 const SOURCE_FILTER: Record<string, SourceSystem> = {
   quickbooks: SourceSystem.QUICKBOOKS,
   xero: SourceSystem.XERO,
+  sage: SourceSystem.SAGE,
+  odoo: SourceSystem.ODOO,
+  'microsoft-dynamics-365-business-central': SourceSystem.MICROSOFT_DYNAMICS_365_BUSINESS_CENTRAL,
   manual: SourceSystem.MANUAL,
   api: SourceSystem.API,
 };

@@ -1,6 +1,9 @@
 export enum SourceSystem {
   QUICKBOOKS = 'QUICKBOOKS',
   XERO = 'XERO',
+  SAGE = 'SAGE',
+  ODOO = 'ODOO',
+  MICROSOFT_DYNAMICS_365_BUSINESS_CENTRAL = 'MICROSOFT_DYNAMICS_365_BUSINESS_CENTRAL',
   API = 'API',
   /**
    * A mapping (or other record) entered directly by a dashboard user, not
