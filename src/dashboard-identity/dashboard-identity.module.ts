@@ -35,7 +35,11 @@ import { DashboardAuthController } from './presentation/dashboard-auth.controlle
     DashboardJwtAuthGuard,
     DashboardUserSeed,
   ],
-  exports: [DashboardJwtAuthGuard, DASHBOARD_USER_REPO, DashboardAuthApplicationService],
+  exports: [
+    DashboardJwtAuthGuard,
+    DASHBOARD_USER_REPO,
+    DashboardAuthApplicationService,
+  ],
 })
 export class DashboardIdentityModule implements OnModuleInit {
   constructor(private readonly seed: DashboardUserSeed) {}

@@ -36,9 +36,35 @@ const KNOWN_UNITS: Array<{
   pkgUnitCd: string;
   aliases: string[];
 }> = [
-  { internalUnit: 'EA', qtyUnitCd: 'NO', pkgUnitCd: 'NT', aliases: ['ea', 'each', 'pcs', 'pc', 'piece', 'pieces', 'unit', 'units', 'item', 'items'] },
-  { internalUnit: 'KG', qtyUnitCd: 'KG', pkgUnitCd: 'NT', aliases: ['kg', 'kgs', 'kilogram', 'kilograms', 'kilo', 'kilos'] },
-  { internalUnit: 'LTR', qtyUnitCd: 'LTR', pkgUnitCd: 'NT', aliases: ['l', 'ltr', 'litre', 'liter', 'litres', 'liters'] },
+  {
+    internalUnit: 'EA',
+    qtyUnitCd: 'NO',
+    pkgUnitCd: 'NT',
+    aliases: [
+      'ea',
+      'each',
+      'pcs',
+      'pc',
+      'piece',
+      'pieces',
+      'unit',
+      'units',
+      'item',
+      'items',
+    ],
+  },
+  {
+    internalUnit: 'KG',
+    qtyUnitCd: 'KG',
+    pkgUnitCd: 'NT',
+    aliases: ['kg', 'kgs', 'kilogram', 'kilograms', 'kilo', 'kilos'],
+  },
+  {
+    internalUnit: 'LTR',
+    qtyUnitCd: 'LTR',
+    pkgUnitCd: 'NT',
+    aliases: ['l', 'ltr', 'litre', 'liter', 'litres', 'liters'],
+  },
 ];
 
 /**
@@ -57,7 +83,10 @@ export class MappingSuggestionService {
    * @param name Raw label as it appeared in the source system, e.g. "16% Standard VAT".
    * @param ratePercent The tax rate as a percentage (e.g. 16 for 16%), if known.
    */
-  suggestTaxMapping(name: string, ratePercent: number | null): TaxMappingSuggestion | null {
+  suggestTaxMapping(
+    name: string,
+    ratePercent: number | null,
+  ): TaxMappingSuggestion | null {
     const n = (name ?? '').toLowerCase();
 
     if (n.includes('exempt')) {
@@ -70,7 +99,8 @@ export class MappingSuggestionService {
 
     const isZeroRate = ratePercent !== null && Math.abs(ratePercent) < 0.001;
     if (isZeroRate || n.includes('zero')) {
-      const confidenceScore = isZeroRate && n.includes('zero') ? 98 : isZeroRate ? 92 : 90;
+      const confidenceScore =
+        isZeroRate && n.includes('zero') ? 98 : isZeroRate ? 92 : 90;
       return {
         internalTaxCategory: TaxCategory.VAT_ZERO,
         taxTyCd: TAX_CATEGORY_CODE[TaxCategory.VAT_ZERO],
@@ -78,7 +108,8 @@ export class MappingSuggestionService {
       };
     }
 
-    const isStandardRate = ratePercent !== null && Math.abs(ratePercent - 16) <= 0.5;
+    const isStandardRate =
+      ratePercent !== null && Math.abs(ratePercent - 16) <= 0.5;
     const mentionsStandard = n.includes('standard') || n.includes('vat');
     if (isStandardRate || mentionsStandard) {
       let confidenceScore = 90;
@@ -97,19 +128,31 @@ export class MappingSuggestionService {
   }
 
   /** @param label Raw unit-of-measure label from the source system, e.g. MainApiItem.unitOfMeasure. */
-  suggestUnitMapping(label: string | null | undefined): UnitMappingSuggestion | null {
+  suggestUnitMapping(
+    label: string | null | undefined,
+  ): UnitMappingSuggestion | null {
     const n = (label ?? '').trim().toLowerCase();
     if (!n) return null;
 
     for (const u of KNOWN_UNITS) {
       if (u.aliases.includes(n)) {
-        return { internalUnit: u.internalUnit, qtyUnitCd: u.qtyUnitCd, pkgUnitCd: u.pkgUnitCd, confidenceScore: 95 };
+        return {
+          internalUnit: u.internalUnit,
+          qtyUnitCd: u.qtyUnitCd,
+          pkgUnitCd: u.pkgUnitCd,
+          confidenceScore: 95,
+        };
       }
     }
     // Looser contains-match (e.g. "Kilograms (kg)") — still confident enough to surface, lower score.
     for (const u of KNOWN_UNITS) {
       if (u.aliases.some((alias) => n.includes(alias))) {
-        return { internalUnit: u.internalUnit, qtyUnitCd: u.qtyUnitCd, pkgUnitCd: u.pkgUnitCd, confidenceScore: 75 };
+        return {
+          internalUnit: u.internalUnit,
+          qtyUnitCd: u.qtyUnitCd,
+          pkgUnitCd: u.pkgUnitCd,
+          confidenceScore: 75,
+        };
       }
     }
     return null;
@@ -128,9 +171,11 @@ export class MappingSuggestionService {
     sku?: string | null;
     itemName?: string | null;
   }): ClassificationPlaceholder | null {
-    if (input.externalId) return { matchType: 'EXTERNAL_ID', matchValue: input.externalId };
+    if (input.externalId)
+      return { matchType: 'EXTERNAL_ID', matchValue: input.externalId };
     if (input.sku) return { matchType: 'SKU', matchValue: input.sku };
-    if (input.itemName) return { matchType: 'NAME_CONTAINS', matchValue: input.itemName };
+    if (input.itemName)
+      return { matchType: 'NAME_CONTAINS', matchValue: input.itemName };
     return null;
   }
 }

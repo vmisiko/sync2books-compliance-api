@@ -7,10 +7,26 @@ import { DashboardRole } from '../../../shared/domain/enums/dashboard-role.enum'
 const DEV_MERCHANT_ID = 'merchant-1';
 const DEV_PASSWORD = 'DevPassword123!';
 
-const DEV_USERS: Array<{ email: string; displayName: string; role: DashboardRole }> = [
-  { email: 'dev@sync2books.local', displayName: 'Dev Admin', role: DashboardRole.ADMIN },
-  { email: 'cfo@sync2books.local', displayName: 'Dev CFO', role: DashboardRole.CFO },
-  { email: 'accountant@sync2books.local', displayName: 'Dev Accountant', role: DashboardRole.ACCOUNTANT },
+const DEV_USERS: Array<{
+  email: string;
+  displayName: string;
+  role: DashboardRole;
+}> = [
+  {
+    email: 'dev@sync2books.local',
+    displayName: 'Dev Admin',
+    role: DashboardRole.ADMIN,
+  },
+  {
+    email: 'cfo@sync2books.local',
+    displayName: 'Dev CFO',
+    role: DashboardRole.CFO,
+  },
+  {
+    email: 'accountant@sync2books.local',
+    displayName: 'Dev Accountant',
+    role: DashboardRole.ACCOUNTANT,
+  },
 ];
 
 @Injectable()
@@ -23,7 +39,8 @@ export class DashboardUserSeed {
   ) {}
 
   async runIfEmpty(): Promise<void> {
-    const tenant = await this.organization.getTenantBySync2booksCompanyId(DEV_MERCHANT_ID);
+    const tenant =
+      await this.organization.getTenantBySync2booksCompanyId(DEV_MERCHANT_ID);
     if (!tenant) {
       this.logger.warn(
         `Skipped dashboard user seed: no tenant for ${DEV_MERCHANT_ID} yet (ComplianceOrganizationSeed should run first).`,
@@ -45,7 +62,9 @@ export class DashboardUserSeed {
         complianceTenantId: tenant.id,
       });
 
-      this.logger.log(`Seeded dev dashboard user ${user.email} / ${DEV_PASSWORD} (${user.role}) for tenant ${tenant.id}`);
+      this.logger.log(
+        `Seeded dev dashboard user ${user.email} / ${DEV_PASSWORD} (${user.role}) for tenant ${tenant.id}`,
+      );
     }
   }
 }

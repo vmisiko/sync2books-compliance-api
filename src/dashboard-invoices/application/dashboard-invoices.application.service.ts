@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { CatalogService } from '../../catalog/api/catalog.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
@@ -40,7 +45,9 @@ export type PulledInvoice = {
 
 @Injectable()
 export class DashboardInvoicesApplicationService {
-  private readonly logger = new Logger(DashboardInvoicesApplicationService.name);
+  private readonly logger = new Logger(
+    DashboardInvoicesApplicationService.name,
+  );
 
   constructor(
     private readonly catalog: CatalogService,
@@ -54,9 +61,11 @@ export class DashboardInvoicesApplicationService {
     complianceTenantId: string,
     params: { page?: number; limit?: number } = {},
   ) {
-    const connection = await this.mainApiConnections.getForTenant(complianceTenantId);
+    const connection =
+      await this.mainApiConnections.getForTenant(complianceTenantId);
 
-    const quickbooksConnectionId = connection.integrations['quickbooks']?.connectionId;
+    const quickbooksConnectionId =
+      connection.integrations['quickbooks']?.connectionId;
     if (quickbooksConnectionId) {
       try {
         await this.mainApiPull.syncInvoicesFromBookkeeping(
@@ -80,9 +89,13 @@ export class DashboardInvoicesApplicationService {
     params: { page?: number; limit?: number } = {},
   ) {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
-    const connection = await this.mainApiConnections.getForTenant(complianceTenantId);
+    const connection =
+      await this.mainApiConnections.getForTenant(complianceTenantId);
 
-    const response = await this.mainApiPull.getInvoices(connection.mainApiApiKey, params);
+    const response = await this.mainApiPull.getInvoices(
+      connection.mainApiApiKey,
+      params,
+    );
     const invoices = await Promise.all(
       response.data.map((invoice) => this.enrich(merchantId, invoice)),
     );
@@ -98,7 +111,8 @@ export class DashboardInvoicesApplicationService {
 
   async getInvoiceById(complianceTenantId: string, mainApiInvoiceId: string) {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
-    const connection = await this.mainApiConnections.getForTenant(complianceTenantId);
+    const connection =
+      await this.mainApiConnections.getForTenant(complianceTenantId);
 
     const invoice = await this.mainApiPull.getInvoiceById(
       connection.mainApiApiKey,
@@ -119,7 +133,10 @@ export class DashboardInvoicesApplicationService {
     options: { submit?: boolean } = {},
   ) {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
-    const pulled = await this.getInvoiceById(complianceTenantId, mainApiInvoiceId);
+    const pulled = await this.getInvoiceById(
+      complianceTenantId,
+      mainApiInvoiceId,
+    );
 
     if (!pulled.readyForSale) {
       const unclassified = pulled.lines
@@ -140,7 +157,9 @@ export class DashboardInvoicesApplicationService {
 
     const lines = await Promise.all(
       pulled.lines.map(async (line) => {
-        const catalogItem = await this.catalog.getItemById(line.catalogItemId as string);
+        const catalogItem = await this.catalog.getItemById(
+          line.catalogItemId as string,
+        );
         if (!catalogItem) {
           throw new BadRequestException(
             `Catalog item ${line.catalogItemId} no longer exists`,
@@ -178,7 +197,10 @@ export class DashboardInvoicesApplicationService {
         invoiceStatusCode: '02',
         currency: pulled.currency || 'KES',
         exchangeRate: 1,
-        subtotalAmount: lines.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0),
+        subtotalAmount: lines.reduce(
+          (sum, l) => sum + l.quantity * l.unitPrice,
+          0,
+        ),
         totalTax: lines.reduce((sum, l) => sum + l.taxAmount, 0),
         totalAmount: lines.reduce(
           (sum, l) => sum + l.quantity * l.unitPrice + l.taxAmount,
@@ -211,7 +233,10 @@ export class DashboardInvoicesApplicationService {
     return this.sales.getNormalizedSaleReport(documentId);
   }
 
-  private async enrich(merchantId: string, invoice: MainApiInvoice): Promise<PulledInvoice> {
+  private async enrich(
+    merchantId: string,
+    invoice: MainApiInvoice,
+  ): Promise<PulledInvoice> {
     const lines = await Promise.all(
       invoice.lineItems.map(async (line) => {
         const itemExternalId = line.itemRef?.id ?? null;

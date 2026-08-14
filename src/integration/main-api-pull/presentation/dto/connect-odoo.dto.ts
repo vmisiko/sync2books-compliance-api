@@ -13,6 +13,8 @@ export class ConnectOdooDto {
   @ApiProperty({ description: 'Odoo API key (Settings > Users > API Keys)' })
   apiKey!: string;
 
-  @ApiPropertyOptional({ description: 'Existing connectionId, when reconnecting' })
+  @ApiPropertyOptional({
+    description: 'Existing connectionId, when reconnecting',
+  })
   connectionId?: string;
 }

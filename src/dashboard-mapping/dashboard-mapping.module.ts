@@ -7,7 +7,12 @@ import { DashboardMappingApplicationService } from './application/dashboard-mapp
 import { DashboardMappingsController } from './presentation/dashboard-mappings.controller';
 
 @Module({
-  imports: [OscuMappingModule, ComplianceOrganizationModule, DashboardIdentityModule, MainApiPullModule],
+  imports: [
+    OscuMappingModule,
+    ComplianceOrganizationModule,
+    DashboardIdentityModule,
+    MainApiPullModule,
+  ],
   controllers: [DashboardMappingsController],
   providers: [DashboardMappingApplicationService],
   exports: [DashboardMappingApplicationService],

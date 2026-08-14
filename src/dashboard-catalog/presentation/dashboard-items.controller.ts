@@ -1,5 +1,21 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { DashboardItemsApplicationService } from '../application/dashboard-items.application.service';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
@@ -36,8 +52,13 @@ export class DashboardItemsController {
   }
 
   @Patch(':id/classification')
-  @ApiOperation({ summary: 'Manually override the OSCU classification for an item' })
-  @ApiResponse({ status: 200, description: 'Item re-registered with the new classification' })
+  @ApiOperation({
+    summary: 'Manually override the OSCU classification for an item',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Item re-registered with the new classification',
+  })
   async overrideClassification(
     @Req() req: Request,
     @Param('id') id: string,

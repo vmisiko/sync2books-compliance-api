@@ -10,22 +10,30 @@ export function applyDnsOverrideIfConfigured(): void {
   const serversEnv = process.env.ETIMS_DNS_OVERRIDE_SERVERS;
   if (!serversEnv) return;
 
-  const servers = serversEnv.split(',').map((s) => s.trim()).filter(Boolean);
+  const servers = serversEnv
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (servers.length === 0) return;
 
   const resolver = new dns.Resolver();
   resolver.setServers(servers);
   const originalLookup = dns.lookup;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (dns as any).lookup = (
     hostname: string,
     options: unknown,
     callback?: unknown,
   ) => {
-    let opts = options as (dns.LookupOneOptions & { all?: boolean }) | undefined;
+    let opts = options as
+      | (dns.LookupOneOptions & { all?: boolean })
+      | undefined;
     let cb = callback as
-      | ((err: NodeJS.ErrnoException | null, address: unknown, family?: number) => void)
+      | ((
+          err: NodeJS.ErrnoException | null,
+          address: unknown,
+          family?: number,
+        ) => void)
       | undefined;
     if (typeof opts === 'function') {
       cb = opts as unknown as typeof cb;
@@ -33,7 +41,6 @@ export function applyDnsOverrideIfConfigured(): void {
     }
     resolver.resolve4(hostname, (err, addresses) => {
       if (err || !addresses || addresses.length === 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return (originalLookup as any)(hostname, options, callback);
       }
       if (opts?.all) {

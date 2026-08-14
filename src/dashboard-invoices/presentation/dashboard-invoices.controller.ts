@@ -1,5 +1,22 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { DashboardInvoicesApplicationService } from '../application/dashboard-invoices.application.service';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
@@ -20,7 +37,11 @@ export class DashboardInvoicesController {
       'Refresh invoices from the main API (sourced from QuickBooks etc.) and return the current list, previewed only (nothing is submitted to eTIMS)',
   })
   @ApiResponse({ status: 200, description: 'Pull result' })
-  async pull(@Req() req: Request, @Query('page') page?: string, @Query('limit') limit?: string) {
+  async pull(
+    @Req() req: Request,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
     const user = req.user as DashboardRequestUser;
     const result = await this.invoices.pullInvoices(user.tenantId, {
       page: page ? Number(page) : undefined,
@@ -30,11 +51,17 @@ export class DashboardInvoicesController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List pulled invoices for this tenant (preview only)' })
+  @ApiOperation({
+    summary: 'List pulled invoices for this tenant (preview only)',
+  })
   @ApiResponse({ status: 200, description: 'Invoice list' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  async list(@Req() req: Request, @Query('page') page?: string, @Query('limit') limit?: string) {
+  async list(
+    @Req() req: Request,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
     const user = req.user as DashboardRequestUser;
     const result = await this.invoices.listInvoices(user.tenantId, {
       page: page ? Number(page) : undefined,
@@ -61,8 +88,14 @@ export class DashboardInvoicesController {
     summary:
       'Create a Sale from a pulled invoice (every line must already be classified) and submit it to eTIMS',
   })
-  @ApiResponse({ status: 201, description: 'Sale created (and submitted unless submit=false)' })
-  @ApiResponse({ status: 400, description: 'Invoice has unclassified items, or validation failed' })
+  @ApiResponse({
+    status: 201,
+    description: 'Sale created (and submitted unless submit=false)',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invoice has unclassified items, or validation failed',
+  })
   async createSale(
     @Req() req: Request,
     @Param('id') id: string,

@@ -23,7 +23,10 @@ import type { ComplianceItem } from '../../shared/domain/entities/compliance-ite
 import type { InventoryStock } from '../domain/entities/inventory-stock.entity';
 import type { StockMovement } from '../domain/entities/stock-movement.entity';
 import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
-import { splitTaxInclusiveAmount, round2 } from '../../regulatory/oscu/mapping/oscu-tax-rates';
+import {
+  splitTaxInclusiveAmount,
+  round2,
+} from '../../regulatory/oscu/mapping/oscu-tax-rates';
 
 @Injectable()
 export class InventoryService {
@@ -79,12 +82,18 @@ export class InventoryService {
    * A timestamp-based sarNo will eventually collide with the sandbox's
    * "Invalid sarNo: Expected X" check, so persist a real counter instead.
    */
-  private async allocateSarNo(kraPin: string, environment: string): Promise<number> {
+  private async allocateSarNo(
+    kraPin: string,
+    environment: string,
+  ): Promise<number> {
     if (!this.syncStateRepo) return Date.now();
     const syncKey = `stock_sar_no:${kraPin}:${environment}`;
     const existing = await this.syncStateRepo.findOne({ where: { syncKey } });
-    const next = (existing?.lastReqDt ? parseInt(existing.lastReqDt, 10) : 0) + 1;
-    await this.syncStateRepo.upsert({ syncKey, lastReqDt: String(next) }, ['syncKey']);
+    const next =
+      (existing?.lastReqDt ? parseInt(existing.lastReqDt, 10) : 0) + 1;
+    await this.syncStateRepo.upsert({ syncKey, lastReqDt: String(next) }, [
+      'syncKey',
+    ]);
     return next;
   }
 
@@ -145,7 +154,10 @@ export class InventoryService {
     if (!connection || !connection.kraBhfId) return;
 
     const ocrnDt = this.formatYyyyMMddUtc(movement.createdAt);
-    const sarNo = await this.allocateSarNo(connection.kraPin, connection.environment);
+    const sarNo = await this.allocateSarNo(
+      connection.kraPin,
+      connection.environment,
+    );
     const qty = Math.abs(movement.quantity);
 
     // KRA's sandbox rejects a literal 0 on `totAmt` ("Expected a value ... but it
@@ -153,7 +165,8 @@ export class InventoryService {
     // sendSalesTransaction -- see oscu-tax-rates.ts). Without a real unit price we
     // can't build a valid request; log clearly instead of silently sending zeros
     // that are guaranteed to be rejected.
-    const hasPricing = typeof params.unitPrice === 'number' && params.unitPrice > 0;
+    const hasPricing =
+      typeof params.unitPrice === 'number' && params.unitPrice > 0;
     if (!hasPricing) {
       this.logger.warn(
         `eTIMS insertStockIO skipped for ${item.id}: no unitPrice supplied for this ` +

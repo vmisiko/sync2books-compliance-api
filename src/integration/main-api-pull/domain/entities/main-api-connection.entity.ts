@@ -9,7 +9,10 @@
  * as a known gap rather than silently introducing a one-off crypto scheme.
  */
 /** Mirrors the main API's own connection.* webhook lifecycle — see WEBHOOK_SYSTEM.md. */
-export type IntegrationConnectionStatus = 'connected' | 'disconnected' | 'error';
+export type IntegrationConnectionStatus =
+  | 'connected'
+  | 'disconnected'
+  | 'error';
 
 /** Live status of one accounting-tool connection, kept current by inbound webhooks. */
 export interface IntegrationConnectionState {

@@ -10,9 +10,14 @@ import type { DashboardRequestUser } from '../strategies/dashboard-jwt.strategy'
  */
 @Injectable()
 export class DashboardJwtAuthGuard extends AuthGuard('dashboard-jwt') {
-  handleRequest<TUser = DashboardRequestUser>(err: unknown, user: TUser): TUser {
+  handleRequest<TUser = DashboardRequestUser>(
+    err: unknown,
+    user: TUser,
+  ): TUser {
     if (err || !user) {
-      throw err instanceof Error ? err : new UnauthorizedException('Access token is required');
+      throw err instanceof Error
+        ? err
+        : new UnauthorizedException('Access token is required');
     }
     return user;
   }

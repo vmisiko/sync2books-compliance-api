@@ -25,7 +25,10 @@ export class UpdateMappingDto {
   pkgUnitCd?: string;
 
   // --- classification ---
-  @ApiProperty({ required: false, enum: ['EXTERNAL_ID', 'SKU', 'NAME_CONTAINS'] })
+  @ApiProperty({
+    required: false,
+    enum: ['EXTERNAL_ID', 'SKU', 'NAME_CONTAINS'],
+  })
   matchType?: ClassificationMatchType;
 
   @ApiProperty({ required: false })

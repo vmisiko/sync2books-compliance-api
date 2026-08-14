@@ -17,13 +17,16 @@ export class DashboardTenantResponseDto {
 export class DashboardTokensResponseDto {
   @ApiProperty() accessToken!: string;
   @ApiProperty() refreshToken!: string;
-  @ApiProperty({ description: 'Seconds until accessToken expires' }) expiresIn!: number;
+  @ApiProperty({ description: 'Seconds until accessToken expires' })
+  expiresIn!: number;
   @ApiProperty({ example: 'Bearer' }) tokenType!: string;
 }
 
 export class DashboardAuthResponseDto {
-  @ApiProperty({ type: DashboardUserResponseDto }) user!: DashboardUserResponseDto;
+  @ApiProperty({ type: DashboardUserResponseDto })
+  user!: DashboardUserResponseDto;
   @ApiPropertyOptional({ type: DashboardTenantResponseDto, nullable: true })
   tenant!: DashboardTenantResponseDto | null;
-  @ApiProperty({ type: DashboardTokensResponseDto }) tokens!: DashboardTokensResponseDto;
+  @ApiProperty({ type: DashboardTokensResponseDto })
+  tokens!: DashboardTokensResponseDto;
 }

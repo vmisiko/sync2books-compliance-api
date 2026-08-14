@@ -34,11 +34,15 @@ interface InboundWebhookBody {
 export class MainApiWebhookController {
   private readonly logger = new Logger(MainApiWebhookController.name);
 
-  constructor(private readonly connections: MainApiConnectionApplicationService) {}
+  constructor(
+    private readonly connections: MainApiConnectionApplicationService,
+  ) {}
 
   @Post(':complianceTenantId')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Inbound connection.* webhook for one compliance tenant' })
+  @ApiOperation({
+    summary: 'Inbound connection.* webhook for one compliance tenant',
+  })
   @ApiParam({ name: 'complianceTenantId' })
   async receive(
     @Param('complianceTenantId') complianceTenantId: string,
@@ -60,11 +64,15 @@ export class MainApiWebhookController {
     if (result === 'unknown_tenant') {
       // 200, not 404: an unregistered tenant is not something the sender should
       // retry — but we also don't want to reveal tenant existence via status code.
-      this.logger.warn(`Webhook for unknown/unconfigured tenant ${complianceTenantId} (event ${body?.eventType})`);
+      this.logger.warn(
+        `Webhook for unknown/unconfigured tenant ${complianceTenantId} (event ${body?.eventType})`,
+      );
       return { received: true };
     }
     if (result === 'bad_signature') {
-      this.logger.warn(`Rejected webhook for tenant ${complianceTenantId}: bad signature`);
+      this.logger.warn(
+        `Rejected webhook for tenant ${complianceTenantId}: bad signature`,
+      );
       // Real 401 (not a 200 with received:false) so a genuine signature
       // mismatch shows up as a failed delivery in the main API's own
       // webhook stats/retry logic, instead of looking like success.

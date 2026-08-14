@@ -16,9 +16,14 @@ export class UpsertMainApiConnectionDto {
 }
 
 export class RecordIntegrationConnectionDto {
-  @ApiProperty({ description: 'Which accounting tool was connected', example: 'quickbooks' })
+  @ApiProperty({
+    description: 'Which accounting tool was connected',
+    example: 'quickbooks',
+  })
   integrationKey!: string;
 
-  @ApiProperty({ description: 'Main-API connectionId returned by the Sync2BooksLink widget' })
+  @ApiProperty({
+    description: 'Main-API connectionId returned by the Sync2BooksLink widget',
+  })
   connectionId!: string;
 }

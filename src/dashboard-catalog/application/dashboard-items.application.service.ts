@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { CatalogService } from '../../catalog/api/catalog.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
@@ -33,12 +38,14 @@ export class DashboardItemsApplicationService {
 
   async pullItems(complianceTenantId: string): Promise<PullItemsResult> {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
-    const connection = await this.mainApiConnections.getForTenant(complianceTenantId);
+    const connection =
+      await this.mainApiConnections.getForTenant(complianceTenantId);
 
     // Best-effort: refresh the main API's own cache from QuickBooks first, so
     // the list below isn't stale. A failure here (e.g. QuickBooks token expired)
     // shouldn't block reading whatever the main API already has.
-    const quickbooksConnectionId = connection.integrations['quickbooks']?.connectionId;
+    const quickbooksConnectionId =
+      connection.integrations['quickbooks']?.connectionId;
     if (quickbooksConnectionId) {
       try {
         await this.mainApiPull.syncItemsFromBookkeeping(
@@ -60,10 +67,13 @@ export class DashboardItemsApplicationService {
     let totalPages = 1;
 
     do {
-      const response = await this.mainApiPull.getItems(connection.mainApiApiKey, {
-        page,
-        limit,
-      });
+      const response = await this.mainApiPull.getItems(
+        connection.mainApiApiKey,
+        {
+          page,
+          limit,
+        },
+      );
       totalPages = response.totalPages || 1;
 
       for (const mainApiItem of response.data) {

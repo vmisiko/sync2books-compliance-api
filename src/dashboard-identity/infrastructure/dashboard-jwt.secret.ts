@@ -14,7 +14,7 @@ export function dashboardJwtSecret(): string {
 
   if (!warned) {
     warned = true;
-    // eslint-disable-next-line no-console
+
     console.warn(
       '[dashboard-identity] JWT_DASHBOARD_SECRET is not set — using an insecure dev fallback. Set it before deploying.',
     );

@@ -31,7 +31,9 @@ export class DashboardUserTypeOrmRepository implements IDashboardUserRepository 
   }
 
   async findByEmail(email: string): Promise<DashboardUser | null> {
-    const e = await this.repo.findOne({ where: { email: email.toLowerCase() } });
+    const e = await this.repo.findOne({
+      where: { email: email.toLowerCase() },
+    });
     return e ? toDomain(e) : null;
   }
 

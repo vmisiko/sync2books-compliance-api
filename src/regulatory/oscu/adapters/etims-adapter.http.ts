@@ -83,13 +83,18 @@ function isRetryableStatus(status: number): boolean {
  * where the real cause ("Incorrect Quantity Unit Code...") was sitting right
  * there in the response body the whole time.
  */
-function describeHttpRejection(status: number, raw: Record<string, unknown>): string {
+function describeHttpRejection(
+  status: number,
+  raw: Record<string, unknown>,
+): string {
   const header = asRecord(raw['responseHeader']);
   const detail =
     (header && safeString(header['debugMessage'])) ||
     (header && safeString(header['customerMessage'])) ||
     '';
-  return detail ? `HTTP ${status} calling OSCU: ${detail}` : `HTTP ${status} calling OSCU`;
+  return detail
+    ? `HTTP ${status} calling OSCU: ${detail}`
+    : `HTTP ${status} calling OSCU`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -296,7 +301,7 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
       const isBusinessFailure = resultCd !== '' && resultCd !== '000';
       const ok = res.ok && !envelopeIndicatesFailure;
       const status = envelopeIndicatesFailure
-        ? (envelopeResponseCode as number)
+        ? envelopeResponseCode
         : res.status;
 
       if (!ok || isBusinessFailure) {
@@ -313,7 +318,10 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
       // sandbox network flakiness (e.g. ENETDOWN surfaces as a generic "fetch
       // failed" without it) -- confirmed live 2026-08-11/12. Log it every time
       // instead of re-adding this inspection by hand next time something looks flaky.
-      const cause = e instanceof Error ? (e as Error & { cause?: unknown }).cause : undefined;
+      const cause =
+        e instanceof Error
+          ? (e as Error & { cause?: unknown }).cause
+          : undefined;
       this.logger.error(
         `x ${logCtx} threw: ${e instanceof Error ? e.message : safeString(e)}` +
           (cause ? ` cause=${safeString(cause) || JSON.stringify(cause)}` : ''),

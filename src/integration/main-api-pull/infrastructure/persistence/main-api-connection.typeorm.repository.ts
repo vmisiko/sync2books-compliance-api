@@ -50,9 +50,7 @@ function toOrmIntegrations(
 }
 
 @Injectable()
-export class MainApiConnectionTypeOrmRepository
-  implements IMainApiConnectionRepository
-{
+export class MainApiConnectionTypeOrmRepository implements IMainApiConnectionRepository {
   constructor(
     @InjectRepository(MainApiConnectionOrmEntity)
     private readonly repo: Repository<MainApiConnectionOrmEntity>,

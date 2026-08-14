@@ -54,10 +54,9 @@ async function releaseInvoiceSequence(
   const existing = await syncStateRepo.findOne({ where: { syncKey } });
   const current = existing?.lastReqDt ? parseInt(existing.lastReqDt, 10) : 0;
   if (current === invcNo) {
-    await syncStateRepo.upsert(
-      { syncKey, lastReqDt: String(invcNo - 1) },
-      ['syncKey'],
-    );
+    await syncStateRepo.upsert({ syncKey, lastReqDt: String(invcNo - 1) }, [
+      'syncKey',
+    ]);
   }
 }
 

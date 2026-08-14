@@ -17,7 +17,11 @@ import { MainApiWebhookController } from './presentation/main-api-webhook.contro
     ComplianceOrganizationModule,
     TypeOrmModule.forFeature([MainApiConnectionOrmEntity]),
   ],
-  controllers: [MainApiConnectionController, ErpLinkController, MainApiWebhookController],
+  controllers: [
+    MainApiConnectionController,
+    ErpLinkController,
+    MainApiWebhookController,
+  ],
   providers: [
     MainApiConnectionTypeOrmRepository,
     {
@@ -27,6 +31,10 @@ import { MainApiWebhookController } from './presentation/main-api-webhook.contro
     MainApiConnectionApplicationService,
     MainApiPullClient,
   ],
-  exports: [MAIN_API_CONNECTION_REPO, MainApiConnectionApplicationService, MainApiPullClient],
+  exports: [
+    MAIN_API_CONNECTION_REPO,
+    MainApiConnectionApplicationService,
+    MainApiPullClient,
+  ],
 })
 export class MainApiPullModule {}

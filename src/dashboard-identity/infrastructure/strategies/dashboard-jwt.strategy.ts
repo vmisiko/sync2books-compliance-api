@@ -23,7 +23,10 @@ export interface DashboardRequestUser {
  * by an unrelated AuthGuard('jwt') if one is added for another purpose later.
  */
 @Injectable()
-export class DashboardJwtStrategy extends PassportStrategy(Strategy, 'dashboard-jwt') {
+export class DashboardJwtStrategy extends PassportStrategy(
+  Strategy,
+  'dashboard-jwt',
+) {
   constructor() {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),

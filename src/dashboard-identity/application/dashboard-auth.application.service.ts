@@ -87,8 +87,12 @@ export class DashboardAuthApplicationService {
     return this.users.findByEmail(email);
   }
 
-  private async buildAuthResult(user: DashboardUser): Promise<DashboardAuthResult> {
-    const tenant = await this.organization.getTenantById(user.complianceTenantId);
+  private async buildAuthResult(
+    user: DashboardUser,
+  ): Promise<DashboardAuthResult> {
+    const tenant = await this.organization.getTenantById(
+      user.complianceTenantId,
+    );
 
     const payload = {
       sub: user.id,
@@ -104,7 +108,9 @@ export class DashboardAuthApplicationService {
 
     return {
       user: this.toSafeUser(user),
-      tenant: tenant ? { id: tenant.id, displayName: tenant.displayName } : null,
+      tenant: tenant
+        ? { id: tenant.id, displayName: tenant.displayName }
+        : null,
       tokens: {
         accessToken,
         refreshToken,

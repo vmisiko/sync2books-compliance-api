@@ -31,7 +31,15 @@ export class MainApiConnectionOrmEntity {
    * the repository mapper converts to/from Date at the domain boundary.
    */
   @Column('simple-json', { nullable: true })
-  integrations!: Record<string, { connectionId: string | null; status: string | null; reason: string | null; updatedAt: string | null }> | null;
+  integrations!: Record<
+    string,
+    {
+      connectionId: string | null;
+      status: string | null;
+      reason: string | null;
+      updatedAt: string | null;
+    }
+  > | null;
 
   @Column('varchar', { nullable: true })
   webhookEndpointId!: string | null;

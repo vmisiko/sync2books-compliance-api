@@ -1,5 +1,23 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { DashboardMappingApplicationService } from '../application/dashboard-mapping.application.service';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
@@ -25,16 +43,33 @@ export class DashboardMappingsController {
   async pull(@Req() req: Request) {
     const user = req.user as DashboardRequestUser;
     const result = await this.mappings.pullTaxRates(user.tenantId);
-    return { success: true, message: 'Tax rates pulled and scored', data: result };
+    return {
+      success: true,
+      message: 'Tax rates pulled and scored',
+      data: result,
+    };
   }
 
   @Get()
   @ApiOperation({
-    summary: 'List tax/unit/classification mappings for this tenant (plus read-only global defaults)',
+    summary:
+      'List tax/unit/classification mappings for this tenant (plus read-only global defaults)',
   })
-  @ApiQuery({ name: 'source', required: false, description: 'quickbooks | xero | manual | api' })
-  @ApiQuery({ name: 'type', required: false, description: 'tax | unit | classification' })
-  @ApiQuery({ name: 'status', required: false, description: 'mapped | needs_review | unmapped | revised' })
+  @ApiQuery({
+    name: 'source',
+    required: false,
+    description: 'quickbooks | xero | manual | api',
+  })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    description: 'tax | unit | classification',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: 'mapped | needs_review | unmapped | revised',
+  })
   @ApiResponse({ status: 200, description: 'Mapping list' })
   async list(
     @Req() req: Request,
@@ -43,13 +78,18 @@ export class DashboardMappingsController {
     @Query('status') status?: string,
   ) {
     const user = req.user as DashboardRequestUser;
-    const result = await this.mappings.list(user.tenantId, { source, type, status });
+    const result = await this.mappings.list(user.tenantId, {
+      source,
+      type,
+      status,
+    });
     return { success: true, message: 'OK', data: result };
   }
 
   @Get('summary')
   @ApiOperation({
-    summary: 'Aggregate mapped/total counts — global defaults and per-source-system, for the progress bars',
+    summary:
+      'Aggregate mapped/total counts — global defaults and per-source-system, for the progress bars',
   })
   @ApiResponse({ status: 200, description: 'Summary counts' })
   async summary(@Req() req: Request) {
@@ -60,7 +100,10 @@ export class DashboardMappingsController {
 
   @Post(':id/approve')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Approve a suggested mapping as-is (status -> MAPPED, activates it)' })
+  @ApiOperation({
+    summary:
+      'Approve a suggested mapping as-is (status -> MAPPED, activates it)',
+  })
   @ApiResponse({ status: 200, description: 'Approved mapping' })
   async approve(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as DashboardRequestUser;
@@ -71,22 +114,38 @@ export class DashboardMappingsController {
   @Patch(':id')
   @ApiOperation({
     summary:
-      'Edit a mapping\'s target code (status -> REVISED if it was already MAPPED/REVISED, otherwise -> MAPPED)',
+      "Edit a mapping's target code (status -> REVISED if it was already MAPPED/REVISED, otherwise -> MAPPED)",
   })
   @ApiResponse({ status: 200, description: 'Updated mapping' })
-  async update(@Req() req: Request, @Param('id') id: string, @Body() body: UpdateMappingDto) {
+  async update(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: UpdateMappingDto,
+  ) {
     const user = req.user as DashboardRequestUser;
-    const result = await this.mappings.update(user.tenantId, id, body, user.email);
+    const result = await this.mappings.update(
+      user.tenantId,
+      id,
+      body,
+      user.email,
+    );
     return { success: true, message: 'Mapping updated', data: result };
   }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create a manual mapping (source MANUAL) — created already MAPPED and active' })
+  @ApiOperation({
+    summary:
+      'Create a manual mapping (source MANUAL) — created already MAPPED and active',
+  })
   @ApiResponse({ status: 201, description: 'Created mapping' })
   async create(@Req() req: Request, @Body() body: CreateMappingDto) {
     const user = req.user as DashboardRequestUser;
-    const result = await this.mappings.createManual(user.tenantId, body, user.email);
+    const result = await this.mappings.createManual(
+      user.tenantId,
+      body,
+      user.email,
+    );
     return { success: true, message: 'Mapping created', data: result };
   }
 }
