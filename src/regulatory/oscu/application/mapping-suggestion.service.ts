@@ -21,12 +21,13 @@ export interface ClassificationPlaceholder {
   matchValue: string;
 }
 
-/** Matches oscu-mapping.seed.ts's internalTaxCategory -> KRA taxTyCd convention (EXEMPT=A, VAT_STANDARD=B, VAT_ZERO=C, OTHER=D). */
+/** Matches oscu-mapping.seed.ts's internalTaxCategory -> KRA taxTyCd convention (EXEMPT=A, VAT_STANDARD=B, VAT_ZERO=C, OTHER=D, VAT_8=E) — same convention as oscu_codes' cdCls '04' (Tax Type) reference table. */
 const TAX_CATEGORY_CODE: Record<TaxCategory, string> = {
   [TaxCategory.EXEMPT]: 'A',
   [TaxCategory.VAT_STANDARD]: 'B',
   [TaxCategory.VAT_ZERO]: 'C',
   [TaxCategory.OTHER]: 'D',
+  [TaxCategory.VAT_8]: 'E',
 };
 
 /** Matches oscu-mapping.seed.ts's known internal units (EA/EACH/PCS -> NO, KG -> KG, L/LTR -> LTR). */
@@ -108,6 +109,17 @@ export class MappingSuggestionService {
       };
     }
 
+    const isEightRate =
+      ratePercent !== null && Math.abs(ratePercent - 8) <= 0.5;
+    if (isEightRate) {
+      const confidenceScore = n.includes('8%') || n.includes('petro') ? 95 : 90;
+      return {
+        internalTaxCategory: TaxCategory.VAT_8,
+        taxTyCd: TAX_CATEGORY_CODE[TaxCategory.VAT_8],
+        confidenceScore,
+      };
+    }
+
     const isStandardRate =
       ratePercent !== null && Math.abs(ratePercent - 16) <= 0.5;
     const mentionsStandard = n.includes('standard') || n.includes('vat');
@@ -137,12 +149,14 @@ export class MappingSuggestionService {
    * both old and current KRA VAT rates), "14.0% S - RC Imported Services"/
    * "16.0% S - RC Imported Services" (reverse-charge imported services),
    * "14.0% S Import"/"16.0% S Import" (standard-rated imports), "8.0%
-   * Petrol" (petroleum, still standard-rated for this 4-category scheme),
+   * Petrol" (petroleum — KRA's own code table has a dedicated 8% tax-type
+   * code, taxTyCd 'E', so this resolves to VAT_8, not VAT_STANDARD),
    * "Exempt Purchase"/"Exempt Sale" (exempt), "No VAT" (out of scope of
-   * VAT -> OTHER). Import/reverse-charge variants still resolve to
-   * VAT_STANDARD (the rate is what determines the KRA category, not the
-   * import/RC bookkeeping treatment) but at a capped, lower confidence
-   * since they're a less direct match than the plain "<rate>% S" form.
+   * VAT -> OTHER). Import/reverse-charge variants of the *16%* rate still
+   * resolve to VAT_STANDARD (the rate is what determines the KRA category,
+   * not the import/RC bookkeeping treatment) but at a capped, lower
+   * confidence since they're a less direct match than the plain "<rate>% S"
+   * form.
    * @param name Raw TaxCode name/label as it appeared in the source system.
    */
   suggestTaxCodeMapping(name: string): TaxMappingSuggestion | null {
@@ -183,6 +197,16 @@ export class MappingSuggestionService {
         internalTaxCategory: TaxCategory.VAT_ZERO,
         taxTyCd: TAX_CATEGORY_CODE[TaxCategory.VAT_ZERO],
         confidenceScore,
+      };
+    }
+
+    const isEightRate =
+      ratePercent !== null && Math.abs(ratePercent - 8) <= 0.5;
+    if (isEightRate) {
+      return {
+        internalTaxCategory: TaxCategory.VAT_8,
+        taxTyCd: TAX_CATEGORY_CODE[TaxCategory.VAT_8],
+        confidenceScore: n.includes('petro') ? 92 : 88,
       };
     }
 

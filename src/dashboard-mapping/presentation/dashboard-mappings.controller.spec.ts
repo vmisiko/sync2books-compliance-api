@@ -17,6 +17,7 @@ describe('DashboardMappingsController', () => {
     approve: jest.Mock;
     update: jest.Mock;
     createManual: jest.Mock;
+    listTaxCategoryOptions: jest.Mock;
   };
 
   const user: DashboardRequestUser = {
@@ -34,6 +35,7 @@ describe('DashboardMappingsController', () => {
       approve: jest.fn(),
       update: jest.fn(),
       createManual: jest.fn(),
+      listTaxCategoryOptions: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -111,6 +113,31 @@ describe('DashboardMappingsController', () => {
       body,
       'reviewer@example.com',
     );
+  });
+
+  it('taxCategories() returns the KRA tax-type code options from the service, unauthenticated by tenant (a shared reference list)', async () => {
+    service.listTaxCategoryOptions.mockResolvedValue([
+      {
+        internalTaxCategory: 'VAT_STANDARD',
+        taxTyCd: 'B',
+        cdNm: 'VAT Standard',
+        label: 'B — VAT Standard',
+      },
+    ]);
+    const result = await controller.taxCategories();
+    expect(service.listTaxCategoryOptions).toHaveBeenCalledWith();
+    expect(result).toEqual({
+      success: true,
+      message: 'OK',
+      data: [
+        {
+          internalTaxCategory: 'VAT_STANDARD',
+          taxTyCd: 'B',
+          cdNm: 'VAT Standard',
+          label: 'B — VAT Standard',
+        },
+      ],
+    });
   });
 
   it('create() passes the authenticated user email as the creator', async () => {

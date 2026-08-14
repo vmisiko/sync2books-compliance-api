@@ -41,8 +41,15 @@ describe('MappingSuggestionService', () => {
       expect(result?.confidenceScore).toBe(98);
     });
 
+    it('maps an 8% rate to VAT_8 (KRA taxTyCd E), not VAT_STANDARD', () => {
+      const result = service.suggestTaxMapping('PPetro-8', 8);
+      expect(result?.internalTaxCategory).toBe(TaxCategory.VAT_8);
+      expect(result?.taxTyCd).toBe('E');
+      expect(result?.confidenceScore).toBeGreaterThanOrEqual(90);
+    });
+
     it('maps an unrecognized rate/name to no suggestion (caller reports Unmapped)', () => {
-      const result = service.suggestTaxMapping('Custom Rate XYZ', 7.5);
+      const result = service.suggestTaxMapping('Custom Rate XYZ', 21.5);
       expect(result).toBeNull();
     });
 
@@ -87,10 +94,10 @@ describe('MappingSuggestionService', () => {
       expect(result?.confidenceScore).toBeLessThanOrEqual(85);
     });
 
-    it('maps "8.0% Petrol" to VAT_STANDARD (positive rate, no exempt/zero keyword)', () => {
+    it('maps "8.0% Petrol" to VAT_8 (KRA taxTyCd E), not VAT_STANDARD', () => {
       const result = service.suggestTaxCodeMapping('8.0% Petrol');
-      expect(result?.internalTaxCategory).toBe(TaxCategory.VAT_STANDARD);
-      expect(result?.taxTyCd).toBe('B');
+      expect(result?.internalTaxCategory).toBe(TaxCategory.VAT_8);
+      expect(result?.taxTyCd).toBe('E');
     });
 
     it('maps "0.0% Z" to VAT_ZERO at the top of the band', () => {

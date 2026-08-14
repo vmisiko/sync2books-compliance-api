@@ -87,6 +87,17 @@ export class DashboardMappingsController {
     return { success: true, message: 'OK', data: result };
   }
 
+  @Get('tax-categories')
+  @ApiOperation({
+    summary:
+      "KRA tax-type code options (cdCls '04') for the Tax Mapping 'KRA Code' dropdown — read from oscu_codes, which is kept current via POST catalog/codes/sync (OSCU /selectCodeList), instead of a list hardcoded on the frontend",
+  })
+  @ApiResponse({ status: 200, description: 'Tax category code options' })
+  async taxCategories() {
+    const result = await this.mappings.listTaxCategoryOptions();
+    return { success: true, message: 'OK', data: result };
+  }
+
   @Get('summary')
   @ApiOperation({
     summary:

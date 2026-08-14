@@ -8,6 +8,8 @@ import type {
 
 /** Kenya VAT standard rate (regulation-isolated - can be configurable) */
 const VAT_STANDARD_RATE = 0.16;
+/** Kenya VAT 8% rate (petroleum products, KRA taxTyCd 'E') */
+const VAT_EIGHT_RATE = 0.08;
 
 /**
  * Tax rules - VAT_STANDARD, VAT_ZERO, EXEMPT.
@@ -53,6 +55,19 @@ export function runTaxRules(lines: ComplianceLine[]): ValidationResult {
           });
         }
         break;
+
+      case TaxCategory.VAT_8: {
+        const expectedTax = line.quantity * line.unitPrice * VAT_EIGHT_RATE;
+        const tolerance = 0.01;
+        if (Math.abs(line.taxAmount - expectedTax) > tolerance) {
+          errors.push({
+            code: 'TAX_VAT_8_RATE',
+            message: `VAT_8 must use 8% rate. Expected tax: ${expectedTax.toFixed(2)}, got: ${line.taxAmount}`,
+            field: `${lineRef}.taxAmount`,
+          });
+        }
+        break;
+      }
 
       case TaxCategory.OTHER:
         break;

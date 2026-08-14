@@ -18,11 +18,13 @@ export class TaxMappingOrmEntity {
   @Column('varchar', { nullable: true })
   merchantId!: string | null;
 
-  @Column('varchar')
-  internalTaxCategory!: string;
+  /** Null for a pulled external rate with no confident auto-suggestion (status UNMAPPED) — a human fills this in via PATCH dashboard-api/mappings/:id. */
+  @Column('varchar', { nullable: true })
+  internalTaxCategory!: string | null;
 
-  @Column('varchar')
-  taxTyCd!: string;
+  /** Null alongside internalTaxCategory for the same UNMAPPED reason. */
+  @Column('varchar', { nullable: true })
+  taxTyCd!: string | null;
 
   @Column('int', { default: 1 })
   version!: number;
@@ -55,6 +57,10 @@ export class TaxMappingOrmEntity {
   /** Raw label as it appeared in the source system, e.g. "16% Standard VAT". */
   @Column('varchar', { nullable: true })
   externalValue!: string | null;
+
+  /** The source system's raw id for this row (e.g. a QuickBooks TaxRate id) — lets a re-pull find and refresh this exact row (including an UNMAPPED one) instead of creating a duplicate. Null for manually-created rows. */
+  @Column('varchar', { nullable: true })
+  externalId!: string | null;
 
   // --- QuickBooks TaxCode fields (additive; see MainApiTaxCode in
   // main-api-pull.client.ts) ---

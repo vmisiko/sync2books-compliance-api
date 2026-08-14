@@ -14,11 +14,14 @@ import {
   ClassificationMatchType,
 } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
 import { MappingSuggestionService } from '../../regulatory/oscu/application/mapping-suggestion.service';
+import { OscuCodeOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-code.orm-entity';
+import { searchCodes } from '../../catalog/application/use-cases/search-codes.usecase';
 import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
 import { MappingStatus } from '../../shared/domain/enums/mapping-status.enum';
+import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
 
 export type MappingType = 'tax' | 'unit' | 'classification';
 
@@ -37,8 +40,10 @@ export interface MappingListItem {
   version?: number;
   createdAt: Date;
   updatedAt: Date;
-  internalTaxCategory?: string;
-  taxTyCd?: string;
+  internalTaxCategory?: string | null;
+  taxTyCd?: string | null;
+  /** Source system's raw id for this row (e.g. a QuickBooks TaxRate id) — null for manually-created rows. */
+  externalId?: string | null;
   /** QuickBooks TaxCode id — what actually gets written to a transaction's TaxCodeRef. Null until a TaxCode pull resolves one for this row's internalTaxCategory. */
   taxCodeId?: string | null;
   /** Raw TaxCode name that resolved taxCodeId, e.g. "16.0% S". */
@@ -94,6 +99,23 @@ export interface MappingSummary {
   overall: { mapped: number; total: number };
 }
 
+/**
+ * A KRA tax-type code option for the Mapping Center's "KRA Code" dropdown,
+ * sourced from oscu_codes (cdCls '04') rather than hardcoded on the
+ * frontend — that table is kept current via POST catalog/codes/sync
+ * (OSCU /selectCodeList).
+ */
+export interface TaxCategoryOption {
+  /** This app's internal category key (e.g. VAT_STANDARD) — null if a KRA code has no corresponding internal category yet. */
+  internalTaxCategory: string | null;
+  /** KRA taxTyCd letter, e.g. 'B'. */
+  taxTyCd: string;
+  /** KRA's own label for the code, e.g. "VAT Standard". */
+  cdNm: string;
+  /** Display label for the dropdown, e.g. "B — VAT Standard". */
+  label: string;
+}
+
 type FoundRow =
   | { type: 'tax'; row: TaxMappingOrmEntity }
   | { type: 'unit'; row: UnitMappingOrmEntity }
@@ -123,6 +145,15 @@ const STATUS_FILTER: Record<string, MappingStatus> = {
   revised: MappingStatus.REVISED,
 };
 
+/** Inverse of MappingSuggestionService's TAX_CATEGORY_CODE map — resolves an oscu_codes (cdCls '04') KRA code back to this app's internal category key. */
+const TAX_TY_CD_TO_CATEGORY: Record<string, TaxCategory> = {
+  A: TaxCategory.EXEMPT,
+  B: TaxCategory.VAT_STANDARD,
+  C: TaxCategory.VAT_ZERO,
+  D: TaxCategory.OTHER,
+  E: TaxCategory.VAT_8,
+};
+
 /**
  * Backs dashboard-api/mappings — the Mapping Center review workflow. Reuses
  * the existing tax_mappings/unit_mappings/classification_mappings tables
@@ -143,6 +174,8 @@ export class DashboardMappingApplicationService {
     private readonly unitRepo: Repository<UnitMappingOrmEntity>,
     @InjectRepository(ClassificationMappingOrmEntity)
     private readonly clsRepo: Repository<ClassificationMappingOrmEntity>,
+    @InjectRepository(OscuCodeOrmEntity)
+    private readonly oscuCodeRepo: Repository<OscuCodeOrmEntity>,
     private readonly suggestions: MappingSuggestionService,
     private readonly mainApiPull: MainApiPullClient,
     private readonly mainApiConnections: MainApiConnectionApplicationService,
@@ -193,24 +226,30 @@ export class DashboardMappingApplicationService {
       );
 
       if (!suggestion) {
-        // Don't guess wildly, and don't persist a placeholder row either —
-        // taxTyCd/internalTaxCategory stay NOT NULL on this table, so a
-        // genuinely-unrecognized external rate is just reported back here
-        // for now. A dashboard user who knows the right KRA code can still
-        // create it directly via POST dashboard-api/mappings.
+        // No confident auto-suggestion — still persist the row (default
+        // confidenceScore 0, no KRA code yet) so it shows up in the Mapping
+        // Center table as an Unmapped row a human can pick a code for
+        // directly, rather than only ever existing in this transient pull
+        // response (see upsertUnmappedTaxRate).
+        const row = await this.upsertUnmappedTaxRate(
+          merchantId,
+          rate.id,
+          externalValue,
+        );
         results.push({
           externalId: rate.id,
           externalValue,
-          mappingId: null,
-          status: MappingStatus.UNMAPPED,
-          confidenceScore: null,
-          internalTaxCategory: null,
+          mappingId: row.id,
+          status: row.status,
+          confidenceScore: row.confidenceScore,
+          internalTaxCategory: row.internalTaxCategory,
         });
         continue;
       }
 
       const row = await this.upsertTaxSuggestion(
         merchantId,
+        rate.id,
         externalValue,
         suggestion,
       );
@@ -326,6 +365,7 @@ export class DashboardMappingApplicationService {
    */
   private async upsertTaxSuggestion(
     merchantId: string,
+    externalId: string,
     externalValue: string,
     suggestion: {
       internalTaxCategory: string;
@@ -358,6 +398,7 @@ export class DashboardMappingApplicationService {
       status: MappingStatus.NEEDS_REVIEW,
       confidenceScore: suggestion.confidenceScore,
       externalValue,
+      externalId,
       active: false,
     };
 
@@ -369,6 +410,51 @@ export class DashboardMappingApplicationService {
         id: `taxmap-${randomUUID()}`,
         version: 1,
         ...patch,
+      }),
+    );
+  }
+
+  /**
+   * Persists a pulled TaxRate that MappingSuggestionService couldn't
+   * confidently categorize, so it shows up in the Mapping Center table
+   * (status UNMAPPED, confidenceScore 0, internalTaxCategory/taxTyCd null)
+   * instead of only existing in the transient pull response — a dashboard
+   * user picks the KRA code themselves via the existing Edit/Assign flow
+   * (DashboardMappingApplicationService.update), which activates the row
+   * (status -> MAPPED) once a code is set.
+   *
+   * Keyed by (merchantId, sourceSystem, externalId) rather than
+   * internalTaxCategory (which is null here) — re-pulling the same
+   * unresolved rate refreshes its externalValue instead of creating a
+   * duplicate row, and never resets a row a human has already resolved.
+   */
+  private async upsertUnmappedTaxRate(
+    merchantId: string,
+    externalId: string,
+    externalValue: string,
+  ): Promise<TaxMappingOrmEntity> {
+    const existing = await this.taxRepo.findOne({
+      where: { merchantId, sourceSystem: SourceSystem.QUICKBOOKS, externalId },
+    });
+    if (existing) {
+      if (existing.active) return existing;
+      existing.externalValue = externalValue;
+      return this.taxRepo.save(existing);
+    }
+
+    return this.taxRepo.save(
+      this.taxRepo.create({
+        id: `taxmap-${randomUUID()}`,
+        merchantId,
+        internalTaxCategory: null,
+        taxTyCd: null,
+        version: 1,
+        active: false,
+        sourceSystem: SourceSystem.QUICKBOOKS,
+        status: MappingStatus.UNMAPPED,
+        confidenceScore: 0,
+        externalValue,
+        externalId,
       }),
     );
   }
@@ -566,6 +652,27 @@ export class DashboardMappingApplicationService {
         total: all.length,
       },
     };
+  }
+
+  /**
+   * KRA tax-type code options for the Mapping Center's "KRA Code" dropdown —
+   * read from oscu_codes (cdCls '04'), which is kept current via POST
+   * catalog/codes/sync (OSCU /selectCodeList), instead of a list hardcoded
+   * on the frontend. Mirrors MappingSuggestionService's taxTyCd convention
+   * (A=EXEMPT, B=VAT_STANDARD, C=VAT_ZERO, D=OTHER, E=VAT_8) to resolve each
+   * KRA code back to this app's internal category key.
+   */
+  async listTaxCategoryOptions(): Promise<TaxCategoryOption[]> {
+    const codes = await searchCodes(
+      { cdCls: '04', limit: 50 },
+      this.oscuCodeRepo,
+    );
+    return codes.map((c) => ({
+      internalTaxCategory: TAX_TY_CD_TO_CATEGORY[c.cd] ?? null,
+      taxTyCd: c.cd,
+      cdNm: c.cdNm,
+      label: `${c.cd} — ${c.cdNm}`,
+    }));
   }
 
   // ---------------------------------------------------------------------
@@ -871,6 +978,7 @@ export class DashboardMappingApplicationService {
       updatedAt: row.updatedAt,
       internalTaxCategory: row.internalTaxCategory,
       taxTyCd: row.taxTyCd,
+      externalId: row.externalId,
       taxCodeId: row.taxCodeId,
       taxCodeExternalValue: row.taxCodeExternalValue,
       taxCodeConfidenceScore: row.taxCodeConfidenceScore,

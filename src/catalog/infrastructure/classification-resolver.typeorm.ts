@@ -82,12 +82,29 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
     const merchant = await this.taxRepo.findOne({
       where: { merchantId, internalTaxCategory, active: true },
     });
-    if (merchant) return merchant.taxTyCd;
+    if (merchant) {
+      // active:true rows are only ever set by DashboardMappingApplicationService's
+      // approve()/update(), both of which require taxTyCd first — so this is a
+      // data-integrity guard, not an expected path.
+      if (!merchant.taxTyCd) {
+        throw new Error(
+          `Active tax mapping for internalTaxCategory=${internalTaxCategory} has no taxTyCd (merchantId=${merchantId})`,
+        );
+      }
+      return merchant.taxTyCd;
+    }
 
     const global = await this.taxRepo.findOne({
       where: { merchantId: IsNull(), internalTaxCategory, active: true },
     });
-    if (global) return global.taxTyCd;
+    if (global) {
+      if (!global.taxTyCd) {
+        throw new Error(
+          `Active global tax mapping for internalTaxCategory=${internalTaxCategory} has no taxTyCd`,
+        );
+      }
+      return global.taxTyCd;
+    }
 
     throw new Error(
       `Missing tax mapping for internalTaxCategory=${internalTaxCategory} (merchantId=${merchantId})`,

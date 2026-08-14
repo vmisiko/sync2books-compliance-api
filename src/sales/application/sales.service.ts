@@ -511,13 +511,16 @@ function resolveTaxTypeCode(
   taxCategory: TaxCategory,
 ): string | null {
   if (snapshot && snapshot.trim() !== '') return snapshot;
+  // Matches the canonical convention used elsewhere (MappingSuggestionService's
+  // TAX_CATEGORY_CODE, oscu_codes cdCls='04', DashboardMappingApplicationService):
+  // EXEMPT=A, VAT_STANDARD=B, VAT_ZERO=C.
   switch (taxCategory) {
     case TaxCategory.VAT_STANDARD:
       return 'B';
     case TaxCategory.VAT_ZERO:
-      return 'A';
-    case TaxCategory.EXEMPT:
       return 'C';
+    case TaxCategory.EXEMPT:
+      return 'A';
     default:
       return null;
   }

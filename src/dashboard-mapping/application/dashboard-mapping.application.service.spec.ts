@@ -6,6 +6,7 @@ import { MappingSuggestionService } from '../../regulatory/oscu/application/mapp
 import { TaxMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
 import { UnitMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/unit-mapping.orm-entity';
 import { ClassificationMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
+import { OscuCodeOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-code.orm-entity';
 import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
@@ -96,6 +97,7 @@ describe('DashboardMappingApplicationService', () => {
   let taxRepo: Repository<TaxMappingOrmEntity>;
   let unitRepo: Repository<UnitMappingOrmEntity>;
   let clsRepo: Repository<ClassificationMappingOrmEntity>;
+  let oscuCodeRepo: Repository<OscuCodeOrmEntity>;
 
   async function buildService(
     org: Pick<ComplianceOrganizationApplicationService, 'getTenantById'>,
@@ -115,6 +117,7 @@ describe('DashboardMappingApplicationService', () => {
           TaxMappingOrmEntity,
           UnitMappingOrmEntity,
           ClassificationMappingOrmEntity,
+          OscuCodeOrmEntity,
         ]),
       ],
       providers: [
@@ -131,6 +134,7 @@ describe('DashboardMappingApplicationService', () => {
     taxRepo = module.get(getRepositoryToken(TaxMappingOrmEntity));
     unitRepo = module.get(getRepositoryToken(UnitMappingOrmEntity));
     clsRepo = module.get(getRepositoryToken(ClassificationMappingOrmEntity));
+    oscuCodeRepo = module.get(getRepositoryToken(OscuCodeOrmEntity));
 
     return module.get(DashboardMappingApplicationService);
   }
@@ -169,8 +173,8 @@ describe('DashboardMappingApplicationService', () => {
             id: 'rate-2',
             name: 'Custom Weird Rate',
             status: 'Active',
-            effectiveTaxRate: 7.5,
-            totalTaxRate: 7.5,
+            effectiveTaxRate: 21.5,
+            totalTaxRate: 21.5,
             connectionId: 'qb-conn-1',
           },
         ]),
@@ -188,13 +192,71 @@ describe('DashboardMappingApplicationService', () => {
 
       const unmapped = result.results.find((r) => r.externalId === 'rate-2');
       expect(unmapped?.status).toBe(MappingStatus.UNMAPPED);
-      expect(unmapped?.mappingId).toBeNull();
+      expect(unmapped?.mappingId).toBeTruthy();
+      expect(unmapped?.confidenceScore).toBe(0);
 
       const row = await taxRepo.findOne({ where: { id: mapped!.mappingId! } });
       expect(row?.sourceSystem).toBe(SourceSystem.QUICKBOOKS);
       expect(row?.status).toBe(MappingStatus.NEEDS_REVIEW);
       expect(row?.active).toBe(false);
       expect(row?.confidenceScore).toBeGreaterThanOrEqual(90);
+
+      // Unmapped rate is persisted too (default confidence 0, no KRA code
+      // yet) so it shows up in the Mapping Center table instead of only
+      // existing in this transient pull response.
+      const unmappedRow = await taxRepo.findOne({
+        where: { id: unmapped!.mappingId! },
+      });
+      expect(unmappedRow?.status).toBe(MappingStatus.UNMAPPED);
+      expect(unmappedRow?.confidenceScore).toBe(0);
+      expect(unmappedRow?.internalTaxCategory).toBeNull();
+      expect(unmappedRow?.taxTyCd).toBeNull();
+      expect(unmappedRow?.externalId).toBe('rate-2');
+      expect(unmappedRow?.externalValue).toBe('Custom Weird Rate');
+      expect(unmappedRow?.active).toBe(false);
+    });
+
+    it('refreshes an unmapped row on re-pull instead of duplicating it, and leaves it alone once a human approves it', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull([
+          {
+            id: 'rate-2',
+            name: 'Custom Weird Rate',
+            status: 'Active',
+            effectiveTaxRate: 21.5,
+            totalTaxRate: 21.5,
+            connectionId: 'qb-conn-1',
+          },
+        ]),
+      );
+
+      const first = await service.pullTaxRates(TENANT_ID);
+      const mappingId = first.results[0].mappingId!;
+
+      const second = await service.pullTaxRates(TENANT_ID);
+      expect(second.results[0].mappingId).toBe(mappingId);
+      const allRows = await taxRepo.find({ where: { externalId: 'rate-2' } });
+      expect(allRows).toHaveLength(1);
+
+      const approved = await service.update(
+        TENANT_ID,
+        mappingId,
+        { internalTaxCategory: TaxCategory.VAT_STANDARD, taxTyCd: 'B' },
+        'reviewer@example.com',
+      );
+      expect(approved.status).toBe(MappingStatus.MAPPED);
+
+      const third = await service.pullTaxRates(TENANT_ID);
+      expect(third.results[0].mappingId).toBe(mappingId);
+      expect(third.results[0].status).toBe(MappingStatus.MAPPED);
+      const rowAfterApproval = await taxRepo.findOne({
+        where: { id: mappingId },
+      });
+      expect(rowAfterApproval?.internalTaxCategory).toBe(
+        TaxCategory.VAT_STANDARD,
+      );
     });
 
     it('does not overwrite an already-approved mapping for the same category on re-pull', async () => {
@@ -751,6 +813,57 @@ describe('DashboardMappingApplicationService', () => {
       const secondRow = await taxRepo.findOne({ where: { id: second.id } });
       expect(firstRow?.active).toBe(false);
       expect(secondRow?.active).toBe(true);
+    });
+  });
+
+  describe('listTaxCategoryOptions', () => {
+    it('reads KRA tax-type codes from oscu_codes (cdCls 04) and resolves each to an internal category', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null),
+        fakeMainApiPull([]),
+      );
+
+      await oscuCodeRepo.save([
+        oscuCodeRepo.create({
+          cdCls: '04',
+          cd: 'B',
+          cdNm: 'VAT Standard',
+          srtOrd: 2,
+          useYn: 'Y',
+        }),
+        oscuCodeRepo.create({
+          cdCls: '04',
+          cd: 'E',
+          cdNm: 'VAT 8%',
+          srtOrd: 5,
+          useYn: 'Y',
+        }),
+        // Different code class -- must not leak into the tax-category list.
+        oscuCodeRepo.create({
+          cdCls: '10',
+          cd: 'KG',
+          cdNm: 'Kilo-Gramme',
+          srtOrd: 1,
+          useYn: 'Y',
+        }),
+      ]);
+
+      const options = await service.listTaxCategoryOptions();
+      expect(options).toEqual([
+        {
+          internalTaxCategory: TaxCategory.VAT_STANDARD,
+          taxTyCd: 'B',
+          cdNm: 'VAT Standard',
+          label: 'B — VAT Standard',
+        },
+        {
+          internalTaxCategory: TaxCategory.VAT_8,
+          taxTyCd: 'E',
+          cdNm: 'VAT 8%',
+          label: 'E — VAT 8%',
+        },
+      ]);
     });
   });
 });
