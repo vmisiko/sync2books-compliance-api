@@ -41,16 +41,31 @@ export interface SyncItemsResult {
 }
 
 /**
+ * itemCd's qtyUnitCd(2)/pkgUnitCd(2) slots are a fixed-width identifier
+ * component, not the canonical unit value -- the real unit still goes out
+ * unmodified in the payload's separate qtyUnitCd/pkgUnitCd fields. Confirmed
+ * empirically against the sandbox (2026-08-10, PIN P600004123A): a real,
+ * valid business code like "U" (Pieces/item, 1 char) is accepted fine as
+ * the separate field but rejected with `400 "Incorrect QtyUnitCd Prefix"`
+ * when embedded here. So when a merchant's real code isn't exactly 2 chars
+ * (many legitimate KRA codes aren't -- "U", "BLL", etc.), substitute one of
+ * KRA's own 2-char codes for the slot instead of failing the whole sync.
+ */
+const QTY_UNIT_CD_SLICE_FALLBACK = 'NO'; // "Number" (cdCls 10) -- generic, always valid
+const PKG_UNIT_CD_SLICE_FALLBACK = 'NT'; // "Not applicable" (cdCls 17) -- generic, always valid
+
+function itemCdSlice(code: string, fallback: string): string {
+  return code.length === 2 ? code : fallback;
+}
+
+/**
  * OSCU `itemCd` format, per spec section 4.19 "Item Code":
  * `orgnNatCd(2) + itemTyCd(1) + pkgUnitCd(2) + qtyUnitCd(2) + seq(7 digits, from 0000001)`
  * e.g. "KE2NTBA0000012".
  *
- * Confirmed empirically against the sandbox (2026-08-10, PIN P600004123A):
- * - qtyUnitCd MUST be exactly 2 characters -- a 1-char code (e.g. "U") is rejected
- *   with `400 "Incorrect QtyUnitCd Prefix"` even with an otherwise well-formed itemCd.
- * - seq MUST be 7 digits, not 8, and must be the next unused value for this tin
- *   (KRA rejected an out-of-order 7-digit seq with
- *   `400 "Invalid itemCd Sequence. Expected sequence ending with: ********1"`).
+ * seq MUST be 7 digits, not 8, and must be the next unused value for this tin
+ * (KRA rejected an out-of-order 7-digit seq with
+ * `400 "Invalid itemCd Sequence. Expected sequence ending with: ********1"`).
  */
 function generateEtimsItemCd(
   item: {
@@ -60,18 +75,14 @@ function generateEtimsItemCd(
   },
   seq: number,
 ): string {
-  if (item.unitCode.length !== 2) {
-    throw new Error(
-      `qtyUnitCd "${item.unitCode}" must be exactly 2 characters to embed in an OSCU itemCd ` +
-        `(spec section 4.19) -- fix the unit mapping for this item instead of guessing a padding scheme`,
-    );
-  }
   const orgnNatCd = 'KE';
+  const pkgUnitCdSlice = itemCdSlice(item.packagingUnitCode, PKG_UNIT_CD_SLICE_FALLBACK);
+  const qtyUnitCdSlice = itemCdSlice(item.unitCode, QTY_UNIT_CD_SLICE_FALLBACK);
   const seqStr = seq.toString().padStart(7, '0');
   if (seqStr.length > 7) {
     throw new Error(`itemCd sequence overflowed 7 digits: ${seq}`);
   }
-  return `${orgnNatCd}${item.productTypeCode}${item.packagingUnitCode}${item.unitCode}${seqStr}`;
+  return `${orgnNatCd}${item.productTypeCode}${pkgUnitCdSlice}${qtyUnitCdSlice}${seqStr}`;
 }
 
 /**
