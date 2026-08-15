@@ -139,6 +139,23 @@ export class DashboardItemsApplicationService {
     return this.catalog.listItems(merchantId);
   }
 
+  /**
+   * Sync selected (or all PENDING/FAILED) catalog items to KRA eTIMS via
+   * OSCU saveItem. Registering an item (pull/override) only ever writes
+   * the local catalog row with status PENDING — this is the step that
+   * actually calls out to KRA and flips it to REGISTERED/FAILED.
+   */
+  async syncItems(complianceTenantId: string, itemIds?: string[]) {
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+    const branchId = await this.resolveBranchId(complianceTenantId);
+    return this.catalog.syncItems({
+      merchantId,
+      branchId,
+      itemIds: itemIds?.length ? itemIds : undefined,
+      onlyPending: true,
+    });
+  }
+
   async overrideClassification(
     complianceTenantId: string,
     itemId: string,
@@ -173,5 +190,30 @@ export class DashboardItemsApplicationService {
       );
     }
     return tenant.sync2booksCompanyId;
+  }
+
+  /**
+   * The dashboard has no branch-selection UI yet, so this resolves the
+   * tenant's first branch the same way `getOrCreateDefaultBranch` does
+   * internally — fine for the common single-branch case this UI targets.
+   * `syncItemsToEtims` looks connections up by `sync2booksBranchId`
+   * (`IComplianceConnectionRepository.findByMerchantAndBranch`), which is
+   * null for branches provisioned only from the dashboard, so that case is
+   * surfaced as a clear error rather than a confusing lookup failure.
+   */
+  private async resolveBranchId(complianceTenantId: string): Promise<string> {
+    const branches = await this.organization.listBranches(complianceTenantId);
+    const branch = branches[0];
+    if (!branch) {
+      throw new NotFoundException(
+        `No branch configured for tenant ${complianceTenantId}`,
+      );
+    }
+    if (!branch.sync2booksBranchId) {
+      throw new BadRequestException(
+        `Branch ${branch.id} has no linked sync2books branch id — link an ERP branch before syncing items to KRA`,
+      );
+    }
+    return branch.sync2booksBranchId;
   }
 }

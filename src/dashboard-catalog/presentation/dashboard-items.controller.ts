@@ -21,6 +21,7 @@ import { DashboardItemsApplicationService } from '../application/dashboard-items
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
 import type { DashboardRequestUser } from '../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
 import { OverrideItemClassificationDto } from './dto/override-item-classification.dto';
+import { SyncItemsDto } from './dto/sync-items.dto';
 
 @Controller('dashboard-api/items')
 @ApiTags('Dashboard items (Mode B)')
@@ -49,6 +50,19 @@ export class DashboardItemsController {
     const user = req.user as DashboardRequestUser;
     const result = await this.items.listItems(user.tenantId);
     return { success: true, message: 'OK', data: result };
+  }
+
+  @Post('sync')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Sync selected (or all PENDING/FAILED) catalog items to KRA eTIMS via OSCU saveItem',
+  })
+  @ApiResponse({ status: 200, description: 'Sync result' })
+  async sync(@Req() req: Request, @Body() body: SyncItemsDto) {
+    const user = req.user as DashboardRequestUser;
+    const result = await this.items.syncItems(user.tenantId, body.itemIds);
+    return { success: true, message: 'Items synced', data: result };
   }
 
   @Patch(':id/classification')
