@@ -136,101 +136,128 @@ export async function syncItemsToEtims(
 
   const results: SyncItemResult[] = [];
   for (const item of toSync) {
-    let itemCd = normalizeNonEmptyString(item.etimsItemCode);
-    if (!itemCd) {
-      const seq = await allocateItemCdSequence(
-        deps.syncStateRepo,
-        connection.kraPin,
-        connection.environment,
-      );
-      itemCd = generateEtimsItemCd(item, seq);
-    }
-    const now = new Date();
+    // Everything in this iteration -- itemCd generation included -- must stay
+    // inside the try. A single malformed item (e.g. a unitCode that isn't
+    // exactly 2 chars) used to throw here uncaught, which aborted the whole
+    // batch with a bare 500 instead of recording just that item as FAILED
+    // and continuing with the rest.
+    try {
+      let itemCd = normalizeNonEmptyString(item.etimsItemCode);
+      if (!itemCd) {
+        const seq = await allocateItemCdSequence(
+          deps.syncStateRepo,
+          connection.kraPin,
+          connection.environment,
+        );
+        itemCd = generateEtimsItemCd(item, seq);
+      }
+      const now = new Date();
 
-    const request: OscuItemSaveReq = {
-      tin: connection.kraPin,
-      bhfId: connection.kraBhfId,
-      cmcKey: connection.cmcKey,
-      itemClsCd: item.classificationCode,
-      itemCd,
-      itemTyCd: item.productTypeCode,
-      itemNm: item.name,
-      itemStdNm: null,
-      orgnNatCd: 'KE',
-      pkgUnitCd: item.packagingUnitCode,
-      qtyUnitCd: item.unitCode,
-      taxTyCd: item.taxTyCd,
-      btchNo: null,
-      bcd: item.sku ?? null,
-      dftPrc: 0,
-      grpPrcL1: 0,
-      grpPrcL2: 0,
-      grpPrcL3: 0,
-      grpPrcL4: 0,
-      grpPrcL5: null,
-      addInfo: null,
-      sftyQty: null,
-      isrcAplcbYn: 'N',
-      useYn: 'Y',
-      regrId: 'sync2books',
-      regrNm: 'sync2books',
-      modrId: 'sync2books',
-      modrNm: 'sync2books',
-    };
+      const request: OscuItemSaveReq = {
+        tin: connection.kraPin,
+        bhfId: connection.kraBhfId,
+        cmcKey: connection.cmcKey,
+        itemClsCd: item.classificationCode,
+        itemCd,
+        itemTyCd: item.productTypeCode,
+        itemNm: item.name,
+        itemStdNm: null,
+        orgnNatCd: 'KE',
+        pkgUnitCd: item.packagingUnitCode,
+        qtyUnitCd: item.unitCode,
+        taxTyCd: item.taxTyCd,
+        btchNo: null,
+        bcd: item.sku ?? null,
+        dftPrc: 0,
+        grpPrcL1: 0,
+        grpPrcL2: 0,
+        grpPrcL3: 0,
+        grpPrcL4: 0,
+        grpPrcL5: null,
+        addInfo: null,
+        sftyQty: null,
+        isrcAplcbYn: 'N',
+        useYn: 'Y',
+        regrId: 'sync2books',
+        regrNm: 'sync2books',
+        modrId: 'sync2books',
+        modrNm: 'sync2books',
+      };
 
-    const res = await deps.etimsAdapter.saveItem(request, {
-      merchantId: input.merchantId,
-      branchId: connection.kraBhfId,
-      kraPin: connection.kraPin,
-      environment: connection.environment,
-      cmcKey: connection.cmcKey,
-      deviceId: connection.deviceId,
-    });
+      const res = await deps.etimsAdapter.saveItem(request, {
+        merchantId: input.merchantId,
+        branchId: connection.kraBhfId,
+        kraPin: connection.kraPin,
+        environment: connection.environment,
+        cmcKey: connection.cmcKey,
+        deviceId: connection.deviceId,
+      });
 
-    const resultCd = res.rawResponse?.resultCd ?? null;
-    const resultMsg = res.rawResponse?.resultMsg ?? null;
+      const resultCd = res.rawResponse?.resultCd ?? null;
+      const resultMsg = res.rawResponse?.resultMsg ?? null;
 
-    if (res.success) {
+      if (res.success) {
+        const updated: CatalogItem = {
+          ...item,
+          etimsItemCode: itemCd,
+          registrationStatus: 'REGISTERED',
+          lastSyncedAt: now,
+          lastSyncAttemptAt: now,
+          lastSyncResultCd: resultCd ?? '000',
+          lastSyncResultMsg: resultMsg ?? 'OK',
+          updatedAt: now,
+        };
+        await deps.itemRepo.save(updated);
+        results.push({
+          itemId: item.id,
+          itemCd,
+          success: true,
+          resultCd: updated.lastSyncResultCd,
+          resultMsg: updated.lastSyncResultMsg,
+          error: null,
+        });
+        continue;
+      }
+
       const updated: CatalogItem = {
         ...item,
         etimsItemCode: itemCd,
-        registrationStatus: 'REGISTERED',
-        lastSyncedAt: now,
+        registrationStatus: 'FAILED',
         lastSyncAttemptAt: now,
-        lastSyncResultCd: resultCd ?? '000',
-        lastSyncResultMsg: resultMsg ?? 'OK',
+        lastSyncResultCd: resultCd,
+        lastSyncResultMsg: resultMsg,
         updatedAt: now,
       };
       await deps.itemRepo.save(updated);
       results.push({
         itemId: item.id,
         itemCd,
-        success: true,
-        resultCd: updated.lastSyncResultCd,
-        resultMsg: updated.lastSyncResultMsg,
-        error: null,
+        success: false,
+        resultCd,
+        resultMsg,
+        error: res.error ?? 'Unknown error',
       });
-      continue;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const now = new Date();
+      const updated: CatalogItem = {
+        ...item,
+        registrationStatus: 'FAILED',
+        lastSyncAttemptAt: now,
+        lastSyncResultCd: null,
+        lastSyncResultMsg: message,
+        updatedAt: now,
+      };
+      await deps.itemRepo.save(updated);
+      results.push({
+        itemId: item.id,
+        itemCd: item.etimsItemCode ?? '',
+        success: false,
+        resultCd: null,
+        resultMsg: null,
+        error: message,
+      });
     }
-
-    const updated: CatalogItem = {
-      ...item,
-      etimsItemCode: itemCd,
-      registrationStatus: 'FAILED',
-      lastSyncAttemptAt: now,
-      lastSyncResultCd: resultCd,
-      lastSyncResultMsg: resultMsg,
-      updatedAt: now,
-    };
-    await deps.itemRepo.save(updated);
-    results.push({
-      itemId: item.id,
-      itemCd,
-      success: false,
-      resultCd,
-      resultMsg,
-      error: res.error ?? 'Unknown error',
-    });
   }
 
   const synced = results.filter((r) => r.success).length;
