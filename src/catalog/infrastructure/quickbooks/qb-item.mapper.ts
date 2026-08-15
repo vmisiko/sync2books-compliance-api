@@ -26,10 +26,15 @@ export function mapQuickBooksItemToRegisterItemInput(params: {
   merchantId: string;
   qbItem: QuickBooksItem;
   /**
-   * Optional override for OSCU classification code (itemClsCd).
-   * In dashboard flows this typically comes from user selection or a prior mapping.
+   * Optional overrides for this specific item's OSCU codes — classification,
+   * quantity unit, and packaging unit are all resolved per item (from that
+   * item's own classification_mappings row, looked up by the caller) rather
+   * than derived from the raw QuickBooks item here. No category/bucket step
+   * happens in this mapper anymore.
    */
   classificationCodeOverride?: string;
+  qtyUnitCdOverride?: string;
+  packagingUnitCdOverride?: string;
 }): RegisterItemInput {
   const { merchantId, qbItem } = params;
 
@@ -40,8 +45,9 @@ export function mapQuickBooksItemToRegisterItemInput(params: {
     sku: qbItem.Sku ?? null,
     itemType: mapQbItemType(qbItem.Type),
     taxCategory: mapQbTaxToInternalTaxCategory(qbItem),
-    internalUnit: (qbItem.UQCDisplayText ?? 'EA').toUpperCase(),
     classificationCode: params.classificationCodeOverride,
+    unitCode: params.qtyUnitCdOverride,
+    packagingUnitCode: params.packagingUnitCdOverride,
   };
 }
 
@@ -51,7 +57,14 @@ function mapQbItemType(type?: QuickBooksItem['Type']): ItemType {
   return ItemType.GOODS;
 }
 
-function mapQbTaxToInternalTaxCategory(item: QuickBooksItem): TaxCategory {
+/**
+ * Exported so callers that need to know an item's resolved internalTaxCategory
+ * without registering it (e.g. the Mapping Center's classification review, to
+ * show whether this item's tax dimension will actually resolve at
+ * registration time) can reuse the exact same heuristic registration uses,
+ * instead of re-deriving it and risking drift.
+ */
+export function mapQbTaxToInternalTaxCategory(item: QuickBooksItem): TaxCategory {
   // QB tax config varies a lot; keep mapping conservative and overrideable by dashboard.
   const name = (item.SalesTaxCodeRef?.name ?? '').toUpperCase();
 

@@ -75,6 +75,46 @@ export class ClassificationMappingOrmEntity {
   @Column('varchar', { nullable: true })
   externalValue!: string | null;
 
+  /**
+   * This item's internalTaxCategory as derived at pull time by the exact
+   * same heuristic registration uses (mapQbTaxToInternalTaxCategory) —
+   * captured here (not just computed live) so the Mapping Center can show,
+   * per item, whether its tax dimension will actually resolve at
+   * registration without needing a fresh ERP call. Cross-referenced against
+   * tax_mappings at list time (see DashboardMappingApplicationService.list)
+   * to populate the row's resolvedTaxTyCd. Tax stays category-based (KRA
+   * only has 5 tax types, so sharing one approved row per category is
+   * correct) — unlike quantity/packaging units below, which are resolved
+   * per item because KRA's real unit code lists are large and
+   * business-specific, and packaging in particular has no natural shared
+   * bucket.
+   */
+  @Column('varchar', { nullable: true })
+  resolvedInternalTaxCategory!: string | null;
+
+  /**
+   * Quantity unit (qtyUnitCd) and packaging unit (pkgUnitCd) are resolved
+   * independently per item, each matched directly against the real synced
+   * KRA code list (oscu_codes, cdCls '10' and '17' respectively) — not
+   * against an internal category table. Matched from the ERP's raw unit
+   * label (MainApiItem.unitOfMeasure) at pull time: an exact match against
+   * a KRA code gets a high confidenceScore, a fuzzy name match gets a lower
+   * one, and no match leaves both null (NEEDS_REVIEW). They're only ever
+   * combined into one payload at the point of the actual OSCU /saveItem
+   * call — never coupled together as a single "unit" concept before that.
+   */
+  @Column('varchar', { nullable: true })
+  qtyUnitCd!: string | null;
+
+  @Column('int', { nullable: true })
+  qtyUnitCdConfidence!: number | null;
+
+  @Column('varchar', { nullable: true })
+  pkgUnitCd!: string | null;
+
+  @Column('int', { nullable: true })
+  pkgUnitCdConfidence!: number | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

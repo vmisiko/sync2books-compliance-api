@@ -4,11 +4,14 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { CatalogService } from '../../catalog/api/catalog.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { mapMainApiItemToRegisterItemInput } from '../../catalog/infrastructure/main-api/main-api-item.mapper';
+import { ClassificationMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
 
 export type PullItemsResult = {
   merchantId: string;
@@ -34,6 +37,8 @@ export class DashboardItemsApplicationService {
     private readonly organization: ComplianceOrganizationApplicationService,
     private readonly mainApiConnections: MainApiConnectionApplicationService,
     private readonly mainApiPull: MainApiPullClient,
+    @InjectRepository(ClassificationMappingOrmEntity)
+    private readonly clsRepo: Repository<ClassificationMappingOrmEntity>,
   ) {}
 
   async pullItems(complianceTenantId: string): Promise<PullItemsResult> {
@@ -78,9 +83,28 @@ export class DashboardItemsApplicationService {
 
       for (const mainApiItem of response.data) {
         try {
+          const externalId = mainApiItem.bookId ?? mainApiItem.itemCode;
+          // The Mapping Center's Classification tab is where a human
+          // resolves this item's itemClsCd/qtyUnitCd/pkgUnitCd (each
+          // independently — see ClassificationMappingOrmEntity's doc
+          // comment). Only an active (fully approved) row counts here; a
+          // still-NEEDS_REVIEW row must not silently leak a partial or
+          // auto-matched-but-unconfirmed value into an actual KRA
+          // registration call.
+          const clsRow = await this.clsRepo.findOne({
+            where: {
+              merchantId,
+              matchType: 'EXTERNAL_ID',
+              matchValue: externalId,
+              active: true,
+            },
+          });
           const input = mapMainApiItemToRegisterItemInput({
             merchantId,
             item: mainApiItem,
+            classificationCodeOverride: clsRow?.itemClsCd ?? undefined,
+            qtyUnitCdOverride: clsRow?.qtyUnitCd ?? undefined,
+            packagingUnitCdOverride: clsRow?.pkgUnitCd ?? undefined,
           });
           const result = await this.catalog.registerItem(input);
           results.push({

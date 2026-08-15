@@ -15,7 +15,6 @@ import { ClassificationMappingOrmEntity } from '../regulatory/oscu/infrastructur
 import { OscuMappingModule } from '../regulatory/oscu/oscu-mapping.module';
 import { OscuReferenceModule } from '../regulatory/oscu/oscu-reference.module';
 import { TaxMappingOrmEntity } from '../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
-import { UnitMappingOrmEntity } from '../regulatory/oscu/infrastructure/persistence/unit-mapping.orm-entity';
 import { ComplianceOrganizationModule } from '../compliance-organization/compliance-organization.module';
 import { EtimsModule } from '../regulatory/oscu/etims.module';
 import { ComplianceServiceAuthModule } from '../integration/compliance-service-auth.module';
@@ -32,7 +31,6 @@ import { PlatformCorrelationModule } from '../integration/platform-correlation.m
     TypeOrmModule.forFeature([
       CatalogItemOrmEntity,
       TaxMappingOrmEntity,
-      UnitMappingOrmEntity,
       ClassificationMappingOrmEntity,
     ]),
   ],

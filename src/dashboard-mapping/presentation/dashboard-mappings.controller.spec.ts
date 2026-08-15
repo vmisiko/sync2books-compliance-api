@@ -58,7 +58,7 @@ describe('DashboardMappingsController', () => {
     expect(service.pullAll).toHaveBeenCalledWith('tenant-1');
     expect(result).toEqual({
       success: true,
-      message: 'Tax rates, tax codes, units, and classifications pulled and scored',
+      message: 'Tax rates, tax codes, and classifications pulled and scored',
       data: { attempted: 1 },
     });
   });

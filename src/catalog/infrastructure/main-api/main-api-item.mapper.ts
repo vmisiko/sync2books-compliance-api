@@ -30,6 +30,9 @@ export function mapMainApiItemToRegisterItemInput(params: {
   merchantId: string;
   item: MainApiPulledItem;
   classificationCodeOverride?: string;
+  /** This item's own KRA quantity/packaging unit codes, looked up by the caller from its classification_mappings row (see DashboardItemsApplicationService.pullItems). */
+  qtyUnitCdOverride?: string;
+  packagingUnitCdOverride?: string;
 }): RegisterItemInput {
   const { item } = params;
 
@@ -54,5 +57,7 @@ export function mapMainApiItemToRegisterItemInput(params: {
     merchantId: params.merchantId,
     qbItem,
     classificationCodeOverride: params.classificationCodeOverride,
+    qtyUnitCdOverride: params.qtyUnitCdOverride,
+    packagingUnitCdOverride: params.packagingUnitCdOverride,
   });
 }

@@ -12,8 +12,9 @@ export interface RegisterItemInput {
   itemType: ItemType;
   taxCategory: TaxCategory;
   classificationCode?: string;
+  /** This item's own KRA quantity unit code — resolved per item, no category fallback. */
   unitCode?: string;
-  internalUnit?: string;
+  /** This item's own KRA packaging unit code — resolved per item, no category fallback. */
   packagingUnitCode?: string;
   taxTyCd?: string;
   productTypeCode?: string;
@@ -50,7 +51,6 @@ export async function registerItem(
     taxTyCd: input.taxTyCd,
     productTypeCode: input.productTypeCode,
     internalTaxCategory: input.taxCategory,
-    internalUnit: input.internalUnit,
   });
 
   const classificationCode = ensureNonEmptyString(

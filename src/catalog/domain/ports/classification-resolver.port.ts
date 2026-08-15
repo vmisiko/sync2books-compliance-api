@@ -24,8 +24,12 @@ export interface IClassificationResolver {
     sku?: string;
     externalId?: string;
     /**
-     * Optional override inputs from UI/ERP. If provided, the resolver will treat
-     * them as already-resolved OSCU codes and only fill missing fields.
+     * classificationCode/unitCode/packagingUnitCode are resolved per item
+     * (from that item's own classification_mappings row) by the caller and
+     * passed in here — there's no category table backing them, so the
+     * resolver throws if unitCode/packagingUnitCode are missing rather than
+     * defaulting. taxTyCd stays optional: if omitted, it's resolved from
+     * internalTaxCategory against the shared tax_mappings category table.
      */
     classificationCode?: string;
     unitCode?: string;
@@ -33,7 +37,5 @@ export interface IClassificationResolver {
     taxTyCd?: string;
     productTypeCode?: string;
     internalTaxCategory?: string;
-    /** ERP/internal unit identifier (e.g. EA, PCS, EACH). */
-    internalUnit?: string;
   }): Promise<ClassificationResolution>;
 }

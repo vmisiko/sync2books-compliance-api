@@ -41,7 +41,8 @@ describe('CatalogController', () => {
       name: 'Widget',
       itemType: ItemType.GOODS,
       taxCategory: TaxCategory.VAT_STANDARD,
-      internalUnit: 'EA',
+      unitCode: 'NO',
+      packagingUnitCode: 'NT',
       classificationCode: '14111400',
     });
     expect(registered.created).toBe(true);

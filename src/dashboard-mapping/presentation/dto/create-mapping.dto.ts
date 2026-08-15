@@ -8,8 +8,8 @@ import type { ClassificationMatchType } from '../../../regulatory/oscu/infrastru
  * so validation is done in the application layer to match convention).
  */
 export class CreateMappingDto {
-  @ApiProperty({ enum: ['tax', 'unit', 'classification'] })
-  type!: 'tax' | 'unit' | 'classification';
+  @ApiProperty({ enum: ['tax', 'classification'] })
+  type!: 'tax' | 'classification';
 
   // --- tax ---
   @ApiProperty({
@@ -26,29 +26,9 @@ export class CreateMappingDto {
   })
   taxTyCd?: string;
 
-  // --- unit ---
-  @ApiProperty({
-    required: false,
-    description: 'Required when type=unit',
-    example: 'KG',
-  })
-  internalUnit?: string;
-
-  @ApiProperty({
-    required: false,
-    description: 'Required when type=unit — KRA qtyUnitCd',
-    example: 'KG',
-  })
-  qtyUnitCd?: string;
-
-  @ApiProperty({
-    required: false,
-    description: 'Required when type=unit — KRA pkgUnitCd',
-    example: 'NT',
-  })
-  pkgUnitCd?: string;
-
-  // --- classification ---
+  // --- classification (also carries this item's own qtyUnitCd/pkgUnitCd —
+  // resolved per item, not via a shared category, see
+  // ClassificationMappingOrmEntity's doc comment) ---
   @ApiProperty({
     required: false,
     enum: ['EXTERNAL_ID', 'SKU', 'NAME_CONTAINS'],
@@ -71,6 +51,20 @@ export class CreateMappingDto {
     example: '14111400',
   })
   itemClsCd?: string;
+
+  @ApiProperty({
+    required: false,
+    description: "This item's KRA quantity unit code (cdCls '10')",
+    example: 'KG',
+  })
+  qtyUnitCd?: string;
+
+  @ApiProperty({
+    required: false,
+    description: "This item's KRA packaging unit code (cdCls '17')",
+    example: 'BG',
+  })
+  pkgUnitCd?: string;
 
   @ApiProperty({ required: false, default: 100 })
   priority?: number;

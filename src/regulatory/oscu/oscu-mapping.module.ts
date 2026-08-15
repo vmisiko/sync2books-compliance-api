@@ -6,7 +6,6 @@ import { OscuSyncStateOrmEntity } from './infrastructure/persistence/oscu-sync-s
 import { OscuMappingSeed } from './infrastructure/persistence/oscu-mapping.seed';
 import { PaymentTypeMappingOrmEntity } from './infrastructure/persistence/payment-type-mapping.orm-entity';
 import { TaxMappingOrmEntity } from './infrastructure/persistence/tax-mapping.orm-entity';
-import { UnitMappingOrmEntity } from './infrastructure/persistence/unit-mapping.orm-entity';
 import { MappingSuggestionService } from './application/mapping-suggestion.service';
 
 @Module({
@@ -15,7 +14,6 @@ import { MappingSuggestionService } from './application/mapping-suggestion.servi
       OscuItemClassificationOrmEntity,
       OscuSyncStateOrmEntity,
       TaxMappingOrmEntity,
-      UnitMappingOrmEntity,
       PaymentTypeMappingOrmEntity,
       ClassificationMappingOrmEntity,
     ]),

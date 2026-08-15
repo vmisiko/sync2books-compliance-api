@@ -25,7 +25,6 @@ import { OscuOperationLogOrmEntity } from './regulatory/oscu/infrastructure/pers
 import { OscuSyncStateOrmEntity } from './regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
 import { PaymentTypeMappingOrmEntity } from './regulatory/oscu/infrastructure/persistence/payment-type-mapping.orm-entity';
 import { TaxMappingOrmEntity } from './regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
-import { UnitMappingOrmEntity } from './regulatory/oscu/infrastructure/persistence/unit-mapping.orm-entity';
 import { ComplianceDocumentOrmEntity } from './sales/infrastructure/persistence/compliance-document.orm-entity';
 import { ComplianceEventOrmEntity } from './sales/infrastructure/persistence/compliance-event.orm-entity';
 import { ComplianceLineOrmEntity } from './sales/infrastructure/persistence/compliance-line.orm-entity';
@@ -63,7 +62,6 @@ import { PlatformCorrelationModule } from './integration/platform-correlation.mo
         OscuSyncStateOrmEntity,
         PaymentTypeMappingOrmEntity,
         TaxMappingOrmEntity,
-        UnitMappingOrmEntity,
       ],
       synchronize: true,
       logging: true,

@@ -6,7 +6,6 @@ import type {
   IClassificationResolver,
 } from '../domain/ports/classification-resolver.port';
 import { TaxMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
-import { UnitMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/unit-mapping.orm-entity';
 import { ClassificationMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
 
 @Injectable()
@@ -14,12 +13,20 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
   constructor(
     @InjectRepository(TaxMappingOrmEntity)
     private readonly taxRepo: Repository<TaxMappingOrmEntity>,
-    @InjectRepository(UnitMappingOrmEntity)
-    private readonly unitRepo: Repository<UnitMappingOrmEntity>,
     @InjectRepository(ClassificationMappingOrmEntity)
     private readonly clsRepo: Repository<ClassificationMappingOrmEntity>,
   ) {}
 
+  /**
+   * Tax stays category-based (internalTaxCategory -> one shared, approved
+   * tax_mappings row — KRA only has 5 tax types). Quantity/packaging unit
+   * and classification are all resolved per item — the caller must supply
+   * unitCode/packagingUnitCode/classificationCode directly (looked up from
+   * that item's own classification_mappings row by the caller), since
+   * there's no category table to fall back to for them anymore. Missing
+   * any of the three throws a clear per-field error rather than silently
+   * defaulting, mirroring how classification has always behaved.
+   */
   async resolveClassification(params: {
     merchantId: string;
     itemType: string;
@@ -32,7 +39,6 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
     taxTyCd?: string;
     productTypeCode?: string;
     internalTaxCategory?: string;
-    internalUnit?: string;
   }): Promise<ClassificationResolution> {
     const merchantId = params.merchantId;
 
@@ -43,10 +49,16 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
       params.taxTyCd ??
       (await this.resolveTaxTyCd(merchantId, params.internalTaxCategory));
 
-    const unitMapping =
-      params.unitCode && params.packagingUnitCode
-        ? { qtyUnitCd: params.unitCode, pkgUnitCd: params.packagingUnitCode }
-        : await this.resolveUnits(merchantId, params.internalUnit);
+    if (!params.unitCode) {
+      throw new Error(
+        `Missing qtyUnitCd for item (merchantId=${merchantId}). Resolve it on the item's classification_mappings row before registering.`,
+      );
+    }
+    if (!params.packagingUnitCode) {
+      throw new Error(
+        `Missing pkgUnitCd for item (merchantId=${merchantId}). Resolve it on the item's classification_mappings row before registering.`,
+      );
+    }
 
     const classificationCode =
       params.classificationCode ??
@@ -63,8 +75,8 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
 
     return {
       classificationCode,
-      unitCode: unitMapping.qtyUnitCd,
-      packagingUnitCode: unitMapping.pkgUnitCd,
+      unitCode: params.unitCode,
+      packagingUnitCode: params.packagingUnitCode,
       taxTyCd,
       productTypeCode,
       source,
@@ -108,29 +120,6 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
 
     throw new Error(
       `Missing tax mapping for internalTaxCategory=${internalTaxCategory} (merchantId=${merchantId})`,
-    );
-  }
-
-  private async resolveUnits(
-    merchantId: string,
-    internalUnit?: string,
-  ): Promise<{ qtyUnitCd: string; pkgUnitCd: string }> {
-    const unit = internalUnit ?? 'EA';
-
-    const merchant = await this.unitRepo.findOne({
-      where: { merchantId, internalUnit: unit, active: true },
-    });
-    if (merchant)
-      return { qtyUnitCd: merchant.qtyUnitCd, pkgUnitCd: merchant.pkgUnitCd };
-
-    const global = await this.unitRepo.findOne({
-      where: { merchantId: IsNull(), internalUnit: unit, active: true },
-    });
-    if (global)
-      return { qtyUnitCd: global.qtyUnitCd, pkgUnitCd: global.pkgUnitCd };
-
-    throw new Error(
-      `Missing unit mapping for internalUnit=${unit} (merchantId=${merchantId})`,
     );
   }
 

@@ -25,17 +25,18 @@ describe('QB import → Catalog item registration (matrix)', () => {
     service = module.get<CatalogService>(CatalogService);
   });
 
-  it('1) Inventory + VAT standard + EA + classification known → creates', async () => {
+  it('1) Inventory + VAT standard + classification/unit known → creates', async () => {
     const input = mapQuickBooksItemToRegisterItemInput({
       merchantId: 'm1',
       qbItem: {
         Id: 'qb-1',
         Name: 'Inventory Widget',
         Type: 'Inventory',
-        UQCDisplayText: 'EA',
         SalesTaxCodeRef: { value: '1', name: 'VAT Standard' },
       },
       classificationCodeOverride: '14111400',
+      qtyUnitCdOverride: 'NO',
+      packagingUnitCdOverride: 'NT',
     });
 
     const res = await service.registerItem(input);
@@ -46,17 +47,18 @@ describe('QB import → Catalog item registration (matrix)', () => {
     expect(res.item.packagingUnitCode).toBe('NT');
   });
 
-  it('2) Service + exempt + EA + classification known → creates', async () => {
+  it('2) Service + exempt + classification/unit known → creates', async () => {
     const input = mapQuickBooksItemToRegisterItemInput({
       merchantId: 'm1',
       qbItem: {
         Id: 'qb-2',
         Name: 'Consulting Hours',
         Type: 'Service',
-        UQCDisplayText: 'EA',
         SalesTaxCodeRef: { value: '2', name: 'Exempt' },
       },
       classificationCodeOverride: '14111400',
+      qtyUnitCdOverride: 'NO',
+      packagingUnitCdOverride: 'NT',
     });
 
     const res = await service.registerItem(input);
@@ -65,23 +67,27 @@ describe('QB import → Catalog item registration (matrix)', () => {
     expect(res.item.productTypeCode).toBe('3');
   });
 
-  it('3) NonInventory + missing tax + missing unit → falls back to defaults', async () => {
+  it('3) NonInventory + missing tax → tax falls back to the global default; unit is still required per item', async () => {
     const input = mapQuickBooksItemToRegisterItemInput({
       merchantId: 'm1',
       qbItem: {
         Id: 'qb-3',
         Name: 'Office Supplies',
         Type: 'NonInventory',
-        // no SalesTaxCodeRef, no UQCDisplayText
+        // no SalesTaxCodeRef -> internalTaxCategory OTHER
       },
       classificationCodeOverride: '14111400',
+      // Quantity/packaging unit has no category fallback anymore -- always
+      // per item, so this item still needs its own override even though
+      // tax can fall back to OTHER's global default.
+      qtyUnitCdOverride: 'NO',
+      packagingUnitCdOverride: 'NT',
     });
 
     const res = await service.registerItem(input);
     expect(res.created).toBe(true);
     // taxCategory OTHER -> taxTyCd D (global default seed)
     expect(res.item.taxTyCd).toBe('D');
-    // internalUnit defaults to EA -> qty NO + pkg NT (global default seed)
     expect(res.item.unitCode).toBe('NO');
     expect(res.item.packagingUnitCode).toBe('NT');
   });
@@ -93,15 +99,33 @@ describe('QB import → Catalog item registration (matrix)', () => {
         Id: 'qb-4',
         Name: 'Unknown Classification Item',
         Type: 'Inventory',
-        UQCDisplayText: 'EA',
         SalesTaxCodeRef: { value: '1', name: 'VAT Standard' },
       },
-      // no classificationCodeOverride
+      // no classificationCodeOverride, but unit is supplied so the
+      // classification check is what actually fails here.
+      qtyUnitCdOverride: 'NO',
+      packagingUnitCdOverride: 'NT',
     });
 
     await expect(service.registerItem(input)).rejects.toThrow(
       /Missing classification mapping/i,
     );
+  });
+
+  it('4b) Missing qtyUnitCd/packagingUnitCd override → errors per field, with no category to fall back to', async () => {
+    const input = mapQuickBooksItemToRegisterItemInput({
+      merchantId: 'm2',
+      qbItem: {
+        Id: 'qb-4b',
+        Name: 'No Unit Item',
+        Type: 'Inventory',
+        SalesTaxCodeRef: { value: '1', name: 'VAT Standard' },
+      },
+      classificationCodeOverride: '14111400',
+      // no qtyUnitCdOverride/packagingUnitCdOverride
+    });
+
+    await expect(service.registerItem(input)).rejects.toThrow(/Missing qtyUnitCd/i);
   });
 
   it('5) Same QB Id imported twice → updates (version increments), does not duplicate', async () => {
@@ -111,10 +135,11 @@ describe('QB import → Catalog item registration (matrix)', () => {
         Id: 'qb-5',
         Name: 'Dup Item',
         Type: 'Inventory',
-        UQCDisplayText: 'EA',
         SalesTaxCodeRef: { value: '1', name: 'VAT Standard' },
       },
       classificationCodeOverride: '14111400',
+      qtyUnitCdOverride: 'NO',
+      packagingUnitCdOverride: 'NT',
     });
 
     const r1 = await service.registerItem(first);

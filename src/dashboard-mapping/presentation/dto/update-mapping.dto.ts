@@ -3,8 +3,8 @@ import type { ClassificationMatchType } from '../../../regulatory/oscu/infrastru
 
 /**
  * Body for PATCH dashboard-api/mappings/:id. Only the fields relevant to the
- * target row's actual type (tax/unit/classification, inferred server-side
- * from the id) are applied — see DashboardMappingApplicationService.update.
+ * target row's actual type (tax/classification, inferred server-side from
+ * the id) are applied — see DashboardMappingApplicationService.update.
  */
 export class UpdateMappingDto {
   // --- tax ---
@@ -14,17 +14,9 @@ export class UpdateMappingDto {
   @ApiProperty({ required: false, description: 'KRA taxTyCd' })
   taxTyCd?: string;
 
-  // --- unit ---
-  @ApiProperty({ required: false })
-  internalUnit?: string;
-
-  @ApiProperty({ required: false, description: 'KRA qtyUnitCd' })
-  qtyUnitCd?: string;
-
-  @ApiProperty({ required: false, description: 'KRA pkgUnitCd' })
-  pkgUnitCd?: string;
-
-  // --- classification ---
+  // --- classification (itemClsCd/qtyUnitCd/pkgUnitCd are three independent
+  // per-item fields — any subset may be sent; the row only becomes
+  // MAPPED/active once all three are present) ---
   @ApiProperty({
     required: false,
     enum: ['EXTERNAL_ID', 'SKU', 'NAME_CONTAINS'],
@@ -39,6 +31,12 @@ export class UpdateMappingDto {
 
   @ApiProperty({ required: false, description: 'KRA itemClsCd' })
   itemClsCd?: string;
+
+  @ApiProperty({ required: false, description: "This item's KRA quantity unit code (cdCls '10')" })
+  qtyUnitCd?: string;
+
+  @ApiProperty({ required: false, description: "This item's KRA packaging unit code (cdCls '17')" })
+  pkgUnitCd?: string;
 
   @ApiProperty({ required: false })
   priority?: number;

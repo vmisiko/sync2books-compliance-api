@@ -4,12 +4,12 @@ import { Repository } from 'typeorm';
 import { DashboardMappingApplicationService } from './dashboard-mapping.application.service';
 import { MappingSuggestionService } from '../../regulatory/oscu/application/mapping-suggestion.service';
 import { TaxMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
-import { UnitMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/unit-mapping.orm-entity';
 import { ClassificationMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
 import { OscuCodeOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-code.orm-entity';
 import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
+import { CatalogService } from '../../catalog/api/catalog.service';
 import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
 import { MappingStatus } from '../../shared/domain/enums/mapping-status.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
@@ -107,7 +107,6 @@ function fakeMainApiPull(
 describe('DashboardMappingApplicationService', () => {
   let module: TestingModule;
   let taxRepo: Repository<TaxMappingOrmEntity>;
-  let unitRepo: Repository<UnitMappingOrmEntity>;
   let clsRepo: Repository<ClassificationMappingOrmEntity>;
   let oscuCodeRepo: Repository<OscuCodeOrmEntity>;
 
@@ -127,7 +126,6 @@ describe('DashboardMappingApplicationService', () => {
         }),
         TypeOrmModule.forFeature([
           TaxMappingOrmEntity,
-          UnitMappingOrmEntity,
           ClassificationMappingOrmEntity,
           OscuCodeOrmEntity,
         ]),
@@ -138,13 +136,16 @@ describe('DashboardMappingApplicationService', () => {
         { provide: MainApiPullClient, useValue: mainApiPull },
         { provide: MainApiConnectionApplicationService, useValue: connections },
         { provide: ComplianceOrganizationApplicationService, useValue: org },
+        {
+          provide: CatalogService,
+          useValue: { searchItemClassifications: () => Promise.resolve([]) },
+        },
       ],
     }).compile();
 
     await module.init();
 
     taxRepo = module.get(getRepositoryToken(TaxMappingOrmEntity));
-    unitRepo = module.get(getRepositoryToken(UnitMappingOrmEntity));
     clsRepo = module.get(getRepositoryToken(ClassificationMappingOrmEntity));
     oscuCodeRepo = module.get(getRepositoryToken(OscuCodeOrmEntity));
 
@@ -541,7 +542,7 @@ describe('DashboardMappingApplicationService', () => {
     });
   });
 
-  describe('pullAll -> units and classifications (derived from items)', () => {
+  describe('pullAll -> classifications (derived from items)', () => {
     function item(overrides: Partial<MainApiItem>): MainApiItem {
       return {
         id: 'item-default',
@@ -552,73 +553,13 @@ describe('DashboardMappingApplicationService', () => {
       };
     }
 
-    it('dedupes unit-of-measure labels across items into one NEEDS_REVIEW row each', async () => {
-      const service = await buildService(
-        fakeOrg(),
-        fakeConnections('qb-conn-1'),
-        fakeMainApiPull([], [], [
-          item({ id: 'i1', name: 'Maize Flour 2kg', unitOfMeasure: 'kg' }),
-          item({ id: 'i2', name: 'Rice 2kg', unitOfMeasure: 'kg' }),
-          item({ id: 'i3', name: 'Cooking Oil 2L', unitOfMeasure: 'ltr' }),
-          item({ id: 'i4', name: 'Bolt', unitOfMeasure: 'Gross (144)' }),
-        ]),
-      );
-
-      const result = await service.pullAll(TENANT_ID);
-
-      expect(result.units.attempted).toBe(3); // kg, ltr, "Gross (144)" -- deduped from 4 items
-      expect(result.units.suggested).toBe(2); // kg, ltr recognized
-      expect(result.units.unmapped).toBe(1); // "Gross (144)" not recognized
-
-      const kgRow = await unitRepo.findOne({
-        where: { merchantId: MERCHANT_ID, externalValue: 'kg' },
-      });
-      expect(kgRow?.status).toBe(MappingStatus.NEEDS_REVIEW);
-      expect(kgRow?.internalUnit).toBe('KG');
-      expect(kgRow?.qtyUnitCd).toBe('KG');
-
-      const grossRow = await unitRepo.findOne({
-        where: { merchantId: MERCHANT_ID, externalValue: 'Gross (144)' },
-      });
-      expect(grossRow?.status).toBe(MappingStatus.UNMAPPED);
-      expect(grossRow?.confidenceScore).toBe(0);
-
-      // Only one row per label even though "kg" appeared on two items.
-      const allKgRows = await unitRepo.find({
-        where: { merchantId: MERCHANT_ID, externalValue: 'kg' },
-      });
-      expect(allKgRows).toHaveLength(1);
-    });
-
-    it('does not overwrite an already-approved unit mapping on re-pull', async () => {
-      const service = await buildService(
-        fakeOrg(),
-        fakeConnections('qb-conn-1'),
-        fakeMainApiPull([], [], [
-          item({ id: 'i1', name: 'Maize Flour 2kg', unitOfMeasure: 'kg' }),
-        ]),
-      );
-
-      const first = await service.pullAll(TENANT_ID);
-      const mappingId = first.units.results[0].mappingId;
-      await service.approve(TENANT_ID, mappingId, 'reviewer@example.com');
-
-      const second = await service.pullAll(TENANT_ID);
-      expect(second.units.results[0].mappingId).toBe(mappingId);
-      expect(second.units.alreadyMapped).toBe(1);
-
-      const row = await unitRepo.findOne({ where: { id: mappingId } });
-      expect(row?.status).toBe(MappingStatus.MAPPED);
-      expect(row?.active).toBe(true);
-    });
-
     it('creates one NEEDS_REVIEW classification placeholder per item, not deduped', async () => {
       const service = await buildService(
         fakeOrg(),
         fakeConnections('qb-conn-1'),
         fakeMainApiPull([], [], [
-          item({ id: 'i1', name: 'Maize Flour 2kg', sku: 'MF-2KG' }),
-          item({ id: 'i2', name: 'Sukuma Wiki Bunch', sku: 'SW-1' }),
+          item({ id: 'i1', itemCode: 'QB_1', name: 'Maize Flour 2kg', sku: 'MF-2KG' }),
+          item({ id: 'i2', itemCode: 'QB_2', name: 'Sukuma Wiki Bunch', sku: 'SW-1' }),
         ]),
       );
 
@@ -638,7 +579,10 @@ describe('DashboardMappingApplicationService', () => {
         'EXTERNAL_ID',
         'EXTERNAL_ID',
       ]);
-      expect(rows.map((r) => r.matchValue).sort()).toEqual(['i1', 'i2']);
+      // matchValue is bookId ?? itemCode (the same value registration's
+      // ClassificationResolverTypeOrm looks up by), not MainApiItem.id --
+      // see pullClassifications' doc comment for why.
+      expect(rows.map((r) => r.matchValue).sort()).toEqual(['QB_1', 'QB_2']);
     });
 
     it('re-pulling classifications refreshes externalValue without creating a duplicate or disturbing an approved row', async () => {
@@ -666,7 +610,7 @@ describe('DashboardMappingApplicationService', () => {
       await service.update(
         TENANT_ID,
         mappingId,
-        { itemClsCd: '14111400' },
+        { itemClsCd: '14111400', qtyUnitCd: 'KG', pkgUnitCd: 'NT' },
         'reviewer@example.com',
       );
 
@@ -697,6 +641,94 @@ describe('DashboardMappingApplicationService', () => {
       await expect(service.pullAll(TENANT_ID)).rejects.toThrow(
         /No connected QuickBooks connection/,
       );
+    });
+
+    it('list() surfaces resolvedTaxTyCd for a classification row when its tax category has an active mapping, and null when it does not', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull([], [], [
+          item({
+            id: 'i1',
+            itemCode: 'QB_1',
+            name: 'Rice 2kg',
+            unitOfMeasure: 'kg',
+            // Deliberately not "16.0% S" -- mapQbTaxToInternalTaxCategory's
+            // isZeroRate check does a crude `.includes('0%')`, which also
+            // matches inside "16.0%" (a real pre-existing bug, flagged
+            // separately -- not something this test is about).
+            defaultTaxCodeRef: { id: 'tc1', name: '16% Standard VAT' },
+          }),
+          item({
+            id: 'i2',
+            itemCode: 'QB_2',
+            name: 'Consulting Service',
+            unitOfMeasure: 'each',
+            defaultTaxCodeRef: undefined,
+          }),
+        ]),
+      );
+
+      // Approve a tax mapping for VAT_STANDARD -- matches what
+      // mapQbTaxToInternalTaxCategory derives for the "Rice 2kg" item above.
+      await service.createManual(
+        TENANT_ID,
+        { type: 'tax', internalTaxCategory: TaxCategory.VAT_STANDARD, taxTyCd: 'B' },
+        'reviewer@example.com',
+      );
+
+      await service.pullAll(TENANT_ID);
+
+      const items = await service.list(TENANT_ID, { type: 'classification' });
+      const rice = items.find((i) => i.externalValue === 'Rice 2kg')!;
+      const consulting = items.find((i) => i.externalValue === 'Consulting Service')!;
+
+      expect(rice.resolvedInternalTaxCategory).toBe(TaxCategory.VAT_STANDARD);
+      expect(rice.resolvedTaxTyCd).toBe('B');
+
+      // No SalesTaxCodeRef -> OTHER, and no active tax mapping exists for
+      // OTHER in this test, so it should resolve to null, not throw or
+      // silently default.
+      expect(consulting.resolvedInternalTaxCategory).toBe(TaxCategory.OTHER);
+      expect(consulting.resolvedTaxTyCd).toBeNull();
+    });
+
+    it('auto-matches qtyUnitCd/pkgUnitCd directly against the real KRA code list per item, independently -- not via a shared category', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull([], [], [
+          item({ id: 'i1', itemCode: 'QB_1', name: 'Rice 2kg', unitOfMeasure: 'kg' }),
+          item({ id: 'i2', itemCode: 'QB_2', name: 'Bolt Box', unitOfMeasure: 'Gross (144)' }),
+        ]),
+      );
+
+      // Real (trimmed) KRA reference data, same shape as the synced table:
+      // "kg" exact-matches cd 'KG' (quantity) but nothing in packaging --
+      // it's a measurement unit, not a way of packaging something. "Gross
+      // (144)" matches neither list at all.
+      await oscuCodeRepo.save([
+        oscuCodeRepo.create({ cdCls: '10', cd: 'KG', cdNm: 'Kilo-Gramme', srtOrd: 1, useYn: 'Y' }),
+        oscuCodeRepo.create({ cdCls: '17', cd: 'BG', cdNm: 'Bag', srtOrd: 1, useYn: 'Y' }),
+        oscuCodeRepo.create({ cdCls: '17', cd: 'BX', cdNm: 'Box', srtOrd: 2, useYn: 'Y' }),
+      ]);
+
+      await service.pullAll(TENANT_ID);
+
+      const items = await service.list(TENANT_ID, { type: 'classification' });
+      const rice = items.find((i) => i.externalValue === 'Rice 2kg')!;
+      const bolt = items.find((i) => i.externalValue === 'Bolt Box')!;
+
+      expect(rice.qtyUnitCd).toBe('KG');
+      expect(rice.qtyUnitCdConfidence).toBeGreaterThanOrEqual(90);
+      // "kg" doesn't match "Bag" or "Box" by name or code -- genuinely
+      // needs a human to pick the packaging, not silently defaulted.
+      expect(rice.pkgUnitCd).toBeNull();
+      expect(rice.pkgUnitCdConfidence).toBeNull();
+
+      expect(bolt.qtyUnitCd).toBeNull();
+      expect(bolt.qtyUnitCdConfidence).toBeNull();
+      expect(bolt.pkgUnitCd).toBeNull();
     });
   });
 
@@ -754,7 +786,7 @@ describe('DashboardMappingApplicationService', () => {
       });
       expect(byStatus.map((r) => r.id)).toEqual(['taxmap-tenant-1']);
 
-      const byType = await service.list(TENANT_ID, { type: 'unit' });
+      const byType = await service.list(TENANT_ID, { type: 'classification' });
       expect(byType).toEqual([]);
 
       await expect(
@@ -898,24 +930,12 @@ describe('DashboardMappingApplicationService', () => {
       expect(revised.taxTyCd).toBe('D');
     });
 
-    it('createManual persists a unit mapping and a classification mapping to their own tables, already MAPPED/active', async () => {
+    it('createManual persists a classification mapping already MAPPED/active once itemClsCd, qtyUnitCd, and pkgUnitCd are all supplied', async () => {
       const service = await buildService(
         fakeOrg(),
         fakeConnections(null),
         fakeMainApiPull([]),
       );
-
-      const unit = await service.createManual(
-        TENANT_ID,
-        { type: 'unit', internalUnit: 'EA', qtyUnitCd: 'NO', pkgUnitCd: 'NT' },
-        'creator@example.com',
-      );
-      const unitRow = await unitRepo.findOne({ where: { id: unit.id } });
-      expect(unitRow?.merchantId).toBe(MERCHANT_ID);
-      expect(unitRow?.sourceSystem).toBe(SourceSystem.MANUAL);
-      expect(unitRow?.status).toBe(MappingStatus.MAPPED);
-      expect(unitRow?.active).toBe(true);
-      expect(unitRow?.approvedBy).toBe('creator@example.com');
 
       const cls = await service.createManual(
         TENANT_ID,
@@ -924,6 +944,8 @@ describe('DashboardMappingApplicationService', () => {
           matchType: 'SKU',
           matchValue: 'SKU-1',
           itemClsCd: '14111400',
+          qtyUnitCd: 'NO',
+          pkgUnitCd: 'NT',
         },
         'creator@example.com',
       );
@@ -935,6 +957,27 @@ describe('DashboardMappingApplicationService', () => {
       expect(clsRow?.approvedBy).toBe('creator@example.com');
     });
 
+    it('createManual leaves a classification row NEEDS_REVIEW/inactive when only itemClsCd is supplied -- qtyUnitCd/pkgUnitCd are independent fields, not silently defaulted', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null),
+        fakeMainApiPull([]),
+      );
+
+      const cls = await service.createManual(
+        TENANT_ID,
+        {
+          type: 'classification',
+          matchType: 'SKU',
+          matchValue: 'SKU-2',
+          itemClsCd: '14111400',
+        },
+        'creator@example.com',
+      );
+      expect(cls.status).toBe(MappingStatus.NEEDS_REVIEW);
+      expect(cls.active).toBe(false);
+    });
+
     it('createManual requires the target codes for each mapping type', async () => {
       const service = await buildService(
         fakeOrg(),
@@ -943,13 +986,6 @@ describe('DashboardMappingApplicationService', () => {
       );
       await expect(
         service.createManual(TENANT_ID, { type: 'tax' }, 'creator@example.com'),
-      ).rejects.toThrow(/required/);
-      await expect(
-        service.createManual(
-          TENANT_ID,
-          { type: 'unit' },
-          'creator@example.com',
-        ),
       ).rejects.toThrow(/required/);
       await expect(
         service.createManual(
@@ -989,6 +1025,130 @@ describe('DashboardMappingApplicationService', () => {
       const secondRow = await taxRepo.findOne({ where: { id: second.id } });
       expect(firstRow?.active).toBe(false);
       expect(secondRow?.active).toBe(true);
+    });
+  });
+
+  describe('bulkClassify', () => {
+    it('applies one itemClsCd to several classification rows, marking each MAPPED/active', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null),
+        fakeMainApiPull([]),
+      );
+      const a = await service.createManual(
+        TENANT_ID,
+        {
+          type: 'classification',
+          matchType: 'SKU',
+          matchValue: 'SKU-A',
+          itemClsCd: '10000000',
+          qtyUnitCd: 'NO',
+          pkgUnitCd: 'NT',
+        },
+        'seed@example.com',
+      );
+      const b = await service.createManual(
+        TENANT_ID,
+        {
+          type: 'classification',
+          matchType: 'SKU',
+          matchValue: 'SKU-B',
+          itemClsCd: '10000000',
+          qtyUnitCd: 'NO',
+          pkgUnitCd: 'NT',
+        },
+        'seed@example.com',
+      );
+
+      const result = await service.bulkClassify(
+        TENANT_ID,
+        [a.id, b.id],
+        { itemClsCd: '14111400', itemType: 'GOODS' },
+        'reviewer@example.com',
+      );
+
+      expect(result.skipped).toEqual([]);
+      expect(result.updated).toHaveLength(2);
+      for (const row of result.updated) {
+        expect(row.itemClsCd).toBe('14111400');
+        expect(row.itemType).toBe('GOODS');
+        expect(row.approvedBy).toBe('reviewer@example.com');
+        expect(row.active).toBe(true);
+      }
+    });
+
+    it('marks an already-approved row REVISED instead of MAPPED, and skips ids from another tenant', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null),
+        fakeMainApiPull([]),
+      );
+      const approved = await service.createManual(
+        TENANT_ID,
+        {
+          type: 'classification',
+          matchType: 'SKU',
+          matchValue: 'SKU-C',
+          itemClsCd: '10000000',
+          qtyUnitCd: 'NO',
+          pkgUnitCd: 'NT',
+        },
+        'seed@example.com',
+      );
+      const otherTenantRow = await clsRepo.save(
+        clsRepo.create({
+          id: 'clsmap-other-tenant',
+          merchantId: 'some-other-merchant',
+          matchType: 'SKU',
+          matchValue: 'SKU-D',
+          itemType: null,
+          itemClsCd: null,
+          priority: 100,
+          source: 'merchant_override',
+          active: false,
+          sourceSystem: SourceSystem.MANUAL,
+          status: MappingStatus.NEEDS_REVIEW,
+          confidenceScore: null,
+          externalValue: null,
+        }),
+      );
+
+      const result = await service.bulkClassify(
+        TENANT_ID,
+        [approved.id, otherTenantRow.id],
+        { itemClsCd: '14111400' },
+        'reviewer@example.com',
+      );
+
+      expect(result.skipped).toEqual([otherTenantRow.id]);
+      expect(result.updated).toHaveLength(1);
+      expect(result.updated[0].status).toBe(MappingStatus.REVISED);
+      expect(result.updated[0].itemClsCd).toBe('14111400');
+    });
+
+    it('rejects an empty itemClsCd up front', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null),
+        fakeMainApiPull([]),
+      );
+      await expect(
+        service.bulkClassify(TENANT_ID, ['clsmap-x'], { itemClsCd: '' }, 'r@example.com'),
+      ).rejects.toThrow(/required/);
+    });
+  });
+
+  describe('searchItemClassifications', () => {
+    it('delegates to CatalogService.searchItemClassifications', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null),
+        fakeMainApiPull([]),
+      );
+      // The test module wires CatalogService to a stub returning [] — this
+      // just confirms the pass-through doesn't throw and returns that shape.
+      const results = await service.searchItemClassifications({ query: 'rice' });
+      expect(results).toEqual([]);
     });
   });
 

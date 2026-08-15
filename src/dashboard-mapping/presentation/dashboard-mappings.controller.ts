@@ -24,6 +24,7 @@ import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/g
 import type { DashboardRequestUser } from '../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
 import { CreateMappingDto } from './dto/create-mapping.dto';
 import { UpdateMappingDto } from './dto/update-mapping.dto';
+import { BulkClassifyMappingDto } from './dto/bulk-classify-mapping.dto';
 
 @Controller('dashboard-api/mappings')
 @ApiTags('Dashboard mapping center (Mode B)')
@@ -36,10 +37,11 @@ export class DashboardMappingsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Pull tax rates, tax codes, item units, and item classifications from the main API ' +
-      '(QuickBooks) and run confidence-scored auto-suggestion in one pass: creates/refreshes ' +
-      'NEEDS_REVIEW tax_mappings/unit_mappings rows, resolves a taxCodeId where possible, and ' +
-      'creates a classification_mappings placeholder row per item for manual itemClsCd review',
+      'Pull tax rates, tax codes, and item classifications from the main API (QuickBooks) and ' +
+      'run confidence-scored auto-suggestion in one pass: creates/refreshes NEEDS_REVIEW ' +
+      'tax_mappings rows, resolves a taxCodeId where possible, and creates a ' +
+      'classification_mappings placeholder row per item with itemClsCd left for manual review ' +
+      'and qtyUnitCd/pkgUnitCd auto-matched directly against the real KRA code list',
   })
   @ApiResponse({ status: 200, description: 'Pull + suggestion result' })
   async pull(@Req() req: Request) {
@@ -47,7 +49,7 @@ export class DashboardMappingsController {
     const result = await this.mappings.pullAll(user.tenantId);
     return {
       success: true,
-      message: 'Tax rates, tax codes, units, and classifications pulled and scored',
+      message: 'Tax rates, tax codes, and classifications pulled and scored',
       data: result,
     };
   }
@@ -55,7 +57,7 @@ export class DashboardMappingsController {
   @Get()
   @ApiOperation({
     summary:
-      'List tax/unit/classification mappings for this tenant (plus read-only global defaults)',
+      'List tax/classification mappings for this tenant (plus read-only global tax defaults)',
   })
   @ApiQuery({
     name: 'source',
@@ -65,7 +67,7 @@ export class DashboardMappingsController {
   @ApiQuery({
     name: 'type',
     required: false,
-    description: 'tax | unit | classification',
+    description: 'tax | classification',
   })
   @ApiQuery({
     name: 'status',
@@ -99,6 +101,52 @@ export class DashboardMappingsController {
     return { success: true, message: 'OK', data: result };
   }
 
+  @Get('item-classifications')
+  @ApiOperation({
+    summary:
+      "Search KRA item classification codes (itemClsCd) for the Assign Classification modal's typeahead — proxies CatalogService, since dashboard users have no other authenticated route to that reference data",
+  })
+  @ApiQuery({ name: 'query', required: false })
+  @ApiQuery({ name: 'itemClsLvl', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiResponse({ status: 200, description: 'Matching classification codes' })
+  async itemClassifications(
+    @Query('query') query?: string,
+    @Query('itemClsLvl') itemClsLvl?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const result = await this.mappings.searchItemClassifications({
+      query,
+      itemClsLvl: itemClsLvl !== undefined ? Number(itemClsLvl) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+    return { success: true, message: 'OK', data: result };
+  }
+
+  @Get('codes')
+  @ApiOperation({
+    summary:
+      "Search KRA reference codes within a code group (cdCls) — e.g. '10' Unit of Quantity, " +
+      "'17' Packaging Unit — for the Assign Classification drawer's quantity/packaging unit " +
+      'typeaheads. Proxies CatalogService the same way item-classifications does.',
+  })
+  @ApiQuery({ name: 'cdCls', required: false })
+  @ApiQuery({ name: 'query', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiResponse({ status: 200, description: 'Matching KRA codes' })
+  async codes(
+    @Query('cdCls') cdCls?: string,
+    @Query('query') query?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const result = await this.mappings.searchCodes({
+      cdCls,
+      query,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+    return { success: true, message: 'OK', data: result };
+  }
+
   @Get('summary')
   @ApiOperation({
     summary:
@@ -122,6 +170,23 @@ export class DashboardMappingsController {
     const user = req.user as DashboardRequestUser;
     const result = await this.mappings.approve(user.tenantId, id, user.email);
     return { success: true, message: 'Mapping approved', data: result };
+  }
+
+  @Patch('bulk-classify')
+  @ApiOperation({
+    summary:
+      'Apply one itemClsCd/itemType to many classification_mappings rows at once — backs the Mapping Center multi-select bulk assign action',
+  })
+  @ApiResponse({ status: 200, description: 'Bulk classify result' })
+  async bulkClassify(@Req() req: Request, @Body() body: BulkClassifyMappingDto) {
+    const user = req.user as DashboardRequestUser;
+    const result = await this.mappings.bulkClassify(
+      user.tenantId,
+      body.ids,
+      { itemClsCd: body.itemClsCd, itemType: body.itemType },
+      user.email,
+    );
+    return { success: true, message: 'Mappings updated', data: result };
   }
 
   @Patch(':id')
