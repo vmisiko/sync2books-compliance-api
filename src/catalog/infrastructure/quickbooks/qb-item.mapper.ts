@@ -48,6 +48,7 @@ export function mapQuickBooksItemToRegisterItemInput(params: {
     classificationCode: params.classificationCodeOverride,
     unitCode: params.qtyUnitCdOverride,
     packagingUnitCode: params.packagingUnitCdOverride,
+    isStockItem: mapQbItemToIsStockItem(qbItem.Type),
   };
 }
 
@@ -55,6 +56,20 @@ function mapQbItemType(type?: QuickBooksItem['Type']): ItemType {
   if (type === 'Service') return ItemType.SERVICE;
   // Inventory and NonInventory both become GOODS for our compliance catalog.
   return ItemType.GOODS;
+}
+
+/**
+ * KRA's own itemTyCd code list (cdCls 24: Raw Material/Finished Product/
+ * Service) has no distinct "non-stock good" value, so stock-tracking
+ * eligibility is tracked as its own flag rather than folded into
+ * productTypeCode. QuickBooks' Type is the only real signal available here
+ * -- `trackQtyOnHand` looks like a more precise fit by name, but it isn't
+ * actually persisted or exposed anywhere in the main API's item pipeline
+ * (checked 2026-08-15: no DB column, dropped before the item ever reaches
+ * this mapper), so it can't be used.
+ */
+function mapQbItemToIsStockItem(type?: QuickBooksItem['Type']): boolean {
+  return type === 'Inventory';
 }
 
 /**

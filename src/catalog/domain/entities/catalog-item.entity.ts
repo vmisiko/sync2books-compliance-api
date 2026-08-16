@@ -23,6 +23,18 @@ export interface CatalogItem {
   taxTyCd: string;
   /** OSCU product type code (itemTyCd) */
   productTypeCode: string;
+  /**
+   * Whether this item requires KRA stock tracking (insertStockIO etc).
+   * Not part of itemTyCd -- KRA's own item-type code list (cdCls 24: Raw
+   * Material / Finished Product / Service) has no distinct "non-stock good"
+   * value, so this is tracked as its own flag rather than folded into
+   * productTypeCode. Auto-derived from QuickBooks' item Type ('Inventory'
+   * -> true, 'Service'/'NonInventory' -> false) on every register/pull,
+   * unless stockItemOverride is set.
+   */
+  isStockItem: boolean;
+  /** Manual override for isStockItem (null = no override, use the QuickBooks-derived default). Survives re-pulls, unlike isStockItem itself. */
+  stockItemOverride: boolean | null;
   registrationStatus: 'PENDING' | 'REGISTERED' | 'FAILED';
   /**
    * The eTIMS/OSCU item code (`itemCd`) assigned/managed by this system.

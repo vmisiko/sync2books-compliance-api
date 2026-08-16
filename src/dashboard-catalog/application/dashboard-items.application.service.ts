@@ -175,8 +175,26 @@ export class DashboardItemsApplicationService {
       itemType: existing.itemType,
       taxCategory: existing.taxCategory,
       classificationCode,
+      // No fresh QuickBooks data here -- pass the current value through so
+      // it isn't reset to the false default (a real override still wins
+      // over this via registerItem's stockItemOverride check either way).
+      isStockItem: existing.isStockItem,
     });
     return result.item;
+  }
+
+  /** Manual override for whether an item requires KRA stock tracking -- survives future pulls (see CatalogService.setStockItemOverride). */
+  async overrideStockItem(
+    complianceTenantId: string,
+    itemId: string,
+    isStockItem: boolean,
+  ) {
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+    const existing = await this.catalog.getItemById(itemId);
+    if (!existing || existing.merchantId !== merchantId) {
+      throw new NotFoundException(`Item ${itemId} not found`);
+    }
+    return this.catalog.setStockItemOverride(itemId, isStockItem);
   }
 
   private async resolveMerchantId(complianceTenantId: string): Promise<string> {

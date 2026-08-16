@@ -44,6 +44,12 @@ export class CatalogItemOrmEntity {
   @Column({ type: 'varchar', default: '2' })
   productTypeCode!: string;
 
+  @Column({ type: 'boolean', default: false })
+  isStockItem!: boolean;
+
+  @Column({ type: 'boolean', nullable: true })
+  stockItemOverride!: boolean | null;
+
   @Column({ type: 'varchar', default: 'PENDING' })
   registrationStatus!: 'PENDING' | 'REGISTERED' | 'FAILED';
 

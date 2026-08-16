@@ -72,6 +72,7 @@ export class CatalogService {
     packagingUnitCode?: string;
     taxTyCd?: string;
     productTypeCode?: string;
+    isStockItem?: boolean;
   }) {
     return registerItem(params, this.itemRepo, this.classificationResolver);
   }
@@ -82,6 +83,21 @@ export class CatalogService {
 
   async getItemById(itemId: string) {
     return this.itemRepo.findById(itemId);
+  }
+
+  /** Manual override for isStockItem -- survives future pulls, unlike the QuickBooks-derived default. */
+  async setStockItemOverride(itemId: string, isStockItem: boolean) {
+    const existing = await this.itemRepo.findById(itemId);
+    if (!existing) {
+      throw new Error(`Item ${itemId} not found`);
+    }
+    const updated = {
+      ...existing,
+      isStockItem,
+      stockItemOverride: isStockItem,
+      updatedAt: new Date(),
+    };
+    return this.itemRepo.save(updated);
   }
 
   async findByExternalId(merchantId: string, externalId: string) {
