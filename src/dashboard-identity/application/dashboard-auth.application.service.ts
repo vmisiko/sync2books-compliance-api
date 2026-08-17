@@ -20,7 +20,7 @@ export type DashboardAuthTokens = {
 
 export type DashboardAuthResult = {
   user: Omit<DashboardUser, 'passwordHash'>;
-  tenant: { id: string; displayName: string | null } | null;
+  tenant: { id: string; displayName: string | null; merchantId: string } | null;
   tokens: DashboardAuthTokens;
 };
 
@@ -109,7 +109,14 @@ export class DashboardAuthApplicationService {
     return {
       user: this.toSafeUser(user),
       tenant: tenant
-        ? { id: tenant.id, displayName: tenant.displayName }
+        ? {
+            id: tenant.id,
+            displayName: tenant.displayName,
+            // Same fallback SalesService/ComplianceOrganizationApplicationService
+            // use elsewhere -- `sync2booksCompanyId` is the real cross-service
+            // merchantId when set, otherwise the compliance tenant id itself.
+            merchantId: tenant.sync2booksCompanyId ?? tenant.id,
+          }
         : null,
       tokens: {
         accessToken,

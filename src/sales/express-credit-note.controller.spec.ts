@@ -9,6 +9,7 @@ import { SourceSystem } from '../shared/domain/enums/source-system.enum';
 import type { Request } from 'express';
 import { PlatformOscuCallbackService } from '../integration/platform-outbound/platform-oscu-callback.service';
 import { Sync2BooksCorrelationPersistenceService } from '../integration/platform-outbound/sync2books-correlation-persistence.service';
+import { MailerService } from '../mailer/mailer.service';
 
 describe('Express credit note controllers', () => {
   let apiController: ApiSalesController;
@@ -100,6 +101,10 @@ describe('Express credit note controllers', () => {
           useValue: {
             patchComplianceDocument: jest.fn().mockResolvedValue(undefined),
           },
+        },
+        {
+          provide: MailerService,
+          useValue: { send: jest.fn().mockResolvedValue({ sent: false, reason: 'stub' }) },
         },
       ],
     }).compile();

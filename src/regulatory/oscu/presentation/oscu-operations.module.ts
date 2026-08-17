@@ -16,5 +16,6 @@ import { ComplianceServiceAuthModule } from '../../../integration/compliance-ser
   ],
   controllers: [OscuOperationsController],
   providers: [OscuOperationsService],
+  exports: [OscuOperationsService],
 })
 export class OscuOperationsModule {}

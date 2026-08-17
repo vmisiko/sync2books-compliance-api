@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
 import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
@@ -26,6 +26,7 @@ import type { ComplianceConnection } from '../../shared/domain/entities/complian
 import { InventoryService } from '../../inventory/api/inventory.service';
 import { MovementType } from '../../inventory/domain/enums/movement-type.enum';
 import { DocumentType } from '../../shared/domain/enums/document-type.enum';
+import { generateEtimsReceiptPdf } from './receipt/etims-receipt-pdf.generator';
 import type {
   IComplianceConnectionRepository,
   IComplianceDocumentRepository,
@@ -94,6 +95,33 @@ export class SalesService {
     return { document };
   }
 
+  /**
+   * Looks up the document created from a given Main-API `Invoice` id, scoped
+   * to a merchant. Backs the dashboard's receipt-attachment-status/
+   * retry-receipt-attachment proxy routes (see `DashboardInvoicesApplicationService`).
+   */
+  async getDocumentBySourceInvoiceId(
+    merchantId: string,
+    sourceInvoiceId: string,
+  ): Promise<ComplianceDocument | null> {
+    return this.documentRepo.findBySourceInvoiceId(merchantId, sourceInvoiceId);
+  }
+
+  /**
+   * Backfills `sourceInvoiceId` onto a document that already existed (matched
+   * by idempotency key) before this link was recorded. See
+   * `DashboardInvoicesApplicationService.createSaleFromInvoice`'s
+   * idempotency-match self-heal branch.
+   */
+  async patchSourceInvoiceLink(
+    documentId: string,
+    sourceInvoiceId: string,
+  ): Promise<void> {
+    const document = await this.documentRepo.findById(documentId);
+    if (!document) return;
+    await this.documentRepo.save({ ...document, sourceInvoiceId });
+  }
+
   async listDocuments(
     merchantId: string,
   ): Promise<{ documents: ComplianceDocument[] }> {
@@ -131,6 +159,35 @@ export class SalesService {
       this.etimsAdapter,
       this.syncStateRepo,
     );
+  }
+
+  /**
+   * Shared "submit a freshly-created document" pipeline: applies inventory
+   * movements, then validate → prepare → submit. This is exactly the
+   * sequence that `ApiSalesController.createSale` /
+   * `DashboardSalesController.createSale` /
+   * `DashboardInvoicesApplicationService.createSaleFromInvoice` need right
+   * after creating a document with `submit=true`, extracted here so those
+   * three call sites don't duplicate it. All three only call this
+   * immediately after `createDocument` returns `created: true`, when the
+   * document's status is always DRAFT, so there's no separate precondition
+   * check here.
+   */
+  async submitDraftDocument(documentId: string): Promise<ComplianceDocument> {
+    await this.applyInventoryMovements(documentId);
+
+    const validation = await this.validateDocument(documentId);
+    if (!validation.validation.isValid) {
+      throw new BadRequestException({
+        message: 'Sale validation failed',
+        errors: validation.validation.errors,
+      });
+    }
+
+    await this.prepareDocument(documentId);
+    await this.submitDocument(documentId);
+
+    return (await this.getDocument(documentId)).document;
   }
 
   /**
@@ -234,11 +291,11 @@ export class SalesService {
       serialNumber: connection?.deviceId ?? null,
       receiptNumber,
       invoiceNumber: safeNumber(document.documentNumber),
-      customerId: null,
-      customerName: null,
+      customerId: document.customerId,
+      customerName: document.customerName,
       customerTin: document.customerPin,
-      customerPhoneNumber: null,
-      customerEmail: null,
+      customerPhoneNumber: document.customerPhoneNumber,
+      customerEmail: document.customerEmail,
       internalData: intrlData || null,
       receiptSignature: rcptSign || null,
       etimsUrl,
@@ -291,6 +348,51 @@ export class SalesService {
         };
       }),
     };
+  }
+
+  /**
+   * Renders the KRA eTIMS receipt as a PDF, on the fly, from the persisted
+   * OSCU response. Returns null if the document hasn't reached ACCEPTED yet
+   * (nothing to show — this is the source of truth for "has been synced").
+   */
+  async getEtimsReceiptPdf(documentId: string): Promise<Buffer | null> {
+    const { document } = await this.getDocument(documentId);
+    if (document.complianceStatus !== ComplianceStatus.ACCEPTED) {
+      return null;
+    }
+
+    const kraRaw = await this.getKraSalesSaveResponse(documentId);
+    const kraData = (kraRaw?.data as Record<string, unknown> | null) ?? null;
+    const curRcptNoRaw =
+      kraData?.curRcptNo ??
+      (kraData as Record<string, unknown>)?.['curRcptNo '];
+    const receiptNumber = safeNumber(curRcptNoRaw);
+    const rcptSign = safeString(kraData?.rcptSign);
+    const intrlData = safeString(kraData?.intrlData);
+
+    const connection = await this.connectionRepo.findByMerchantAndBranch(
+      document.merchantId,
+      document.branchId,
+    );
+
+    const etimsUrl =
+      connection?.kraPin && rcptSign
+        ? `https://etims.kra.go.ke/common/link/etims/receipt/indexEtimsReceptData?{${connection.kraPin}+${document.branchId}+${rcptSign}}`
+        : null;
+
+    const itemIds = [...new Set(document.lines.map((l) => l.itemId))];
+    const items: ComplianceItem[] = await this.itemRepo.findByIds(itemIds);
+    const itemsById = new Map(items.map((i) => [i.id, i]));
+
+    return generateEtimsReceiptPdf({
+      document,
+      connection,
+      itemsById,
+      receiptNumber,
+      receiptSignature: rcptSign,
+      internalData: intrlData,
+      etimsUrl,
+    });
   }
 
   async listNormalizedSaleReports(params: {
@@ -639,11 +741,11 @@ function buildNormalizedSaleReport(input: {
     serialNumber: connection?.deviceId ?? null,
     receiptNumber,
     invoiceNumber: safeNumber(document.documentNumber),
-    customerId: null,
-    customerName: null,
+    customerId: document.customerId,
+    customerName: document.customerName,
     customerTin: document.customerPin,
-    customerPhoneNumber: null,
-    customerEmail: null,
+    customerPhoneNumber: document.customerPhoneNumber,
+    customerEmail: document.customerEmail,
     internalData: intrlData || null,
     receiptSignature: rcptSign || null,
     etimsUrl,

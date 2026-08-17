@@ -17,6 +17,7 @@ import { ComplianceEventTypeOrmRepository } from './infrastructure/persistence/c
 import { ComplianceServiceAuthModule } from '../integration/compliance-service-auth.module';
 import { PlatformCorrelationModule } from '../integration/platform-correlation.module';
 import { OscuSyncStateOrmEntity } from '../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
+import { MailerModule } from '../mailer/mailer.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { OscuSyncStateOrmEntity } from '../regulatory/oscu/infrastructure/persis
     ComplianceOrganizationModule,
     DashboardIdentityModule,
     EtimsModule,
+    MailerModule,
     TypeOrmModule.forFeature([
       ComplianceDocumentOrmEntity,
       ComplianceLineOrmEntity,

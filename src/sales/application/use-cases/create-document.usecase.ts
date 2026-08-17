@@ -21,6 +21,8 @@ export interface CreateDocumentInput {
   originalDocumentNumber?: string | null;
   /** For CREDIT_NOTE created from an internal sale: original sale document id */
   originalSaleId?: string | null;
+  /** Main-API `Invoice` id, when this document originated from a pulled ERP invoice. */
+  sourceInvoiceId?: string | null;
   /** For CREDIT_NOTE: credit note datetime (OSCU `rfdDt`) `yyyyMMddhhmmss` */
   creditNoteDate?: string | null;
   /** For CREDIT_NOTE: credit reason code (OSCU `rfdRsnCd`) e.g. "01".."06" */
@@ -35,6 +37,10 @@ export interface CreateDocumentInput {
   totalTax: number;
   totalAmount: number;
   customerPin?: string | null;
+  customerId?: string | null;
+  customerName?: string | null;
+  customerPhoneNumber?: string | null;
+  customerEmail?: string | null;
   lines: Array<{
     itemId: string;
     description: string;
@@ -131,6 +137,9 @@ export async function createDocument(
     documentNumber: input.documentNumber,
     originalDocumentNumber: input.originalDocumentNumber ?? null,
     originalSaleId: input.originalSaleId ?? null,
+    sourceInvoiceId: input.sourceInvoiceId ?? null,
+    mainApiSyncItemId: null,
+    mainApiSyncBatchId: null,
     creditNoteDate: input.creditNoteDate ?? null,
     creditNoteReasonCode: input.creditNoteReasonCode ?? null,
     saleDate: input.saleDate ?? null,
@@ -143,6 +152,10 @@ export async function createDocument(
     totalAmount: input.totalAmount,
     totalTax: input.totalTax,
     customerPin: input.customerPin ?? null,
+    customerId: input.customerId ?? null,
+    customerName: input.customerName ?? null,
+    customerPhoneNumber: input.customerPhoneNumber ?? null,
+    customerEmail: input.customerEmail ?? null,
     complianceStatus: ComplianceStatus.DRAFT,
     submissionAttempts: 0,
     etimsReceiptNumber: null,

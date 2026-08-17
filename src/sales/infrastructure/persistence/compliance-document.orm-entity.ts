@@ -35,6 +35,18 @@ export class ComplianceDocumentOrmEntity {
   @Column('varchar', { nullable: true })
   originalSaleId!: string | null;
 
+  /** Main-API `Invoice` id, when this document originated from a pulled ERP invoice. */
+  @Column('varchar', { nullable: true })
+  sourceInvoiceId!: string | null;
+
+  /** Main API `sync_item` id from `POST /internal/compliance/invoice-receipt`. */
+  @Column('varchar', { nullable: true })
+  mainApiSyncItemId!: string | null;
+
+  /** Main API `sync_batch` id from `POST /internal/compliance/invoice-receipt`. */
+  @Column('varchar', { nullable: true })
+  mainApiSyncBatchId!: string | null;
+
   @Column('varchar', { nullable: true })
   creditNoteDate!: string | null;
 
@@ -70,6 +82,18 @@ export class ComplianceDocumentOrmEntity {
 
   @Column('varchar', { nullable: true })
   customerPin!: string | null;
+
+  @Column('varchar', { nullable: true })
+  customerId!: string | null;
+
+  @Column('varchar', { nullable: true })
+  customerName!: string | null;
+
+  @Column('varchar', { nullable: true })
+  customerPhoneNumber!: string | null;
+
+  @Column('varchar', { nullable: true })
+  customerEmail!: string | null;
 
   @Column('varchar')
   complianceStatus!: string;

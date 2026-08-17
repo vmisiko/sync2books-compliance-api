@@ -1,11 +1,14 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CatalogModule } from './catalog/catalog.module';
 import { ComplianceOrganizationModule } from './compliance-organization/compliance-organization.module';
 import { DashboardCatalogModule } from './dashboard-catalog/dashboard-catalog.module';
+import { DashboardCustomersModule } from './dashboard-customers/dashboard-customers.module';
 import { DashboardIdentityModule } from './dashboard-identity/dashboard-identity.module';
+import { DashboardInventoryModule } from './dashboard-inventory/dashboard-inventory.module';
 import { DashboardInvoicesModule } from './dashboard-invoices/dashboard-invoices.module';
 import { DashboardMappingModule } from './dashboard-mapping/dashboard-mapping.module';
 import { InventoryModule } from './inventory/inventory.module';
@@ -28,13 +31,20 @@ import { TaxMappingOrmEntity } from './regulatory/oscu/infrastructure/persistenc
 import { ComplianceDocumentOrmEntity } from './sales/infrastructure/persistence/compliance-document.orm-entity';
 import { ComplianceEventOrmEntity } from './sales/infrastructure/persistence/compliance-event.orm-entity';
 import { ComplianceLineOrmEntity } from './sales/infrastructure/persistence/compliance-line.orm-entity';
+import { CustomerOrmEntity } from './dashboard-customers/infrastructure/persistence/customer.orm-entity';
 import { DashboardUserOrmEntity } from './dashboard-identity/infrastructure/persistence/dashboard-user.orm-entity';
+import { InventoryStockOrmEntity } from './inventory/infrastructure/persistence/inventory-stock.orm-entity';
+import { StockMovementOrmEntity } from './inventory/infrastructure/persistence/stock-movement.orm-entity';
 import { MainApiConnectionOrmEntity } from './integration/main-api-pull/infrastructure/persistence/main-api-connection.orm-entity';
 import { MainApiPullModule } from './integration/main-api-pull/main-api-pull.module';
 import { PlatformCorrelationModule } from './integration/platform-correlation.module';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+    }),
     TypeOrmModule.forRoot({
       name: 'default',
       type: 'mysql',
@@ -53,7 +63,9 @@ import { PlatformCorrelationModule } from './integration/platform-correlation.mo
         ComplianceEventOrmEntity,
         ComplianceLineOrmEntity,
         ComplianceTenantOrmEntity,
+        CustomerOrmEntity,
         DashboardUserOrmEntity,
+        InventoryStockOrmEntity,
         MainApiConnectionOrmEntity,
         OscuCodeClassOrmEntity,
         OscuCodeOrmEntity,
@@ -61,6 +73,7 @@ import { PlatformCorrelationModule } from './integration/platform-correlation.mo
         OscuOperationLogOrmEntity,
         OscuSyncStateOrmEntity,
         PaymentTypeMappingOrmEntity,
+        StockMovementOrmEntity,
         TaxMappingOrmEntity,
       ],
       synchronize: true,
@@ -73,7 +86,9 @@ import { PlatformCorrelationModule } from './integration/platform-correlation.mo
     CatalogModule,
     ComplianceOrganizationModule,
     DashboardCatalogModule,
+    DashboardCustomersModule,
     DashboardIdentityModule,
+    DashboardInventoryModule,
     DashboardInvoicesModule,
     DashboardMappingModule,
     InventoryModule,

@@ -3,11 +3,15 @@ import {
   Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -26,6 +30,9 @@ import {
 import { CreateExpressCreditNoteDto } from './dto/create-express-credit-note.dto';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
+import { MailerService } from '../../mailer/mailer.service';
+import { EmailReceiptDto } from './dto/email-receipt.dto';
+import { renderReceiptEmailHtml } from '../application/receipt/receipt-email.renderer';
 
 /**
  * Guarded (previously open to any caller). Still trusts merchantId/branchId
@@ -38,7 +45,10 @@ import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/g
 @UseGuards(DashboardJwtAuthGuard)
 @ApiBearerAuth()
 export class DashboardSalesController {
-  constructor(private readonly salesService: SalesService) {}
+  constructor(
+    private readonly salesService: SalesService,
+    private readonly mailer: MailerService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List sales (Digitax-like report)' })
@@ -121,6 +131,10 @@ export class DashboardSalesController {
           0,
         ),
         customerPin: body.customerTin ?? null,
+        customerId: body.customerId ?? null,
+        customerName: body.customerName ?? null,
+        customerPhoneNumber: body.customerPhoneNumber ?? null,
+        customerEmail: body.customerEmail ?? null,
         lines: items.map((i) => ({
           itemId: i.id,
           description: i.itemDescription ?? '',
@@ -137,18 +151,7 @@ export class DashboardSalesController {
 
     // Dashboard can still be synchronous for MVP; later make async + polling.
     if (createResult.created && shouldSubmit) {
-      await this.salesService.applyInventoryMovements(documentId);
-
-      const validation = await this.salesService.validateDocument(documentId);
-      if (!validation.validation.isValid) {
-        throw new BadRequestException({
-          message: 'Sale validation failed',
-          errors: validation.validation.errors,
-        });
-      }
-
-      await this.salesService.prepareDocument(documentId);
-      await this.salesService.submitDocument(documentId);
+      await this.salesService.submitDraftDocument(documentId);
     }
 
     const data = await this.salesService.getNormalizedSaleReport(documentId);
@@ -278,6 +281,63 @@ export class DashboardSalesController {
   ): Promise<SalesReportDetailResponseDto> {
     const data = await this.salesService.getNormalizedSaleReport(id);
     return { data };
+  }
+
+  @Get(':id/receipt')
+  @ApiOperation({
+    summary: 'Download the KRA eTIMS receipt PDF for an ACCEPTED sale',
+  })
+  @ApiResponse({ status: 200, description: 'Receipt PDF' })
+  async getReceipt(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const pdf = await this.salesService.getEtimsReceiptPdf(id);
+    if (!pdf) {
+      throw new NotFoundException(
+        'Receipt not available -- sale has not been accepted by KRA yet',
+      );
+    }
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="etims-receipt-${id}.pdf"`,
+    });
+    return new StreamableFile(pdf);
+  }
+
+  @Post(':id/email')
+  @ApiOperation({
+    summary:
+      "Email the sale invoice receipt to the customer (attaches the KRA receipt PDF when the sale has been ACCEPTED, otherwise sends the summary only)",
+  })
+  @ApiResponse({ status: 200, description: 'Email result' })
+  @ApiBadRequestResponse({ description: 'No destination email available' })
+  async emailReceipt(@Param('id') id: string, @Body() body: EmailReceiptDto) {
+    const report = await this.salesService.getNormalizedSaleReport(id);
+    const to = body.email ?? report.customerEmail;
+    if (!to) {
+      throw new BadRequestException(
+        'No email address on file for this sale -- pass one explicitly',
+      );
+    }
+
+    const pdf = await this.salesService.getEtimsReceiptPdf(id);
+    const result = await this.mailer.send({
+      to,
+      subject: `Sale Invoice ${report.traderInvoiceNumber}`,
+      html: renderReceiptEmailHtml(report),
+      attachments: pdf
+        ? [
+            {
+              filename: `etims-receipt-${id}.pdf`,
+              content: pdf,
+              contentType: 'application/pdf',
+            },
+          ]
+        : undefined,
+    });
+
+    return { success: result.sent, to, ...result };
   }
 
   // private toSaleDocumentDto(

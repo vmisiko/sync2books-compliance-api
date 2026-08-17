@@ -43,6 +43,9 @@ function docOrmToDomain(
     documentNumber: row.documentNumber,
     originalDocumentNumber: row.originalDocumentNumber,
     originalSaleId: row.originalSaleId,
+    sourceInvoiceId: row.sourceInvoiceId,
+    mainApiSyncItemId: row.mainApiSyncItemId,
+    mainApiSyncBatchId: row.mainApiSyncBatchId,
     creditNoteDate: row.creditNoteDate,
     creditNoteReasonCode: row.creditNoteReasonCode,
     saleDate: row.saleDate,
@@ -55,6 +58,10 @@ function docOrmToDomain(
     totalAmount: row.totalAmount,
     totalTax: row.totalTax,
     customerPin: row.customerPin,
+    customerId: row.customerId,
+    customerName: row.customerName,
+    customerPhoneNumber: row.customerPhoneNumber,
+    customerEmail: row.customerEmail,
     complianceStatus:
       row.complianceStatus as ComplianceDocument['complianceStatus'],
     submissionAttempts: row.submissionAttempts,
@@ -80,6 +87,9 @@ function docDomainToOrm(
   e.documentNumber = document.documentNumber;
   e.originalDocumentNumber = document.originalDocumentNumber;
   e.originalSaleId = document.originalSaleId;
+  e.sourceInvoiceId = document.sourceInvoiceId;
+  e.mainApiSyncItemId = document.mainApiSyncItemId;
+  e.mainApiSyncBatchId = document.mainApiSyncBatchId;
   e.creditNoteDate = document.creditNoteDate;
   e.creditNoteReasonCode = document.creditNoteReasonCode;
   e.saleDate = document.saleDate;
@@ -92,6 +102,10 @@ function docDomainToOrm(
   e.totalAmount = document.totalAmount;
   e.totalTax = document.totalTax;
   e.customerPin = document.customerPin;
+  e.customerId = document.customerId;
+  e.customerName = document.customerName;
+  e.customerPhoneNumber = document.customerPhoneNumber;
+  e.customerEmail = document.customerEmail;
   e.complianceStatus = document.complianceStatus;
   e.submissionAttempts = document.submissionAttempts;
   e.etimsReceiptNumber = document.etimsReceiptNumber;
@@ -170,6 +184,29 @@ export class ComplianceDocumentTypeOrmRepository implements IComplianceDocumentR
     idempotencyKey: string,
   ): Promise<ComplianceDocument | null> {
     const row = await this.documentRepo.findOne({ where: { idempotencyKey } });
+    if (!row) return null;
+    const lines = await this.lineRepo.find({
+      where: { documentId: row.id },
+      order: { createdAt: 'ASC' },
+    });
+    return docOrmToDomain(row, lines);
+  }
+
+  /**
+   * Looks up the document created from a given Main-API `Invoice` id (see
+   * `ComplianceDocument.sourceInvoiceId`), scoped to a merchant so one
+   * tenant can't probe another's documents by guessing an invoice id.
+   * Used by the dashboard's receipt-attachment-status/retry-receipt-attachment
+   * proxy routes.
+   */
+  async findBySourceInvoiceId(
+    merchantId: string,
+    sourceInvoiceId: string,
+  ): Promise<ComplianceDocument | null> {
+    const row = await this.documentRepo.findOne({
+      where: { merchantId, sourceInvoiceId },
+      order: { createdAt: 'DESC' },
+    });
     if (!row) return null;
     const lines = await this.lineRepo.find({
       where: { documentId: row.id },

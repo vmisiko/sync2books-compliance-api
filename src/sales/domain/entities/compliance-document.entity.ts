@@ -30,6 +30,25 @@ export interface ComplianceDocument {
    */
   originalSaleId: string | null;
   /**
+   * Main-API `Invoice` id this document was created from, when it originated
+   * from a pulled ERP invoice (see `DashboardInvoicesApplicationService.
+   * createSaleFromInvoice`). Null for documents created directly (manual
+   * dashboard/API entry). Carried through to the outbound OSCU-outcome
+   * callback so Main API can link the callback back to its `Invoice` row.
+   */
+  sourceInvoiceId: string | null;
+  /**
+   * Main API `sync_item` id returned by `POST /internal/compliance/invoice-receipt`
+   * after this document notifies Main API of a successful eTIMS submission
+   * (see `DashboardInvoicesApplicationService.createSaleFromInvoice`'s
+   * unconditional notification call). Null until that call succeeds. Used by
+   * the dashboard's receipt-attachment-status/retry-receipt-attachment proxy
+   * routes to look up/retry the sync item on Main API.
+   */
+  mainApiSyncItemId: string | null;
+  /** Main API `sync_batch` id returned alongside `mainApiSyncItemId`, kept for completeness. */
+  mainApiSyncBatchId: string | null;
+  /**
    * For CREDIT_NOTE: credit note datetime (OSCU `rfdDt`) formatted as `yyyyMMddhhmmss`.
    * Optional per spec.
    */
@@ -50,6 +69,11 @@ export interface ComplianceDocument {
   totalAmount: number;
   totalTax: number;
   customerPin: string | null;
+  /** Snapshot at sale time of the referenced Customer, if one was selected. */
+  customerId: string | null;
+  customerName: string | null;
+  customerPhoneNumber: string | null;
+  customerEmail: string | null;
   complianceStatus: ComplianceStatus;
   submissionAttempts: number;
   etimsReceiptNumber: string | null;

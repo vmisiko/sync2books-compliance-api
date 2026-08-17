@@ -72,6 +72,15 @@ export class CreateSaleDto {
   @ApiProperty({ required: false })
   customerName?: string;
 
+  @ApiProperty({ required: false, description: 'Reference to a saved Customer' })
+  customerId?: string;
+
+  @ApiProperty({ required: false })
+  customerPhoneNumber?: string;
+
+  @ApiProperty({ required: false })
+  customerEmail?: string;
+
   @ApiProperty({ description: 'Receipt type code, e.g. S or R' })
   receiptTypeCode!: string;
 

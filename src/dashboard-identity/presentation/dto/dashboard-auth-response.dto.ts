@@ -12,6 +12,11 @@ export class DashboardUserResponseDto {
 export class DashboardTenantResponseDto {
   @ApiProperty() id!: string;
   @ApiPropertyOptional({ nullable: true }) displayName!: string | null;
+  @ApiProperty({
+    description:
+      "The tenant's cross-service merchantId (sync2booksCompanyId when set, otherwise the tenant id itself) -- pass this as merchantId to endpoints that require one, not `id`.",
+  })
+  merchantId!: string;
 }
 
 export class DashboardTokensResponseDto {

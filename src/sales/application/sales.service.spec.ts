@@ -25,6 +25,9 @@ function baseDocument(
     documentNumber: 'INV-1',
     originalDocumentNumber: null,
     originalSaleId: null,
+    sourceInvoiceId: null,
+    mainApiSyncItemId: null,
+    mainApiSyncBatchId: null,
     creditNoteDate: null,
     creditNoteReasonCode: null,
     saleDate: '2026-08-14',
@@ -37,6 +40,10 @@ function baseDocument(
     totalAmount: 100,
     totalTax: 0,
     customerPin: null,
+    customerId: null,
+    customerName: null,
+    customerPhoneNumber: null,
+    customerEmail: null,
     complianceStatus: ComplianceStatus.ACCEPTED,
     submissionAttempts: 1,
     etimsReceiptNumber: null,
@@ -72,6 +79,7 @@ describe('SalesService.getNormalizedSaleReport tax type resolution', () => {
       save: jest.fn(),
       findById: jest.fn().mockResolvedValue(document),
       findByIdempotencyKey: jest.fn(),
+      findBySourceInvoiceId: jest.fn(),
       findByMerchant: jest.fn(),
     };
     const eventRepo: IComplianceEventRepository = {

@@ -401,6 +401,17 @@ export class MainApiPullClient {
     );
   }
 
+  /** Sibling to syncItemsFromBookkeeping/syncInvoicesFromBookkeeping -- see customer.controller.ts's identical route on the main API. */
+  async syncCustomersFromBookkeeping(
+    apiKey: string,
+    connectionId: string,
+  ): Promise<unknown> {
+    return this.post(
+      apiKey,
+      `/customers/connection/${connectionId}/sync-from-bookkeeping`,
+    );
+  }
+
   // --- Sync2Books Link (ERP connect widget) proxy calls ---
   // Mirrors src/lib/sync2books-link/client.ts in sync2books-react, but kept
   // server-side here so the main-API key never reaches the browser.
