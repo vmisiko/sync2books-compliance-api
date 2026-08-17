@@ -95,4 +95,55 @@ describe('StockController', () => {
     expect(res.from.quantityOnHand).toBe(2);
     expect(res.to.quantityOnHand).toBe(5);
   });
+
+  it('should reconcile stock against an external quantity, recording the delta not the absolute value', async () => {
+    await service.recordMovement({
+      itemId: 'item-4',
+      branchId: 'branch-1',
+      movementType: MovementType.PURCHASE,
+      quantity: 10,
+    });
+
+    const up = await service.reconcileStock({
+      itemId: 'item-4',
+      branchId: 'branch-1',
+      externalQtyOnHand: 15,
+    });
+    expect(up.movement.movementType).toBe(MovementType.RECONCILE);
+    expect(up.movement.quantity).toBe(5); // 15 - 10
+    expect(up.movement.sourceSystem).toBe('QUICKBOOKS');
+    expect(up.stock.quantityOnHand).toBe(15);
+
+    const down = await service.reconcileStock({
+      itemId: 'item-4',
+      branchId: 'branch-1',
+      externalQtyOnHand: 3,
+    });
+    expect(down.movement.quantity).toBe(-12); // 3 - 15
+    expect(down.stock.quantityOnHand).toBe(3);
+  });
+
+  it('should reject a movement that would take stock negative without recording it', async () => {
+    await service.recordMovement({
+      itemId: 'item-5',
+      branchId: 'branch-1',
+      movementType: MovementType.PURCHASE,
+      quantity: 2,
+    });
+
+    await expect(
+      service.recordMovement({
+        itemId: 'item-5',
+        branchId: 'branch-1',
+        movementType: MovementType.SALE,
+        quantity: 5,
+      }),
+    ).rejects.toThrow('Insufficient stock');
+
+    const movements = await service.listMovements({ itemId: 'item-5' });
+    // Only the PURCHASE should be recorded -- the rejected SALE must never
+    // land in the ledger (a real pre-existing bug this atomicity fix closes).
+    expect(movements).toHaveLength(1);
+    expect(movements[0].movementType).toBe(MovementType.PURCHASE);
+  });
 });

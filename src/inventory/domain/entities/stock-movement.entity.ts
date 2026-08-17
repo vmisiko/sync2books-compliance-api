@@ -10,7 +10,11 @@ export interface StockMovement {
   branchId: string;
   movementType: MovementType;
   quantity: number; // Positive for in, negative for out
+  /** quantityOnHand immediately after this movement applied -- audit convenience. */
+  balanceAfter: number;
   referenceType: string | null; // e.g. 'INVOICE', 'PURCHASE_ORDER'
   referenceId: string | null;
+  /** Where this movement originated, e.g. 'QUICKBOOKS', 'DASHBOARD'. Null for internal/manual. */
+  sourceSystem: string | null;
   createdAt: Date;
 }

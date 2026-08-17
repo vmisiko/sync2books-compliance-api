@@ -13,6 +13,7 @@ export interface RecordMovementInput {
   quantity: number;
   referenceType?: string | null;
   referenceId?: string | null;
+  sourceSystem?: string | null;
 }
 
 export interface RecordMovementResult {
@@ -30,13 +31,20 @@ function getSignedQuantity(
     MovementType.TRANSFER_OUT,
   ];
   if (outbound.includes(movementType)) return -Math.abs(quantity);
-  if (movementType === MovementType.ADJUSTMENT) return quantity; // Allow +/- directly
+  // ADJUSTMENT/RECONCILE carry an already-signed delta (can be +/-).
+  if (
+    movementType === MovementType.ADJUSTMENT ||
+    movementType === MovementType.RECONCILE
+  )
+    return quantity;
   return Math.abs(quantity); // PURCHASE, TRANSFER_IN, RETURN
 }
 
 /**
  * Record stock movement.
- * Stock must only change through StockMovement. Atomic update.
+ * Stock must only change through StockMovement, applied atomically by the
+ * repository (IStockRepository.applyDelta) -- it throws InsufficientStockError
+ * before anything is recorded, so a rejected movement never lands in the ledger.
  */
 export async function recordMovement(
   input: RecordMovementInput,
@@ -46,37 +54,21 @@ export async function recordMovement(
   const delta = getSignedQuantity(input.movementType, input.quantity);
   const now = new Date();
 
+  const stock = await stockRepo.applyDelta(input.itemId, input.branchId, delta);
+
   const movement: StockMovement = {
     id: `mov-${input.itemId}-${input.branchId}-${now.getTime()}`,
     itemId: input.itemId,
     branchId: input.branchId,
     movementType: input.movementType,
     quantity: delta,
+    balanceAfter: stock.quantityOnHand,
     referenceType: input.referenceType ?? null,
     referenceId: input.referenceId ?? null,
+    sourceSystem: input.sourceSystem ?? null,
     createdAt: now,
   };
   await movementRepo.append(movement);
 
-  const stock = await stockRepo.getStock(input.itemId, input.branchId);
-  const newQty = (stock?.quantityOnHand ?? 0) + delta;
-
-  if (newQty < 0) {
-    throw new Error(
-      `Insufficient stock: ${input.itemId} at ${input.branchId}. ` +
-        `Have ${stock?.quantityOnHand ?? 0}, tried to deduct ${Math.abs(delta)}`,
-    );
-  }
-
-  const updatedStock: InventoryStock = {
-    itemId: input.itemId,
-    branchId: input.branchId,
-    quantityOnHand: newQty,
-    reservedQuantity: stock?.reservedQuantity ?? 0,
-    lastMovementAt: now,
-    updatedAt: now,
-  };
-  await stockRepo.upsertStock(updatedStock);
-
-  return { movement, stock: updatedStock };
+  return { movement, stock };
 }

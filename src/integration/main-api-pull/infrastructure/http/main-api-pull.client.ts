@@ -13,6 +13,8 @@ export interface MainApiItem {
   defaultTaxCodeRef?: { id: string; name?: string } | null;
   bookId?: string | null;
   bookType?: string | null;
+  /** QuickBooks QtyOnHand, captured on item pull/sync. Undefined for non-inventory items. */
+  qtyOnHand?: number | null;
 }
 
 export interface MainApiInvoiceLineItem {
@@ -493,6 +495,47 @@ export class MainApiPullClient {
       apiKey,
       `/connections/${connectionId}/disconnect`,
       undefined,
+    );
+  }
+
+  // --- Generic sync-item status/retry (dashboard receipt-attachment proxy) ---
+  // Backs DashboardInvoicesController's receipt-attachment-status/
+  // retry-receipt-attachment routes. Auth'd the same way as every other call
+  // in this client (x-api-key against the tenant's stored Main-API
+  // connection), NOT the internal bearer-token scheme Sync2BooksMainApiOscuClient
+  // uses for the invoice-receipt webhook — these are Main API's normal
+  // external API surface, entity-type-agnostic.
+
+  /**
+   * GET /sync/items/:syncItemId — generic single-sync-item status lookup.
+   * UNCONFIRMED PATH: at the time this was written, Main API's exact route
+   * for this (entity-type-agnostic single-item status) was still being
+   * finalized in a parallel task; this is a best guess based on the
+   * confirmed retry route below. Verify against Main API's actual route
+   * before relying on this in production.
+   */
+  async getSyncItemStatus(
+    apiKey: string,
+    syncItemId: string,
+  ): Promise<Record<string, unknown>> {
+    return this.get<Record<string, unknown>>(
+      apiKey,
+      `/sync/items/${syncItemId}`,
+      {},
+    );
+  }
+
+  /**
+   * POST /sync/items/:syncItemId/retry — confirmed generic retry route,
+   * entity-type-agnostic, needs only the sync item id.
+   */
+  async retrySyncItem(
+    apiKey: string,
+    syncItemId: string,
+  ): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>(
+      apiKey,
+      `/sync/items/${syncItemId}/retry`,
     );
   }
 

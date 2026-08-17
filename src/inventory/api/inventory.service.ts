@@ -113,6 +113,7 @@ export class InventoryService {
       case MovementType.TRANSFER_OUT:
         return '13';
       case MovementType.ADJUSTMENT:
+      case MovementType.RECONCILE:
         return movement.quantity >= 0 ? '05' : '16';
       default:
         return movement.quantity >= 0 ? '05' : '16';
@@ -319,6 +320,7 @@ export class InventoryService {
     quantity: number;
     referenceType?: string | null;
     referenceId?: string | null;
+    sourceSystem?: string | null;
     /** Unit price for this movement -- required for the eTIMS insertStockIO sync
      * (KRA needs a real, non-zero amount). Not needed for the stock-quantity math
      * itself; omit it and the movement still records locally, it just won't sync. */
@@ -331,8 +333,53 @@ export class InventoryService {
       this.movementRepo,
     );
     await this.syncStockMovementToEtims({ ...result, unitPrice });
-    await this.syncStockMasterToEtims(result.stock);
+    // saveStockMaster is reconciliation-only: it sets KRA's resident-quantity
+    // snapshot (rsdQty), not a per-movement ledger entry -- firing it after
+    // every SALE/PURCHASE/TRANSFER would be both wrong (it's not what
+    // saveStockMaster is for) and wasteful.
+    if (result.movement.movementType === MovementType.RECONCILE) {
+      await this.syncStockMasterToEtims(result.stock);
+    }
     return result;
+  }
+
+  /**
+   * Reconcile local stock against an external system's quantity (e.g.
+   * QuickBooks QtyOnHand) -- diffs against the current on-hand quantity and
+   * records the delta as a RECONCILE movement, never a blind overwrite.
+   */
+  async reconcileStock(params: {
+    itemId: string;
+    branchId: string;
+    externalQtyOnHand: number;
+    sourceSystem?: string;
+    referenceId?: string;
+    unitPrice?: number;
+  }) {
+    const current = await this.stockRepo.getStock(params.itemId, params.branchId);
+    const delta = params.externalQtyOnHand - (current?.quantityOnHand ?? 0);
+    return this.recordMovement({
+      itemId: params.itemId,
+      branchId: params.branchId,
+      movementType: MovementType.RECONCILE,
+      quantity: delta,
+      referenceType: 'RECONCILE',
+      referenceId: params.referenceId ?? null,
+      sourceSystem: params.sourceSystem ?? 'QUICKBOOKS',
+      unitPrice: params.unitPrice,
+    });
+  }
+
+  async listStock(branchId?: string) {
+    return this.stockRepo.listByBranch(branchId);
+  }
+
+  async listMovements(params: {
+    itemId?: string;
+    branchId?: string;
+    limit?: number;
+  }) {
+    return this.movementRepo.list(params);
   }
 
   async adjustStock(params: {
