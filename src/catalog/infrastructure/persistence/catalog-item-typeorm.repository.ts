@@ -20,6 +20,8 @@ function ormToDomain(row: CatalogItemOrmEntity): CatalogItem {
     packagingUnitCode: row.packagingUnitCode,
     taxTyCd: row.taxTyCd,
     productTypeCode: row.productTypeCode,
+    unitPrice: row.unitPrice,
+    originCountry: row.originCountry,
     isStockItem: row.isStockItem,
     stockItemOverride: row.stockItemOverride,
     registrationStatus: row.registrationStatus,
@@ -48,6 +50,8 @@ function domainToOrm(item: CatalogItem): CatalogItemOrmEntity {
   e.packagingUnitCode = item.packagingUnitCode;
   e.taxTyCd = item.taxTyCd;
   e.productTypeCode = item.productTypeCode;
+  e.unitPrice = item.unitPrice;
+  e.originCountry = item.originCountry;
   e.isStockItem = item.isStockItem;
   e.stockItemOverride = item.stockItemOverride;
   e.registrationStatus = item.registrationStatus;

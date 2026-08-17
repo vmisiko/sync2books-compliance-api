@@ -113,7 +113,10 @@ describe('DashboardMappingApplicationService', () => {
   async function buildService(
     org: Pick<ComplianceOrganizationApplicationService, 'getTenantById'>,
     connections: Pick<MainApiConnectionApplicationService, 'ensureCompany'>,
-    mainApiPull: Pick<MainApiPullClient, 'getTaxRates' | 'getTaxCodes' | 'getItems'>,
+    mainApiPull: Pick<
+      MainApiPullClient,
+      'getTaxRates' | 'getTaxCodes' | 'getItems'
+    >,
   ): Promise<DashboardMappingApplicationService> {
     module = await Test.createTestingModule({
       imports: [
@@ -503,7 +506,13 @@ describe('DashboardMappingApplicationService', () => {
         // getItems() is never actually invoked -- present only to satisfy
         // buildService()'s parameter type.
         getItems: () =>
-          Promise.resolve({ data: [], total: 0, page: 1, limit: 100, totalPages: 1 }),
+          Promise.resolve({
+            data: [],
+            total: 0,
+            page: 1,
+            limit: 100,
+            totalPages: 1,
+          }),
       };
 
       const service = await buildService(
@@ -557,10 +566,24 @@ describe('DashboardMappingApplicationService', () => {
       const service = await buildService(
         fakeOrg(),
         fakeConnections('qb-conn-1'),
-        fakeMainApiPull([], [], [
-          item({ id: 'i1', itemCode: 'QB_1', name: 'Maize Flour 2kg', sku: 'MF-2KG' }),
-          item({ id: 'i2', itemCode: 'QB_2', name: 'Sukuma Wiki Bunch', sku: 'SW-1' }),
-        ]),
+        fakeMainApiPull(
+          [],
+          [],
+          [
+            item({
+              id: 'i1',
+              itemCode: 'QB_1',
+              name: 'Maize Flour 2kg',
+              sku: 'MF-2KG',
+            }),
+            item({
+              id: 'i2',
+              itemCode: 'QB_2',
+              name: 'Sukuma Wiki Bunch',
+              sku: 'SW-1',
+            }),
+          ],
+        ),
       );
 
       const result = await service.pullAll(TENANT_ID);
@@ -593,17 +616,21 @@ describe('DashboardMappingApplicationService', () => {
       let currentItems: MainApiItem[] = [
         item({ id: 'i1', name: 'Maize Flour 2kg', sku: 'MF-2KG' }),
       ];
-      const service = await buildService(fakeOrg(), fakeConnections('qb-conn-1'), {
-        ...fakeMainApiPull([], []),
-        getItems: () =>
-          Promise.resolve({
-            data: currentItems,
-            total: currentItems.length,
-            page: 1,
-            limit: 100,
-            totalPages: 1,
-          }),
-      });
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        {
+          ...fakeMainApiPull([], []),
+          getItems: () =>
+            Promise.resolve({
+              data: currentItems,
+              total: currentItems.length,
+              page: 1,
+              limit: 100,
+              totalPages: 1,
+            }),
+        },
+      );
 
       const first = await service.pullAll(TENANT_ID);
       const mappingId = first.classifications.results[0].mappingId;
@@ -647,33 +674,41 @@ describe('DashboardMappingApplicationService', () => {
       const service = await buildService(
         fakeOrg(),
         fakeConnections('qb-conn-1'),
-        fakeMainApiPull([], [], [
-          item({
-            id: 'i1',
-            itemCode: 'QB_1',
-            name: 'Rice 2kg',
-            unitOfMeasure: 'kg',
-            // Deliberately not "16.0% S" -- mapQbTaxToInternalTaxCategory's
-            // isZeroRate check does a crude `.includes('0%')`, which also
-            // matches inside "16.0%" (a real pre-existing bug, flagged
-            // separately -- not something this test is about).
-            defaultTaxCodeRef: { id: 'tc1', name: '16% Standard VAT' },
-          }),
-          item({
-            id: 'i2',
-            itemCode: 'QB_2',
-            name: 'Consulting Service',
-            unitOfMeasure: 'each',
-            defaultTaxCodeRef: undefined,
-          }),
-        ]),
+        fakeMainApiPull(
+          [],
+          [],
+          [
+            item({
+              id: 'i1',
+              itemCode: 'QB_1',
+              name: 'Rice 2kg',
+              unitOfMeasure: 'kg',
+              // Deliberately not "16.0% S" -- mapQbTaxToInternalTaxCategory's
+              // isZeroRate check does a crude `.includes('0%')`, which also
+              // matches inside "16.0%" (a real pre-existing bug, flagged
+              // separately -- not something this test is about).
+              defaultTaxCodeRef: { id: 'tc1', name: '16% Standard VAT' },
+            }),
+            item({
+              id: 'i2',
+              itemCode: 'QB_2',
+              name: 'Consulting Service',
+              unitOfMeasure: 'each',
+              defaultTaxCodeRef: undefined,
+            }),
+          ],
+        ),
       );
 
       // Approve a tax mapping for VAT_STANDARD -- matches what
       // mapQbTaxToInternalTaxCategory derives for the "Rice 2kg" item above.
       await service.createManual(
         TENANT_ID,
-        { type: 'tax', internalTaxCategory: TaxCategory.VAT_STANDARD, taxTyCd: 'B' },
+        {
+          type: 'tax',
+          internalTaxCategory: TaxCategory.VAT_STANDARD,
+          taxTyCd: 'B',
+        },
         'reviewer@example.com',
       );
 
@@ -681,7 +716,9 @@ describe('DashboardMappingApplicationService', () => {
 
       const items = await service.list(TENANT_ID, { type: 'classification' });
       const rice = items.find((i) => i.externalValue === 'Rice 2kg')!;
-      const consulting = items.find((i) => i.externalValue === 'Consulting Service')!;
+      const consulting = items.find(
+        (i) => i.externalValue === 'Consulting Service',
+      )!;
 
       expect(rice.resolvedInternalTaxCategory).toBe(TaxCategory.VAT_STANDARD);
       expect(rice.resolvedTaxTyCd).toBe('B');
@@ -697,10 +734,24 @@ describe('DashboardMappingApplicationService', () => {
       const service = await buildService(
         fakeOrg(),
         fakeConnections('qb-conn-1'),
-        fakeMainApiPull([], [], [
-          item({ id: 'i1', itemCode: 'QB_1', name: 'Rice 2kg', unitOfMeasure: 'kg' }),
-          item({ id: 'i2', itemCode: 'QB_2', name: 'Bolt Box', unitOfMeasure: 'Gross (144)' }),
-        ]),
+        fakeMainApiPull(
+          [],
+          [],
+          [
+            item({
+              id: 'i1',
+              itemCode: 'QB_1',
+              name: 'Rice 2kg',
+              unitOfMeasure: 'kg',
+            }),
+            item({
+              id: 'i2',
+              itemCode: 'QB_2',
+              name: 'Bolt Box',
+              unitOfMeasure: 'Gross (144)',
+            }),
+          ],
+        ),
       );
 
       // Real (trimmed) KRA reference data, same shape as the synced table:
@@ -708,9 +759,27 @@ describe('DashboardMappingApplicationService', () => {
       // it's a measurement unit, not a way of packaging something. "Gross
       // (144)" matches neither list at all.
       await oscuCodeRepo.save([
-        oscuCodeRepo.create({ cdCls: '10', cd: 'KG', cdNm: 'Kilo-Gramme', srtOrd: 1, useYn: 'Y' }),
-        oscuCodeRepo.create({ cdCls: '17', cd: 'BG', cdNm: 'Bag', srtOrd: 1, useYn: 'Y' }),
-        oscuCodeRepo.create({ cdCls: '17', cd: 'BX', cdNm: 'Box', srtOrd: 2, useYn: 'Y' }),
+        oscuCodeRepo.create({
+          cdCls: '10',
+          cd: 'KG',
+          cdNm: 'Kilo-Gramme',
+          srtOrd: 1,
+          useYn: 'Y',
+        }),
+        oscuCodeRepo.create({
+          cdCls: '17',
+          cd: 'BG',
+          cdNm: 'Bag',
+          srtOrd: 1,
+          useYn: 'Y',
+        }),
+        oscuCodeRepo.create({
+          cdCls: '17',
+          cd: 'BX',
+          cdNm: 'Box',
+          srtOrd: 2,
+          useYn: 'Y',
+        }),
       ]);
 
       await service.pullAll(TENANT_ID);
@@ -1133,7 +1202,12 @@ describe('DashboardMappingApplicationService', () => {
         fakeMainApiPull([]),
       );
       await expect(
-        service.bulkClassify(TENANT_ID, ['clsmap-x'], { itemClsCd: '' }, 'r@example.com'),
+        service.bulkClassify(
+          TENANT_ID,
+          ['clsmap-x'],
+          { itemClsCd: '' },
+          'r@example.com',
+        ),
       ).rejects.toThrow(/required/);
     });
   });
@@ -1147,7 +1221,9 @@ describe('DashboardMappingApplicationService', () => {
       );
       // The test module wires CatalogService to a stub returning [] — this
       // just confirms the pass-through doesn't throw and returns that shape.
-      const results = await service.searchItemClassifications({ query: 'rice' });
+      const results = await service.searchItemClassifications({
+        query: 'rice',
+      });
       expect(results).toEqual([]);
     });
   });

@@ -3,13 +3,16 @@ import {
   Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   Post,
   Query,
   Req,
+  Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import {
   ApiBadRequestResponse,
@@ -141,18 +144,7 @@ export class ApiSalesController {
     // synchronously for dev API ergonomics. Otherwise (idempotent replay or
     // submit=false), just return the normalized document view.
     if (createResult.created && shouldSubmit) {
-      await this.salesService.applyInventoryMovements(documentId);
-
-      const validation = await this.salesService.validateDocument(documentId);
-      if (!validation.validation.isValid) {
-        throw new BadRequestException({
-          message: 'Sale validation failed',
-          errors: validation.validation.errors,
-        });
-      }
-
-      await this.salesService.prepareDocument(documentId);
-      await this.salesService.submitDocument(documentId);
+      await this.salesService.submitDraftDocument(documentId);
 
       const corr = parseSync2BooksCorrelation(req);
       if (corr) {
@@ -328,6 +320,28 @@ export class ApiSalesController {
   ): Promise<SalesReportDetailResponseDto> {
     const data = await this.salesService.getNormalizedSaleReport(id);
     return { data };
+  }
+
+  @Get(':id/receipt')
+  @ApiOperation({
+    summary: 'Download the KRA eTIMS receipt PDF for an ACCEPTED sale',
+  })
+  @ApiResponse({ status: 200, description: 'Receipt PDF' })
+  async getReceipt(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const pdf = await this.salesService.getEtimsReceiptPdf(id);
+    if (!pdf) {
+      throw new NotFoundException(
+        'Receipt not available -- sale has not been accepted by KRA yet',
+      );
+    }
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="etims-receipt-${id}.pdf"`,
+    });
+    return new StreamableFile(pdf);
   }
 
   // private toSaleDocumentDto(

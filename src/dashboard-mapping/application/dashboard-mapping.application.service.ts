@@ -237,7 +237,11 @@ export class DashboardMappingApplicationService {
    * so this just exposes it behind the dashboard guard the same way
    * searchItemClassifications does.
    */
-  async searchCodes(params: { cdCls?: string; query?: string; limit?: number }) {
+  async searchCodes(params: {
+    cdCls?: string;
+    query?: string;
+    limit?: number;
+  }) {
     return searchCodes(params, this.oscuCodeRepo);
   }
 
@@ -517,7 +521,10 @@ export class DashboardMappingApplicationService {
         Id: externalId,
         Name: item.name,
         SalesTaxCodeRef: item.defaultTaxCodeRef
-          ? { value: item.defaultTaxCodeRef.id, name: item.defaultTaxCodeRef.name }
+          ? {
+              value: item.defaultTaxCodeRef.id,
+              name: item.defaultTaxCodeRef.name,
+            }
           : undefined,
       };
       const resolvedInternalTaxCategory = mapQbTaxToInternalTaxCategory(qbItem);
@@ -553,8 +560,9 @@ export class DashboardMappingApplicationService {
 
     return {
       attempted: results.length,
-      needsReview: results.filter((r) => r.status === MappingStatus.NEEDS_REVIEW)
-        .length,
+      needsReview: results.filter(
+        (r) => r.status === MappingStatus.NEEDS_REVIEW,
+      ).length,
       results,
     };
   }

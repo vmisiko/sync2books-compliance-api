@@ -27,6 +27,24 @@ export class Sync2BooksCorrelationPersistenceService {
     } as Parameters<Repository<ComplianceDocumentOrmEntity>['update']>[1]);
   }
 
+  /**
+   * Persists the Main API sync_item/sync_batch ids returned by
+   * `POST /internal/compliance/invoice-receipt` (see
+   * `Sync2BooksMainApiOscuClient.postInvoiceReceipt`) so the dashboard's
+   * receipt-attachment-status/retry-receipt-attachment routes can look the
+   * sync item up later without re-deriving it.
+   */
+  async patchMainApiSyncRef(
+    documentId: string,
+    mainApiSyncItemId: string,
+    mainApiSyncBatchId: string,
+  ): Promise<void> {
+    await this.documents.update(
+      { id: documentId },
+      { mainApiSyncItemId, mainApiSyncBatchId },
+    );
+  }
+
   async patchCatalogItem(
     itemId: string,
     corr: Sync2BooksCorrelationStored,

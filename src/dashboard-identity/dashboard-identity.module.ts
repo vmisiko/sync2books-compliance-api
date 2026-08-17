@@ -17,9 +17,11 @@ import { DashboardAuthController } from './presentation/dashboard-auth.controlle
   imports: [
     ComplianceOrganizationModule,
     PassportModule,
-    JwtModule.register({
-      secret: dashboardJwtSecret(),
-      signOptions: { expiresIn: '1h' },
+    JwtModule.registerAsync({
+      useFactory: () => ({
+        secret: dashboardJwtSecret(),
+        signOptions: { expiresIn: '1h' },
+      }),
     }),
     TypeOrmModule.forFeature([DashboardUserOrmEntity]),
   ],

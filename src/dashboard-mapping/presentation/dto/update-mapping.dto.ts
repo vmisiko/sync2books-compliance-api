@@ -32,10 +32,16 @@ export class UpdateMappingDto {
   @ApiProperty({ required: false, description: 'KRA itemClsCd' })
   itemClsCd?: string;
 
-  @ApiProperty({ required: false, description: "This item's KRA quantity unit code (cdCls '10')" })
+  @ApiProperty({
+    required: false,
+    description: "This item's KRA quantity unit code (cdCls '10')",
+  })
   qtyUnitCd?: string;
 
-  @ApiProperty({ required: false, description: "This item's KRA packaging unit code (cdCls '17')" })
+  @ApiProperty({
+    required: false,
+    description: "This item's KRA packaging unit code (cdCls '17')",
+  })
   pkgUnitCd?: string;
 
   @ApiProperty({ required: false })

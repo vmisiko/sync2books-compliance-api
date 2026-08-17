@@ -9,6 +9,10 @@ export interface IComplianceDocumentRepository {
   findByIdempotencyKey(
     idempotencyKey: string,
   ): Promise<ComplianceDocument | null>;
+  findBySourceInvoiceId(
+    merchantId: string,
+    sourceInvoiceId: string,
+  ): Promise<ComplianceDocument | null>;
   findByMerchant(merchantId: string): Promise<ComplianceDocument[]>;
 }
 

@@ -20,6 +20,7 @@ import type { Request } from 'express';
 import { DashboardItemsApplicationService } from '../application/dashboard-items.application.service';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
 import type { DashboardRequestUser } from '../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
+import { CreateItemDto } from './dto/create-item.dto';
 import { OverrideItemClassificationDto } from './dto/override-item-classification.dto';
 import { OverrideStockItemDto } from './dto/override-stock-item.dto';
 import { SyncItemsDto } from './dto/sync-items.dto';
@@ -51,6 +52,19 @@ export class DashboardItemsController {
     const user = req.user as DashboardRequestUser;
     const result = await this.items.listItems(user.tenantId);
     return { success: true, message: 'OK', data: result };
+  }
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary:
+      'Create a manual catalog item (no ERP source) — created as PENDING, same as a pulled item',
+  })
+  @ApiResponse({ status: 201, description: 'Created item' })
+  async create(@Req() req: Request, @Body() body: CreateItemDto) {
+    const user = req.user as DashboardRequestUser;
+    const item = await this.items.createItem(user.tenantId, body);
+    return { success: true, message: 'Item created', data: { item } };
   }
 
   @Post('sync')
@@ -105,6 +119,10 @@ export class DashboardItemsController {
       id,
       body.isStockItem,
     );
-    return { success: true, message: 'Stock item flag updated', data: { item } };
+    return {
+      success: true,
+      message: 'Stock item flag updated',
+      data: { item },
+    };
   }
 }

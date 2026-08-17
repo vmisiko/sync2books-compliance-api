@@ -20,6 +20,7 @@ export interface QuickBooksItem {
   Active?: boolean;
   SalesTaxCodeRef?: QuickBooksRef;
   UQCDisplayText?: string;
+  UnitPrice?: number;
 }
 
 export function mapQuickBooksItemToRegisterItemInput(params: {
@@ -49,6 +50,7 @@ export function mapQuickBooksItemToRegisterItemInput(params: {
     unitCode: params.qtyUnitCdOverride,
     packagingUnitCode: params.packagingUnitCdOverride,
     isStockItem: mapQbItemToIsStockItem(qbItem.Type),
+    unitPrice: qbItem.UnitPrice ?? null,
   };
 }
 
@@ -79,7 +81,9 @@ function mapQbItemToIsStockItem(type?: QuickBooksItem['Type']): boolean {
  * registration time) can reuse the exact same heuristic registration uses,
  * instead of re-deriving it and risking drift.
  */
-export function mapQbTaxToInternalTaxCategory(item: QuickBooksItem): TaxCategory {
+export function mapQbTaxToInternalTaxCategory(
+  item: QuickBooksItem,
+): TaxCategory {
   // QB tax config varies a lot; keep mapping conservative and overrideable by dashboard.
   const name = (item.SalesTaxCodeRef?.name ?? '').toUpperCase();
 

@@ -178,7 +178,10 @@ export class DashboardMappingsController {
       'Apply one itemClsCd/itemType to many classification_mappings rows at once — backs the Mapping Center multi-select bulk assign action',
   })
   @ApiResponse({ status: 200, description: 'Bulk classify result' })
-  async bulkClassify(@Req() req: Request, @Body() body: BulkClassifyMappingDto) {
+  async bulkClassify(
+    @Req() req: Request,
+    @Body() body: BulkClassifyMappingDto,
+  ) {
     const user = req.user as DashboardRequestUser;
     const result = await this.mappings.bulkClassify(
       user.tenantId,

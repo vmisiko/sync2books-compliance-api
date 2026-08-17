@@ -12,6 +12,23 @@ import { MainApiConnectionApplicationService } from '../../integration/main-api-
 import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { mapMainApiItemToRegisterItemInput } from '../../catalog/infrastructure/main-api/main-api-item.mapper';
 import { ClassificationMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
+import { ItemType } from '../../shared/domain/enums/item-type.enum';
+import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
+import type { CreateItemDto } from '../presentation/dto/create-item.dto';
+
+/**
+ * Mirrors TAX_CATEGORY_CODE in mapping-suggestion.service.ts (kept local
+ * since that map isn't exported), inverted: a manually-created item gives us
+ * its taxTyCd directly, and this internal bucket is derived from it rather
+ * than the other way around. Not sent to KRA — taxTyCd is what matters there.
+ */
+const TAX_CATEGORY_BY_CODE: Record<string, TaxCategory> = {
+  A: TaxCategory.EXEMPT,
+  B: TaxCategory.VAT_STANDARD,
+  C: TaxCategory.VAT_ZERO,
+  D: TaxCategory.OTHER,
+  E: TaxCategory.VAT_8,
+};
 
 export type PullItemsResult = {
   merchantId: string;
@@ -132,6 +149,61 @@ export class DashboardItemsApplicationService {
       failed: results.filter((r) => r.status === 'error').length,
       results,
     };
+  }
+
+  /**
+   * Create an item manually from the dashboard — no ERP source, so it's
+   * never pushed back to QuickBooks. Reuses registerItem's insert path
+   * (externalId omitted -> always a fresh row) so it gets the exact same
+   * classification resolution and PENDING staging as a pulled item.
+   */
+  async createItem(complianceTenantId: string, dto: CreateItemDto) {
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+
+    if (!dto.name?.trim()) {
+      throw new BadRequestException('name is required');
+    }
+    if (!['1', '2', '3'].includes(dto.productTypeCode)) {
+      throw new BadRequestException(
+        "productTypeCode must be '1' (Raw Material), '2' (Finished Product) or '3' (Service)",
+      );
+    }
+    if (!dto.classificationCode?.trim()) {
+      throw new BadRequestException('classificationCode is required');
+    }
+    if (!dto.unitCode?.trim()) {
+      throw new BadRequestException('unitCode is required');
+    }
+    if (!dto.packagingUnitCode?.trim()) {
+      throw new BadRequestException('packagingUnitCode is required');
+    }
+    if (!dto.taxTyCd?.trim()) {
+      throw new BadRequestException('taxTyCd is required');
+    }
+
+    const isService = dto.productTypeCode === '3';
+    const itemType = isService ? ItemType.SERVICE : ItemType.GOODS;
+    // Raw Material/Finished Product default to stock-tracked, Service to not;
+    // dashboard users can still flip this later via overrideStockItem.
+    const isStockItem = !isService;
+    const taxCategory = TAX_CATEGORY_BY_CODE[dto.taxTyCd] ?? TaxCategory.OTHER;
+
+    const result = await this.catalog.registerItem({
+      merchantId,
+      name: dto.name,
+      sku: dto.sku ?? null,
+      itemType,
+      taxCategory,
+      classificationCode: dto.classificationCode,
+      unitCode: dto.unitCode,
+      packagingUnitCode: dto.packagingUnitCode,
+      taxTyCd: dto.taxTyCd,
+      productTypeCode: dto.productTypeCode,
+      unitPrice: dto.unitPrice ?? null,
+      originCountry: dto.originCountry ?? 'KE',
+      isStockItem,
+    });
+    return result.item;
   }
 
   async listItems(complianceTenantId: string) {

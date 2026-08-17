@@ -76,7 +76,10 @@ function generateEtimsItemCd(
   seq: number,
 ): string {
   const orgnNatCd = 'KE';
-  const pkgUnitCdSlice = itemCdSlice(item.packagingUnitCode, PKG_UNIT_CD_SLICE_FALLBACK);
+  const pkgUnitCdSlice = itemCdSlice(
+    item.packagingUnitCode,
+    PKG_UNIT_CD_SLICE_FALLBACK,
+  );
   const qtyUnitCdSlice = itemCdSlice(item.unitCode, QTY_UNIT_CD_SLICE_FALLBACK);
   const seqStr = seq.toString().padStart(7, '0');
   if (seqStr.length > 7) {
@@ -173,13 +176,13 @@ export async function syncItemsToEtims(
         itemTyCd: item.productTypeCode,
         itemNm: item.name,
         itemStdNm: null,
-        orgnNatCd: 'KE',
+        orgnNatCd: item.originCountry ?? 'KE',
         pkgUnitCd: item.packagingUnitCode,
         qtyUnitCd: item.unitCode,
         taxTyCd: item.taxTyCd,
         btchNo: null,
         bcd: item.sku ?? null,
-        dftPrc: 0,
+        dftPrc: item.unitPrice ?? 0,
         grpPrcL1: 0,
         grpPrcL2: 0,
         grpPrcL3: 0,

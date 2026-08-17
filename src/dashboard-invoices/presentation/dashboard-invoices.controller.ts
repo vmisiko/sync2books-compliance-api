@@ -102,9 +102,53 @@ export class DashboardInvoicesController {
     @Body() body: CreateSaleFromInvoiceDto,
   ) {
     const user = req.user as DashboardRequestUser;
-    const data = await this.invoices.createSaleFromInvoice(user.tenantId, id, {
-      submit: body.submit,
-    });
+    const data = await this.invoices.createSaleFromInvoice(
+      user.tenantId,
+      id,
+      { submit: body.submit },
+      req,
+    );
     return { success: true, message: 'Sale created', data };
+  }
+
+  @Get(':id/receipt-attachment-status')
+  @ApiOperation({
+    summary:
+      "Check the Main API sync-item status for the sale created from this invoice (proxies Main API's generic sync-item status lookup)",
+  })
+  @ApiResponse({ status: 200, description: 'Receipt-attachment status' })
+  async getReceiptAttachmentStatus(
+    @Req() req: Request,
+    @Param('id') id: string,
+  ) {
+    const user = req.user as DashboardRequestUser;
+    const data = await this.invoices.getReceiptAttachmentStatus(
+      user.tenantId,
+      id,
+    );
+    return { success: true, message: 'OK', data };
+  }
+
+  @Post(':id/retry-receipt-attachment')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Retry the Main API sync item for the sale created from this invoice (proxies Main API's generic sync-item retry route)",
+  })
+  @ApiResponse({ status: 200, description: 'Retry result' })
+  @ApiResponse({
+    status: 400,
+    description: 'No Main API sync item recorded for this invoice yet',
+  })
+  async retryReceiptAttachment(
+    @Req() req: Request,
+    @Param('id') id: string,
+  ) {
+    const user = req.user as DashboardRequestUser;
+    const data = await this.invoices.retryReceiptAttachment(
+      user.tenantId,
+      id,
+    );
+    return { success: true, message: 'Retry triggered', data };
   }
 }

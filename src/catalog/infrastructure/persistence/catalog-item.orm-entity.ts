@@ -14,8 +14,8 @@ export class CatalogItemOrmEntity {
   @Column()
   merchantId!: string;
 
-  @Column()
-  externalId!: string;
+  @Column({ type: 'varchar', nullable: true })
+  externalId!: string | null;
 
   @Column()
   name!: string;
@@ -43,6 +43,12 @@ export class CatalogItemOrmEntity {
 
   @Column({ type: 'varchar', default: '2' })
   productTypeCode!: string;
+
+  @Column({ type: 'float', nullable: true })
+  unitPrice!: number | null;
+
+  @Column({ type: 'varchar', nullable: true, default: 'KE' })
+  originCountry!: string | null;
 
   @Column({ type: 'boolean', default: false })
   isStockItem!: boolean;

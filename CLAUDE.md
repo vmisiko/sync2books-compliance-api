@@ -27,7 +27,7 @@ pnpm run test -- -t "<test name>"
 pnpm run test:e2e -- --testPathPattern=<name>
 ```
 
-Nest does not auto-load `.env` — source it manually (`set -a; source <(grep -v '^#' .env); set +a`). Stale `nest start --watch` processes silently keep serving old env vars/ports — kill and restart rather than trusting a running process reflects a recent env change.
+`.env` is auto-loaded via `ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' })` in `app.module.ts` (added 2026-08-16, matching `nest-sync-2-books-api`) — no more manual sourcing needed for `nest start`/`start:dev`. Stale `nest start --watch` processes silently keep serving old env vars/ports — kill and restart rather than trusting a running process reflects a recent env change.
 
 There's a dedicated `etims-golive-testing` skill (`.claude/skills/`) for driving the KRA Go-Live certification checklist against this service and the main API — use it when working through KRA sandbox test cases rather than improvising the flow.
 

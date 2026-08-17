@@ -17,6 +17,7 @@ export interface MainApiPulledItem {
   defaultTaxCodeRef?: { id: string; name?: string } | null;
   bookId?: string | null;
   bookType?: string | null;
+  unitPrice?: number | null;
 }
 
 /**
@@ -51,6 +52,7 @@ export function mapMainApiItemToRegisterItemInput(params: {
       ? { value: item.defaultTaxCodeRef.id, name: item.defaultTaxCodeRef.name }
       : undefined,
     UQCDisplayText: item.unitOfMeasure ?? undefined,
+    UnitPrice: item.unitPrice ?? undefined,
   };
 
   return mapQuickBooksItemToRegisterItemInput({

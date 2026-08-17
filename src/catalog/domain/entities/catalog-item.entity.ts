@@ -8,7 +8,8 @@ import { TaxCategory } from '../../../shared/domain/enums/tax-category.enum';
 export interface CatalogItem {
   id: string;
   merchantId: string;
-  externalId: string;
+  /** Null for items created manually in the dashboard (never pulled from an ERP). */
+  externalId: string | null;
   name: string;
   sku: string | null;
   itemType: ItemType;
@@ -23,6 +24,10 @@ export interface CatalogItem {
   taxTyCd: string;
   /** OSCU product type code (itemTyCd) */
   productTypeCode: string;
+  /** OSCU default unit price (dftPrc). Null when unknown (e.g. dropped/unset ERP source). */
+  unitPrice: number | null;
+  /** OSCU country of origin (orgnNatCd). Defaults to 'KE' when unset. */
+  originCountry: string | null;
   /**
    * Whether this item requires KRA stock tracking (insertStockIO etc).
    * Not part of itemTyCd -- KRA's own item-type code list (cdCls 24: Raw

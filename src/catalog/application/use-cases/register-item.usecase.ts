@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { CatalogItem } from '../../domain/entities/catalog-item.entity';
 import { ItemType } from '../../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../../shared/domain/enums/tax-category.enum';
@@ -6,7 +7,8 @@ import type { IClassificationResolver } from '../../domain/ports/classification-
 
 export interface RegisterItemInput {
   merchantId: string;
-  externalId: string;
+  /** Omit/null for a manually-created item with no ERP source — always inserts rather than upserting. */
+  externalId?: string | null;
   name: string;
   sku?: string | null;
   itemType: ItemType;
@@ -18,6 +20,10 @@ export interface RegisterItemInput {
   packagingUnitCode?: string;
   taxTyCd?: string;
   productTypeCode?: string;
+  /** OSCU default unit price (dftPrc). */
+  unitPrice?: number | null;
+  /** OSCU country of origin (orgnNatCd). Defaults to 'KE' when unset. */
+  originCountry?: string | null;
   /**
    * QuickBooks-derived stock signal for this registration attempt (not an
    * override -- always the current QB-derived value, computed fresh by the
@@ -43,17 +49,22 @@ export async function registerItem(
   itemRepo: ICatalogItemRepository,
   classificationResolver: IClassificationResolver,
 ): Promise<RegisterItemResult> {
-  const existing = await itemRepo.findByMerchantAndExternalId(
-    input.merchantId,
-    input.externalId,
-  );
+  // A manually-created item has no externalId -- there's nothing to upsert
+  // against, so it always inserts as a brand-new row (guards against a null
+  // externalId ever matching another manual item's row).
+  const existing = input.externalId
+    ? await itemRepo.findByMerchantAndExternalId(
+        input.merchantId,
+        input.externalId,
+      )
+    : null;
 
   const resolution = await classificationResolver.resolveClassification({
     merchantId: input.merchantId,
     itemType: input.itemType,
     itemName: input.name,
     sku: input.sku ?? undefined,
-    externalId: input.externalId,
+    externalId: input.externalId ?? undefined,
     classificationCode: input.classificationCode,
     unitCode: input.unitCode,
     packagingUnitCode: input.packagingUnitCode,
@@ -91,6 +102,8 @@ export async function registerItem(
       packagingUnitCode,
       taxTyCd,
       productTypeCode,
+      unitPrice: input.unitPrice ?? existing.unitPrice,
+      originCountry: input.originCountry ?? existing.originCountry ?? 'KE',
       // A manual override always wins over the QuickBooks-derived value.
       isStockItem: existing.stockItemOverride ?? qbDerivedIsStockItem,
       // Any change requires a resync to eTIMS (same itemCd can be reused).
@@ -108,9 +121,13 @@ export async function registerItem(
 
   const newItem: CatalogItem = {
     // Stable id so other systems (sales, ERP sync) can reference it reliably.
-    id: `item-${input.merchantId}-${input.externalId}`,
+    // Manual entries (no externalId) get a random suffix instead, since
+    // there's no ERP-provided id to key off of.
+    id: input.externalId
+      ? `item-${input.merchantId}-${input.externalId}`
+      : `item-${input.merchantId}-manual-${randomUUID()}`,
     merchantId: input.merchantId,
-    externalId: input.externalId,
+    externalId: input.externalId ?? null,
     name: input.name,
     sku: input.sku ?? null,
     itemType: input.itemType,
@@ -120,6 +137,8 @@ export async function registerItem(
     packagingUnitCode,
     taxTyCd,
     productTypeCode,
+    unitPrice: input.unitPrice ?? null,
+    originCountry: input.originCountry ?? 'KE',
     isStockItem: qbDerivedIsStockItem,
     stockItemOverride: null,
     registrationStatus: 'PENDING',

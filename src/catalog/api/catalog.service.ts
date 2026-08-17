@@ -61,7 +61,8 @@ export class CatalogService {
 
   async registerItem(params: {
     merchantId: string;
-    externalId: string;
+    /** Omit/null for a manually-created item with no ERP source. */
+    externalId?: string | null;
     name: string;
     sku?: string | null;
     itemType: ItemType;
@@ -72,6 +73,8 @@ export class CatalogService {
     packagingUnitCode?: string;
     taxTyCd?: string;
     productTypeCode?: string;
+    unitPrice?: number | null;
+    originCountry?: string | null;
     isStockItem?: boolean;
   }) {
     return registerItem(params, this.itemRepo, this.classificationResolver);

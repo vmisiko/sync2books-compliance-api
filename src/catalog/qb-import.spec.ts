@@ -125,7 +125,9 @@ describe('QB import → Catalog item registration (matrix)', () => {
       // no qtyUnitCdOverride/packagingUnitCdOverride
     });
 
-    await expect(service.registerItem(input)).rejects.toThrow(/Missing qtyUnitCd/i);
+    await expect(service.registerItem(input)).rejects.toThrow(
+      /Missing qtyUnitCd/i,
+    );
   });
 
   it('5) Same QB Id imported twice → updates (version increments), does not duplicate', async () => {
