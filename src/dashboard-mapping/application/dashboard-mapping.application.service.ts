@@ -12,6 +12,7 @@ import {
   ClassificationMappingOrmEntity,
   ClassificationMatchType,
 } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
+import { PaymentTypeMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/payment-type-mapping.orm-entity';
 import { MappingSuggestionService } from '../../regulatory/oscu/application/mapping-suggestion.service';
 import { OscuCodeOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-code.orm-entity';
 import { searchCodes } from '../../catalog/application/use-cases/search-codes.usecase';
@@ -22,6 +23,7 @@ import {
 } from '../../catalog/infrastructure/quickbooks/qb-item.mapper';
 import {
   MainApiItem,
+  MainApiPaymentMethod,
   MainApiPullClient,
 } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
@@ -30,7 +32,7 @@ import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
 import { MappingStatus } from '../../shared/domain/enums/mapping-status.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
 
-export type MappingType = 'tax' | 'classification';
+export type MappingType = 'tax' | 'classification' | 'payment';
 
 /** KRA cdCls for the Unit of Quantity code list (qtyUnitCd candidates). */
 const CD_CLS_QTY_UNIT = '10';
@@ -86,6 +88,10 @@ export interface MappingListItem {
   qtyUnitCdConfidence?: number | null;
   pkgUnitCd?: string | null;
   pkgUnitCdConfidence?: number | null;
+  /** For a payment row: this app's internal payment-method key (e.g. MOBILE_MONEY). */
+  internalPaymentMethod?: string | null;
+  /** OSCU pmtTyCd (cdCls '07'), e.g. '07' for MOBILE_MONEY. */
+  pmtTyCd?: string | null;
 }
 
 export interface MappingListFilters {
@@ -105,6 +111,8 @@ export interface CreateMappingInput {
   qtyUnitCd?: string;
   pkgUnitCd?: string;
   priority?: number;
+  internalPaymentMethod?: string;
+  pmtTyCd?: string;
 }
 
 export interface UpdateMappingInput {
@@ -117,6 +125,8 @@ export interface UpdateMappingInput {
   qtyUnitCd?: string;
   pkgUnitCd?: string;
   priority?: number;
+  internalPaymentMethod?: string;
+  pmtTyCd?: string;
 }
 
 export interface MappingSummary {
@@ -142,9 +152,19 @@ export interface TaxCategoryOption {
   label: string;
 }
 
+export interface PaymentMethodOption {
+  /** This app's internal payment-method key, e.g. MOBILE_MONEY. */
+  internalPaymentMethod: string;
+  /** OSCU pmtTyCd (cdCls '07'), e.g. '07'. */
+  pmtTyCd: string;
+  /** Display label for the dropdown, e.g. "Mobile Money". */
+  label: string;
+}
+
 type FoundRow =
   | { type: 'tax'; row: TaxMappingOrmEntity }
-  | { type: 'classification'; row: ClassificationMappingOrmEntity };
+  | { type: 'classification'; row: ClassificationMappingOrmEntity }
+  | { type: 'payment'; row: PaymentTypeMappingOrmEntity };
 
 /**
  * Query-param keys mirror the main API's IntegrationKeyType string values
@@ -202,6 +222,8 @@ export class DashboardMappingApplicationService {
     private readonly taxRepo: Repository<TaxMappingOrmEntity>,
     @InjectRepository(ClassificationMappingOrmEntity)
     private readonly clsRepo: Repository<ClassificationMappingOrmEntity>,
+    @InjectRepository(PaymentTypeMappingOrmEntity)
+    private readonly paymentRepo: Repository<PaymentTypeMappingOrmEntity>,
     @InjectRepository(OscuCodeOrmEntity)
     private readonly oscuCodeRepo: Repository<OscuCodeOrmEntity>,
     private readonly suggestions: MappingSuggestionService,
@@ -257,11 +279,12 @@ export class DashboardMappingApplicationService {
    * separate action per tab.
    */
   async pullAll(complianceTenantId: string) {
-    const [tax, classifications] = await Promise.all([
+    const [tax, classifications, paymentMethods] = await Promise.all([
       this.pullTaxRates(complianceTenantId),
       this.pullItemClassifications(complianceTenantId),
+      this.pullPaymentMethods(complianceTenantId),
     ]);
-    return { ...tax, classifications };
+    return { ...tax, classifications, paymentMethods };
   }
 
   async pullTaxRates(complianceTenantId: string) {
@@ -358,6 +381,237 @@ export class DashboardMappingApplicationService {
         .length,
       results,
       taxCodes,
+    };
+  }
+
+  /**
+   * Pulls QuickBooks' PaymentMethod catalog (Cash, Check, Credit Card, ...)
+   * and auto-suggests each against the 8 internal payment methods via
+   * MappingSuggestionService.suggestPaymentMethodMapping, same shape as
+   * pullTaxRates above: confident suggestion -> NEEDS_REVIEW row with a
+   * pmtTyCd already filled in; no confident suggestion -> UNMAPPED
+   * placeholder row a human fills in directly. Payment stays category-keyed
+   * (payment_type_mappings, global fallback tier) like tax, not per-item
+   * like classification — see the class doc comment.
+   */
+  async pullPaymentMethods(complianceTenantId: string) {
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+    const connection =
+      await this.mainApiConnections.ensureCompany(complianceTenantId);
+    const quickbooksConnectionId =
+      connection.integrations?.quickbooks?.connectionId ?? null;
+    if (!quickbooksConnectionId) {
+      throw new BadRequestException(
+        'No connected QuickBooks connection for this tenant yet — connect QuickBooks before pulling payment methods.',
+      );
+    }
+
+    const response = await this.mainApiPull.getPaymentMethods(
+      connection.mainApiApiKey,
+      quickbooksConnectionId,
+    );
+
+    const results: Array<{
+      externalId: string;
+      externalValue: string;
+      mappingId: string | null;
+      status: MappingStatus;
+      confidenceScore: number | null;
+      internalPaymentMethod: string | null;
+    }> = [];
+
+    for (const method of response.paymentMethods) {
+      if (method.active === false) continue;
+      const externalValue = method.name;
+      const suggestion = this.suggestions.suggestPaymentMethodMapping(
+        method.name,
+      );
+
+      if (!suggestion) {
+        const row = await this.upsertUnmappedPaymentMethod(
+          merchantId,
+          method.id,
+          externalValue,
+        );
+        results.push({
+          externalId: method.id,
+          externalValue,
+          mappingId: row.id,
+          status: row.status,
+          confidenceScore: row.confidenceScore,
+          internalPaymentMethod: row.internalPaymentMethod,
+        });
+        continue;
+      }
+
+      const row = await this.upsertPaymentMethodSuggestion(
+        merchantId,
+        method.id,
+        externalValue,
+        suggestion,
+      );
+      results.push({
+        externalId: method.id,
+        externalValue,
+        mappingId: row.id,
+        status: row.status,
+        confidenceScore: row.confidenceScore,
+        internalPaymentMethod: suggestion.internalPaymentMethod,
+      });
+    }
+
+    return {
+      merchantId,
+      attempted: results.length,
+      suggested: results.filter((r) => r.status === MappingStatus.NEEDS_REVIEW)
+        .length,
+      alreadyMapped: results.filter((r) => r.status === MappingStatus.MAPPED)
+        .length,
+      unmapped: results.filter((r) => r.status === MappingStatus.UNMAPPED)
+        .length,
+      results,
+    };
+  }
+
+  /**
+   * Upserts a NEEDS_REVIEW candidate row for (merchantId, internalPaymentMethod).
+   * Never touches an already-approved (active: true) row for that key — a
+   * fresh pull shouldn't silently override a human decision, it's just
+   * reported back as "already mapped" to the caller. Mirrors upsertTaxSuggestion.
+   */
+  private async upsertPaymentMethodSuggestion(
+    merchantId: string,
+    externalId: string,
+    externalValue: string,
+    suggestion: {
+      internalPaymentMethod: string;
+      pmtTyCd: string;
+      confidenceScore: number;
+    },
+  ): Promise<PaymentTypeMappingOrmEntity> {
+    const approved = await this.paymentRepo.findOne({
+      where: {
+        merchantId,
+        internalPaymentMethod: suggestion.internalPaymentMethod,
+        active: true,
+      },
+    });
+    if (approved) return approved;
+
+    const pending = await this.paymentRepo.findOne({
+      where: {
+        merchantId,
+        internalPaymentMethod: suggestion.internalPaymentMethod,
+        active: false,
+      },
+    });
+
+    const patch = {
+      merchantId,
+      internalPaymentMethod: suggestion.internalPaymentMethod,
+      pmtTyCd: suggestion.pmtTyCd,
+      sourceSystem: SourceSystem.QUICKBOOKS,
+      status: MappingStatus.NEEDS_REVIEW,
+      confidenceScore: suggestion.confidenceScore,
+      externalValue,
+      externalId,
+      active: false,
+    };
+
+    if (pending) {
+      return this.paymentRepo.save({ ...pending, ...patch });
+    }
+    return this.paymentRepo.save(
+      this.paymentRepo.create({
+        id: `paymap-${randomUUID()}`,
+        version: 1,
+        ...patch,
+      }),
+    );
+  }
+
+  /**
+   * Persists a pulled PaymentMethod that MappingSuggestionService couldn't
+   * confidently categorize, so it shows up in the Mapping Center table
+   * (status UNMAPPED, confidenceScore 0, internalPaymentMethod/pmtTyCd
+   * null) instead of only existing in the transient pull response. Mirrors
+   * upsertUnmappedTaxRate — keyed by (merchantId, sourceSystem, externalId)
+   * so a re-pull refreshes externalValue instead of duplicating, and never
+   * resets a row a human has already resolved.
+   */
+  private async upsertUnmappedPaymentMethod(
+    merchantId: string,
+    externalId: string,
+    externalValue: string,
+  ): Promise<PaymentTypeMappingOrmEntity> {
+    const existing = await this.paymentRepo.findOne({
+      where: { merchantId, sourceSystem: SourceSystem.QUICKBOOKS, externalId },
+    });
+    if (existing) {
+      if (existing.active) return existing;
+      existing.externalValue = externalValue;
+      return this.paymentRepo.save(existing);
+    }
+
+    return this.paymentRepo.save(
+      this.paymentRepo.create({
+        id: `paymap-${randomUUID()}`,
+        merchantId,
+        internalPaymentMethod: null,
+        pmtTyCd: null,
+        version: 1,
+        active: false,
+        sourceSystem: SourceSystem.QUICKBOOKS,
+        status: MappingStatus.UNMAPPED,
+        confidenceScore: 0,
+        externalValue,
+        externalId,
+      }),
+    );
+  }
+
+  private async activatePaymentRow(
+    row: PaymentTypeMappingOrmEntity,
+  ): Promise<PaymentTypeMappingOrmEntity> {
+    return this.paymentRepo.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(PaymentTypeMappingOrmEntity);
+      await repo
+        .createQueryBuilder()
+        .update(PaymentTypeMappingOrmEntity)
+        .set({ active: false })
+        .where(...merchantIdEquals(row.merchantId))
+        .andWhere('internalPaymentMethod = :method', {
+          method: row.internalPaymentMethod,
+        })
+        .andWhere('active = :active', { active: true })
+        .andWhere('id != :id', { id: row.id })
+        .execute();
+      row.active = true;
+      return repo.save(row);
+    });
+  }
+
+  private paymentRowToListItem(
+    row: PaymentTypeMappingOrmEntity,
+  ): MappingListItem {
+    return {
+      id: row.id,
+      type: 'payment',
+      merchantId: row.merchantId,
+      scope: row.merchantId ? 'tenant' : 'global',
+      sourceSystem: row.sourceSystem,
+      status: row.status,
+      confidenceScore: row.confidenceScore,
+      externalValue: row.externalValue,
+      approvedBy: row.approvedBy,
+      approvedAt: row.approvedAt,
+      active: row.active,
+      version: row.version,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      externalId: row.externalId,
+      internalPaymentMethod: row.internalPaymentMethod,
+      pmtTyCd: row.pmtTyCd,
     };
   }
 
@@ -906,6 +1160,23 @@ export class DashboardMappingApplicationService {
         )),
       );
     }
+    if (!type || type === 'payment') {
+      const rows = await this.paymentRepo.find({
+        where: [
+          {
+            merchantId,
+            ...(sourceSystem ? { sourceSystem } : {}),
+            ...(status ? { status } : {}),
+          },
+          {
+            merchantId: IsNull(),
+            ...(sourceSystem ? { sourceSystem } : {}),
+            ...(status ? { status } : {}),
+          },
+        ],
+      });
+      items.push(...rows.map((r) => this.paymentRowToListItem(r)));
+    }
 
     items.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
     return items;
@@ -914,9 +1185,12 @@ export class DashboardMappingApplicationService {
   async summary(complianceTenantId: string): Promise<MappingSummary> {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
 
-    const [taxRows, clsRows] = await Promise.all([
+    const [taxRows, clsRows, paymentRows] = await Promise.all([
       this.taxRepo.find({ where: [{ merchantId }, { merchantId: IsNull() }] }),
       this.clsRepo.find({ where: { merchantId } }),
+      this.paymentRepo.find({
+        where: [{ merchantId }, { merchantId: IsNull() }],
+      }),
     ]);
 
     const isMapped = (s: MappingStatus) =>
@@ -925,7 +1199,7 @@ export class DashboardMappingApplicationService {
       merchantId: string | null;
       sourceSystem: SourceSystem | null;
       status: MappingStatus;
-    }> = [...taxRows, ...clsRows];
+    }> = [...taxRows, ...clsRows, ...paymentRows];
 
     const global = all.filter((r) => r.merchantId === null);
     const tenantRows = all.filter((r) => r.merchantId !== null);
@@ -976,6 +1250,43 @@ export class DashboardMappingApplicationService {
     }));
   }
 
+  /**
+   * The internal-side dropdown options for the Payment mapping tab's
+   * Add/Edit modal — the 8 payment methods oscu-mapping.seed.ts seeds
+   * globally. Unlike tax categories these are fixed by this app (not
+   * queried from oscu_codes), since OSCU's own cdCls '07' list IS the KRA
+   * code side already covered generically by searchCodes({cdCls: '07'}) —
+   * this just supplies human labels for the internal key half of the pair.
+   */
+  listPaymentMethodOptions(): PaymentMethodOption[] {
+    return [
+      { internalPaymentMethod: 'CASH', pmtTyCd: '01', label: 'Cash' },
+      { internalPaymentMethod: 'CREDIT', pmtTyCd: '02', label: 'Credit' },
+      {
+        internalPaymentMethod: 'CASH_CREDIT',
+        pmtTyCd: '03',
+        label: 'Cash/Credit',
+      },
+      {
+        internalPaymentMethod: 'BANK_CHECK',
+        pmtTyCd: '04',
+        label: 'Bank Check',
+      },
+      {
+        internalPaymentMethod: 'DEBIT_CREDIT',
+        pmtTyCd: '05',
+        label: 'Debit & Credit Card',
+      },
+      { internalPaymentMethod: 'CARD', pmtTyCd: '06', label: 'Card' },
+      {
+        internalPaymentMethod: 'MOBILE_MONEY',
+        pmtTyCd: '07',
+        label: 'Mobile Money',
+      },
+      { internalPaymentMethod: 'OTHER', pmtTyCd: '08', label: 'Other' },
+    ];
+  }
+
   // ---------------------------------------------------------------------
   // Approve / edit / manual create
   // ---------------------------------------------------------------------
@@ -1003,6 +1314,20 @@ export class DashboardMappingApplicationService {
       row.approvedAt = new Date();
       const saved = await this.activateTaxRow(row);
       return this.taxRowToListItem(saved);
+    }
+
+    if (found.type === 'payment') {
+      const row = found.row;
+      if (!row.pmtTyCd) {
+        throw new BadRequestException(
+          'Mapping has no target pmtTyCd yet — PATCH one in before approving',
+        );
+      }
+      row.status = MappingStatus.MAPPED;
+      row.approvedBy = approvedBy;
+      row.approvedAt = new Date();
+      const saved = await this.activatePaymentRow(row);
+      return this.paymentRowToListItem(saved);
     }
 
     const row = found.row;
@@ -1049,6 +1374,19 @@ export class DashboardMappingApplicationService {
       row.approvedAt = new Date();
       const saved = await this.activateTaxRow(row);
       return this.taxRowToListItem(saved);
+    }
+
+    if (found.type === 'payment') {
+      const row = found.row;
+      if (input.internalPaymentMethod)
+        row.internalPaymentMethod = input.internalPaymentMethod;
+      if (input.pmtTyCd) row.pmtTyCd = input.pmtTyCd;
+      if (!row.pmtTyCd) throw new BadRequestException('pmtTyCd is required');
+      row.status = nextStatus;
+      row.approvedBy = approvedBy;
+      row.approvedAt = new Date();
+      const saved = await this.activatePaymentRow(row);
+      return this.paymentRowToListItem(saved);
     }
 
     // Classification row — itemClsCd, qtyUnitCd, and pkgUnitCd are three
@@ -1183,6 +1521,30 @@ export class DashboardMappingApplicationService {
       return this.taxRowToListItem(saved);
     }
 
+    if (input.type === 'payment') {
+      if (!input.internalPaymentMethod || !input.pmtTyCd) {
+        throw new BadRequestException(
+          'internalPaymentMethod and pmtTyCd are required for a payment mapping',
+        );
+      }
+      const row = this.paymentRepo.create({
+        id: `paymap-${randomUUID()}`,
+        merchantId,
+        internalPaymentMethod: input.internalPaymentMethod,
+        pmtTyCd: input.pmtTyCd,
+        version: 1,
+        active: true,
+        sourceSystem: SourceSystem.MANUAL,
+        status: MappingStatus.MAPPED,
+        confidenceScore: null,
+        approvedBy: createdBy,
+        approvedAt: now,
+        externalValue: null,
+      });
+      const saved = await this.activatePaymentRow(row);
+      return this.paymentRowToListItem(saved);
+    }
+
     if (!input.matchType || !input.matchValue || !input.itemClsCd) {
       throw new BadRequestException(
         'matchType, matchValue and itemClsCd are required for a classification mapping',
@@ -1253,6 +1615,10 @@ export class DashboardMappingApplicationService {
       const row = await this.clsRepo.findOne({ where: { id } });
       return row ? { type: 'classification', row } : null;
     }
+    if (id.startsWith('paymap-')) {
+      const row = await this.paymentRepo.findOne({ where: { id } });
+      return row ? { type: 'payment', row } : null;
+    }
     // Defensive fallback for ids that don't follow our prefix convention
     // (shouldn't normally happen — every id this service or the seed
     // creates is prefixed).
@@ -1260,6 +1626,8 @@ export class DashboardMappingApplicationService {
     if (tax) return { type: 'tax', row: tax };
     const cls = await this.clsRepo.findOne({ where: { id } });
     if (cls) return { type: 'classification', row: cls };
+    const payment = await this.paymentRepo.findOne({ where: { id } });
+    if (payment) return { type: 'payment', row: payment };
     return null;
   }
 
@@ -1378,7 +1746,8 @@ export class DashboardMappingApplicationService {
   private parseTypeFilter(type?: string): MappingType | undefined {
     if (!type) return undefined;
     const key = type.toLowerCase();
-    if (key === 'tax' || key === 'classification') return key;
+    if (key === 'tax' || key === 'classification' || key === 'payment')
+      return key;
     throw new BadRequestException(`Unknown type filter: ${type}`);
   }
 

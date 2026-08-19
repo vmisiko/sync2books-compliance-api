@@ -37,11 +37,12 @@ export class DashboardMappingsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Pull tax rates, tax codes, and item classifications from the main API (QuickBooks) and ' +
-      'run confidence-scored auto-suggestion in one pass: creates/refreshes NEEDS_REVIEW ' +
-      'tax_mappings rows, resolves a taxCodeId where possible, and creates a ' +
-      'classification_mappings placeholder row per item with itemClsCd left for manual review ' +
-      'and qtyUnitCd/pkgUnitCd auto-matched directly against the real KRA code list',
+      'Pull tax rates, tax codes, item classifications, and payment methods from the main API ' +
+      '(QuickBooks) and run confidence-scored auto-suggestion in one pass: creates/refreshes ' +
+      'NEEDS_REVIEW tax_mappings and payment_type_mappings rows, resolves a taxCodeId where ' +
+      'possible, and creates a classification_mappings placeholder row per item with itemClsCd ' +
+      'left for manual review and qtyUnitCd/pkgUnitCd auto-matched directly against the real ' +
+      'KRA code list',
   })
   @ApiResponse({ status: 200, description: 'Pull + suggestion result' })
   async pull(@Req() req: Request) {
@@ -49,7 +50,8 @@ export class DashboardMappingsController {
     const result = await this.mappings.pullAll(user.tenantId);
     return {
       success: true,
-      message: 'Tax rates, tax codes, and classifications pulled and scored',
+      message:
+        'Tax rates, tax codes, classifications, and payment methods pulled and scored',
       data: result,
     };
   }
@@ -57,7 +59,7 @@ export class DashboardMappingsController {
   @Get()
   @ApiOperation({
     summary:
-      'List tax/classification mappings for this tenant (plus read-only global tax defaults)',
+      'List tax/classification/payment mappings for this tenant (plus read-only global tax and payment defaults)',
   })
   @ApiQuery({
     name: 'source',
@@ -67,7 +69,7 @@ export class DashboardMappingsController {
   @ApiQuery({
     name: 'type',
     required: false,
-    description: 'tax | classification',
+    description: 'tax | classification | payment',
   })
   @ApiQuery({
     name: 'status',
@@ -144,6 +146,17 @@ export class DashboardMappingsController {
       query,
       limit: limit !== undefined ? Number(limit) : undefined,
     });
+    return { success: true, message: 'OK', data: result };
+  }
+
+  @Get('payment-methods')
+  @ApiOperation({
+    summary:
+      "Internal payment-method options (the 8 keys oscu-mapping.seed.ts seeds globally) for the Payment Mapping tab's 'Internal Method' dropdown. The KRA-code side of that same modal reuses GET .../codes?cdCls=07, already generic.",
+  })
+  @ApiResponse({ status: 200, description: 'Payment method options' })
+  async paymentMethodOptions() {
+    const result = this.mappings.listPaymentMethodOptions();
     return { success: true, message: 'OK', data: result };
   }
 

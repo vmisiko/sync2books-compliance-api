@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TaxCategory } from '../../../../shared/domain/enums/tax-category.enum';
+import { MappingStatus } from '../../../../shared/domain/enums/mapping-status.enum';
 import { PaymentTypeMappingOrmEntity } from './payment-type-mapping.orm-entity';
 import { TaxMappingOrmEntity } from './tax-mapping.orm-entity';
 
@@ -60,6 +61,7 @@ export class OscuMappingSeed {
             pmtTyCd: m.pmtTyCd,
             version: 1,
             active: true,
+            status: MappingStatus.MAPPED,
           }),
         ),
       );

@@ -5,6 +5,7 @@ import { DashboardMappingApplicationService } from './dashboard-mapping.applicat
 import { MappingSuggestionService } from '../../regulatory/oscu/application/mapping-suggestion.service';
 import { TaxMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
 import { ClassificationMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
+import { PaymentTypeMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/payment-type-mapping.orm-entity';
 import { OscuCodeOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-code.orm-entity';
 import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
@@ -18,6 +19,7 @@ import type {
   MainApiTaxRateListResponse,
   MainApiTaxCodeListResponse,
   MainApiItem,
+  MainApiPaymentMethodListResponse,
 } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 
 const TENANT_ID = 'tenant-1';
@@ -73,7 +75,11 @@ function fakeMainApiPull(
   taxRates: MainApiTaxRateListResponse['taxRates'],
   taxCodes: MainApiTaxCodeListResponse['taxCodes'] = [],
   items: MainApiItem[] = [],
-): Pick<MainApiPullClient, 'getTaxRates' | 'getTaxCodes' | 'getItems'> {
+  paymentMethods: MainApiPaymentMethodListResponse['paymentMethods'] = [],
+): Pick<
+  MainApiPullClient,
+  'getTaxRates' | 'getTaxCodes' | 'getItems' | 'getPaymentMethods'
+> {
   return {
     getTaxRates: () =>
       Promise.resolve({
@@ -101,6 +107,7 @@ function fakeMainApiPull(
         limit: 100,
         totalPages: 1,
       }),
+    getPaymentMethods: () => Promise.resolve({ paymentMethods }),
   };
 }
 
@@ -109,13 +116,14 @@ describe('DashboardMappingApplicationService', () => {
   let taxRepo: Repository<TaxMappingOrmEntity>;
   let clsRepo: Repository<ClassificationMappingOrmEntity>;
   let oscuCodeRepo: Repository<OscuCodeOrmEntity>;
+  let paymentRepo: Repository<PaymentTypeMappingOrmEntity>;
 
   async function buildService(
     org: Pick<ComplianceOrganizationApplicationService, 'getTenantById'>,
     connections: Pick<MainApiConnectionApplicationService, 'ensureCompany'>,
     mainApiPull: Pick<
       MainApiPullClient,
-      'getTaxRates' | 'getTaxCodes' | 'getItems'
+      'getTaxRates' | 'getTaxCodes' | 'getItems' | 'getPaymentMethods'
     >,
   ): Promise<DashboardMappingApplicationService> {
     module = await Test.createTestingModule({
@@ -130,6 +138,7 @@ describe('DashboardMappingApplicationService', () => {
         TypeOrmModule.forFeature([
           TaxMappingOrmEntity,
           ClassificationMappingOrmEntity,
+          PaymentTypeMappingOrmEntity,
           OscuCodeOrmEntity,
         ]),
       ],
@@ -151,6 +160,7 @@ describe('DashboardMappingApplicationService', () => {
     taxRepo = module.get(getRepositoryToken(TaxMappingOrmEntity));
     clsRepo = module.get(getRepositoryToken(ClassificationMappingOrmEntity));
     oscuCodeRepo = module.get(getRepositoryToken(OscuCodeOrmEntity));
+    paymentRepo = module.get(getRepositoryToken(PaymentTypeMappingOrmEntity));
 
     return module.get(DashboardMappingApplicationService);
   }
@@ -475,7 +485,7 @@ describe('DashboardMappingApplicationService', () => {
       ];
       const mainApiPull: Pick<
         MainApiPullClient,
-        'getTaxRates' | 'getTaxCodes' | 'getItems'
+        'getTaxRates' | 'getTaxCodes' | 'getItems' | 'getPaymentMethods'
       > = {
         getTaxRates: () =>
           Promise.resolve({
@@ -503,8 +513,8 @@ describe('DashboardMappingApplicationService', () => {
             hasMore: false,
           }),
         // This test only calls pullTaxRates() directly, never pullAll(), so
-        // getItems() is never actually invoked -- present only to satisfy
-        // buildService()'s parameter type.
+        // getItems()/getPaymentMethods() are never actually invoked --
+        // present only to satisfy buildService()'s parameter type.
         getItems: () =>
           Promise.resolve({
             data: [],
@@ -513,6 +523,7 @@ describe('DashboardMappingApplicationService', () => {
             limit: 100,
             totalPages: 1,
           }),
+        getPaymentMethods: () => Promise.resolve({ paymentMethods: [] }),
       };
 
       const service = await buildService(
@@ -1276,6 +1287,134 @@ describe('DashboardMappingApplicationService', () => {
           label: 'E — VAT 8%',
         },
       ]);
+    });
+  });
+
+  describe('pullPaymentMethods', () => {
+    it('throws when the tenant has no connected QuickBooks connection', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null),
+        fakeMainApiPull([]),
+      );
+      await expect(service.pullPaymentMethods(TENANT_ID)).rejects.toThrow(
+        /No connected QuickBooks connection/,
+      );
+    });
+
+    it('creates a NEEDS_REVIEW row for a recognized method and reports an unrecognized one as unmapped', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull([], [], [], [
+          { id: 'pm-1', name: 'M-Pesa', type: 'OTHER', active: true },
+          { id: 'pm-2', name: 'Store Loyalty Points', type: 'OTHER', active: true },
+        ]),
+      );
+
+      const result = await service.pullPaymentMethods(TENANT_ID);
+
+      expect(result.attempted).toBe(2);
+      expect(result.suggested).toBe(1);
+      expect(result.unmapped).toBe(1);
+
+      const mapped = result.results.find((r) => r.externalId === 'pm-1');
+      expect(mapped?.status).toBe(MappingStatus.NEEDS_REVIEW);
+      expect(mapped?.internalPaymentMethod).toBe('MOBILE_MONEY');
+
+      const row = await paymentRepo.findOne({
+        where: { id: mapped!.mappingId! },
+      });
+      expect(row?.sourceSystem).toBe(SourceSystem.QUICKBOOKS);
+      expect(row?.pmtTyCd).toBe('07');
+      expect(row?.active).toBe(false);
+      expect(row?.confidenceScore).toBeGreaterThanOrEqual(90);
+
+      const unmapped = result.results.find((r) => r.externalId === 'pm-2');
+      expect(unmapped?.status).toBe(MappingStatus.UNMAPPED);
+      const unmappedRow = await paymentRepo.findOne({
+        where: { id: unmapped!.mappingId! },
+      });
+      expect(unmappedRow?.internalPaymentMethod).toBeNull();
+      expect(unmappedRow?.pmtTyCd).toBeNull();
+      expect(unmappedRow?.confidenceScore).toBe(0);
+    });
+
+    it('never overrides an already-approved row on re-pull', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull([], [], [], [
+          { id: 'pm-1', name: 'Cash', type: 'CASH', active: true },
+        ]),
+      );
+
+      const first = await service.pullPaymentMethods(TENANT_ID);
+      const mappingId = first.results[0].mappingId!;
+      await service.approve(TENANT_ID, mappingId, 'user@example.com');
+
+      const second = await service.pullPaymentMethods(TENANT_ID);
+      expect(second.results[0].mappingId).toBe(mappingId);
+      expect(second.results[0].status).toBe(MappingStatus.MAPPED);
+
+      const rows = await paymentRepo.find({
+        where: { internalPaymentMethod: 'CASH', merchantId: MERCHANT_ID },
+      });
+      expect(rows).toHaveLength(1);
+      expect(rows[0].active).toBe(true);
+    });
+  });
+
+  describe('approve / update — payment', () => {
+    it('rejects approving a payment row with no pmtTyCd yet', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull([], [], [], [
+          { id: 'pm-1', name: 'Store Loyalty Points', active: true },
+        ]),
+      );
+      const result = await service.pullPaymentMethods(TENANT_ID);
+      const mappingId = result.results[0].mappingId!;
+
+      await expect(
+        service.approve(TENANT_ID, mappingId, 'user@example.com'),
+      ).rejects.toThrow(/pmtTyCd/);
+    });
+
+    it('lets a human resolve an unmapped row via update(), activating it', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1'),
+        fakeMainApiPull([], [], [], [
+          { id: 'pm-1', name: 'Store Loyalty Points', active: true },
+        ]),
+      );
+      const pulled = await service.pullPaymentMethods(TENANT_ID);
+      const mappingId = pulled.results[0].mappingId!;
+
+      const updated = await service.update(
+        TENANT_ID,
+        mappingId,
+        { internalPaymentMethod: 'OTHER', pmtTyCd: '08' },
+        'user@example.com',
+      );
+      expect(updated.status).toBe(MappingStatus.MAPPED);
+      expect(updated.active).toBe(true);
+      expect(updated.pmtTyCd).toBe('08');
+    });
+  });
+
+  describe('listPaymentMethodOptions', () => {
+    it('returns the 8 seeded internal payment methods with their pmtTyCd', async () => {
+      const service = await buildService(fakeOrg(), fakeConnections(null), fakeMainApiPull([]));
+      const options = service.listPaymentMethodOptions();
+      expect(options).toHaveLength(8);
+      expect(options.find((o) => o.internalPaymentMethod === 'MOBILE_MONEY')).toEqual({
+        internalPaymentMethod: 'MOBILE_MONEY',
+        pmtTyCd: '07',
+        label: 'Mobile Money',
+      });
     });
   });
 });

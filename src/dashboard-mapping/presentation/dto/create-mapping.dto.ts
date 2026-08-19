@@ -8,8 +8,8 @@ import type { ClassificationMatchType } from '../../../regulatory/oscu/infrastru
  * so validation is done in the application layer to match convention).
  */
 export class CreateMappingDto {
-  @ApiProperty({ enum: ['tax', 'classification'] })
-  type!: 'tax' | 'classification';
+  @ApiProperty({ enum: ['tax', 'classification', 'payment'] })
+  type!: 'tax' | 'classification' | 'payment';
 
   // --- tax ---
   @ApiProperty({
@@ -68,4 +68,19 @@ export class CreateMappingDto {
 
   @ApiProperty({ required: false, default: 100 })
   priority?: number;
+
+  // --- payment ---
+  @ApiProperty({
+    required: false,
+    description: 'Required when type=payment',
+    example: 'MOBILE_MONEY',
+  })
+  internalPaymentMethod?: string;
+
+  @ApiProperty({
+    required: false,
+    description: "Required when type=payment — OSCU pmtTyCd (cdCls '07')",
+    example: '07',
+  })
+  pmtTyCd?: string;
 }

@@ -112,6 +112,18 @@ export interface MainApiTaxRateListResponse {
   hasMore: boolean;
 }
 
+/** QuickBooks' PaymentMethod list entity, as returned by nest-sync-2-books-api's live QuickBooks read. */
+export interface MainApiPaymentMethod {
+  id: string;
+  name: string;
+  type?: string | null;
+  active?: boolean;
+}
+
+export interface MainApiPaymentMethodListResponse {
+  paymentMethods: MainApiPaymentMethod[];
+}
+
 /**
  * QuickBooks' SalesItemLineDetail.TaxCodeRef needs a TaxCode id, not a
  * TaxRate id — a TaxRate is just the percentage detail a TaxCode wraps
@@ -194,6 +206,8 @@ export interface MainApiCustomer {
   familyName?: string | null;
   taxId?: string | null;
   bookType?: string | null;
+  email?: string | null;
+  phone?: string | null;
 }
 
 export interface MainApiCustomerListResponse {
@@ -298,6 +312,24 @@ export class MainApiPullClient {
       limit: params.limit,
       offset: params.offset,
     });
+  }
+
+  /**
+   * GET /payment-methods/connection/:connectionId — QuickBooks' own
+   * PaymentMethod catalog entity (Cash, Check, Credit Card, ...), live-read
+   * by the main API rather than served from a local sync table (see that
+   * route's doc comment in nest-sync-2-books-api's payment-method.controller.ts
+   * for why). Backs Track D's Mapping Center payment-method pull.
+   */
+  async getPaymentMethods(
+    apiKey: string,
+    connectionId: string,
+  ): Promise<MainApiPaymentMethodListResponse> {
+    return this.get<MainApiPaymentMethodListResponse>(
+      apiKey,
+      `/payment-methods/connection/${encodeURIComponent(connectionId)}`,
+      {},
+    );
   }
 
   /**

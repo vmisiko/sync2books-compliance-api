@@ -21,6 +21,12 @@ export interface ClassificationPlaceholder {
   matchValue: string;
 }
 
+export interface PaymentMethodMappingSuggestion {
+  internalPaymentMethod: string;
+  pmtTyCd: string;
+  confidenceScore: number;
+}
+
 /** Matches oscu-mapping.seed.ts's internalTaxCategory -> KRA taxTyCd convention (EXEMPT=A, VAT_STANDARD=B, VAT_ZERO=C, OTHER=D, VAT_8=E) — same convention as oscu_codes' cdCls '04' (Tax Type) reference table. */
 const TAX_CATEGORY_CODE: Record<TaxCategory, string> = {
   [TaxCategory.EXEMPT]: 'A',
@@ -66,6 +72,55 @@ const KNOWN_UNITS: Array<{
     pkgUnitCd: 'NT',
     aliases: ['l', 'ltr', 'litre', 'liter', 'litres', 'liters'],
   },
+];
+
+/** Matches oscu-mapping.seed.ts's 8 internal payment methods -> OSCU pmtTyCd (cdCls '07'). */
+const KNOWN_PAYMENT_METHODS: Array<{
+  internalPaymentMethod: string;
+  pmtTyCd: string;
+  aliases: string[];
+}> = [
+  { internalPaymentMethod: 'CASH', pmtTyCd: '01', aliases: ['cash'] },
+  {
+    internalPaymentMethod: 'CREDIT',
+    pmtTyCd: '02',
+    aliases: ['credit', 'on account', 'on credit', 'invoice'],
+  },
+  {
+    internalPaymentMethod: 'CASH_CREDIT',
+    pmtTyCd: '03',
+    aliases: ['cash/credit', 'cash and credit', 'cash or credit'],
+  },
+  {
+    internalPaymentMethod: 'BANK_CHECK',
+    pmtTyCd: '04',
+    aliases: ['check', 'cheque', 'bank check', 'bank cheque'],
+  },
+  {
+    internalPaymentMethod: 'DEBIT_CREDIT',
+    pmtTyCd: '05',
+    aliases: ['debit card', 'credit card', 'debit/credit card', 'visa', 'mastercard'],
+  },
+  {
+    internalPaymentMethod: 'CARD',
+    pmtTyCd: '06',
+    aliases: ['card', 'e-check', 'echeck'],
+  },
+  {
+    internalPaymentMethod: 'MOBILE_MONEY',
+    pmtTyCd: '07',
+    aliases: [
+      'mobile money',
+      'm-pesa',
+      'mpesa',
+      'm pesa',
+      'till',
+      'till number',
+      'paybill',
+      'airtel money',
+    ],
+  },
+  { internalPaymentMethod: 'OTHER', pmtTyCd: '08', aliases: ['other'] },
 ];
 
 /**
@@ -259,6 +314,35 @@ export class MappingSuggestionService {
           internalUnit: u.internalUnit,
           qtyUnitCd: u.qtyUnitCd,
           pkgUnitCd: u.pkgUnitCd,
+          confidenceScore: 75,
+        };
+      }
+    }
+    return null;
+  }
+
+  /** @param label Raw label from the source system, e.g. QuickBooks PaymentMethod.Name ("Cash", "M-Pesa", "Credit Card"). */
+  suggestPaymentMethodMapping(
+    label: string | null | undefined,
+  ): PaymentMethodMappingSuggestion | null {
+    const n = (label ?? '').trim().toLowerCase();
+    if (!n) return null;
+
+    for (const p of KNOWN_PAYMENT_METHODS) {
+      if (p.aliases.includes(n)) {
+        return {
+          internalPaymentMethod: p.internalPaymentMethod,
+          pmtTyCd: p.pmtTyCd,
+          confidenceScore: 95,
+        };
+      }
+    }
+    // Looser contains-match (e.g. "M-Pesa Till") — still confident enough to surface, lower score.
+    for (const p of KNOWN_PAYMENT_METHODS) {
+      if (p.aliases.some((alias) => n.includes(alias))) {
+        return {
+          internalPaymentMethod: p.internalPaymentMethod,
+          pmtTyCd: p.pmtTyCd,
           confidenceScore: 75,
         };
       }

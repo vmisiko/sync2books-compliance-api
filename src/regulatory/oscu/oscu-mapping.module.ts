@@ -5,8 +5,10 @@ import { OscuItemClassificationOrmEntity } from './infrastructure/persistence/os
 import { OscuSyncStateOrmEntity } from './infrastructure/persistence/oscu-sync-state.orm-entity';
 import { OscuMappingSeed } from './infrastructure/persistence/oscu-mapping.seed';
 import { PaymentTypeMappingOrmEntity } from './infrastructure/persistence/payment-type-mapping.orm-entity';
+import { PaymentTypeResolverTypeOrm } from './infrastructure/persistence/payment-type-resolver.typeorm';
 import { TaxMappingOrmEntity } from './infrastructure/persistence/tax-mapping.orm-entity';
 import { MappingSuggestionService } from './application/mapping-suggestion.service';
+import { PAYMENT_TYPE_RESOLVER } from '../../shared/tokens';
 
 @Module({
   imports: [
@@ -18,8 +20,12 @@ import { MappingSuggestionService } from './application/mapping-suggestion.servi
       ClassificationMappingOrmEntity,
     ]),
   ],
-  providers: [OscuMappingSeed, MappingSuggestionService],
-  exports: [TypeOrmModule, MappingSuggestionService],
+  providers: [
+    OscuMappingSeed,
+    MappingSuggestionService,
+    { provide: PAYMENT_TYPE_RESOLVER, useClass: PaymentTypeResolverTypeOrm },
+  ],
+  exports: [TypeOrmModule, MappingSuggestionService, PAYMENT_TYPE_RESOLVER],
 })
 export class OscuMappingModule implements OnModuleInit {
   constructor(private readonly seed: OscuMappingSeed) {}

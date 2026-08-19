@@ -209,4 +209,44 @@ describe('MappingSuggestionService', () => {
       expect(service.suggestClassificationPlaceholder({})).toBeNull();
     });
   });
+
+  describe('suggestPaymentMethodMapping', () => {
+    it('matches an exact alias with high confidence', () => {
+      expect(service.suggestPaymentMethodMapping('Cash')).toEqual({
+        internalPaymentMethod: 'CASH',
+        pmtTyCd: '01',
+        confidenceScore: 95,
+      });
+      expect(service.suggestPaymentMethodMapping('m-pesa')).toEqual({
+        internalPaymentMethod: 'MOBILE_MONEY',
+        pmtTyCd: '07',
+        confidenceScore: 95,
+      });
+      expect(service.suggestPaymentMethodMapping('Credit Card')).toEqual({
+        internalPaymentMethod: 'DEBIT_CREDIT',
+        pmtTyCd: '05',
+        confidenceScore: 95,
+      });
+    });
+
+    it('falls back to a lower-confidence substring match', () => {
+      expect(service.suggestPaymentMethodMapping('M-Pesa Till')).toEqual({
+        internalPaymentMethod: 'MOBILE_MONEY',
+        pmtTyCd: '07',
+        confidenceScore: 75,
+      });
+    });
+
+    it('returns null for an unrecognized label', () => {
+      expect(
+        service.suggestPaymentMethodMapping('Store Loyalty Points'),
+      ).toBeNull();
+    });
+
+    it('returns null for empty/null/undefined input', () => {
+      expect(service.suggestPaymentMethodMapping('')).toBeNull();
+      expect(service.suggestPaymentMethodMapping(null)).toBeNull();
+      expect(service.suggestPaymentMethodMapping(undefined)).toBeNull();
+    });
+  });
 });

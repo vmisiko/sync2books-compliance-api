@@ -46,4 +46,14 @@ export class UpdateMappingDto {
 
   @ApiProperty({ required: false })
   priority?: number;
+
+  // --- payment ---
+  @ApiProperty({
+    required: false,
+    description: 'Internal payment-method key, e.g. MOBILE_MONEY',
+  })
+  internalPaymentMethod?: string;
+
+  @ApiProperty({ required: false, description: "OSCU pmtTyCd (cdCls '07')" })
+  pmtTyCd?: string;
 }

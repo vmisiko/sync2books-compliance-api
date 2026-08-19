@@ -5,6 +5,7 @@ import { DashboardIdentityModule } from '../dashboard-identity/dashboard-identit
 import { MainApiPullModule } from '../integration/main-api-pull/main-api-pull.module';
 import { PlatformCorrelationModule } from '../integration/platform-correlation.module';
 import { SalesModule } from '../sales/sales.module';
+import { OscuMappingModule } from '../regulatory/oscu/oscu-mapping.module';
 import { DashboardInvoicesApplicationService } from './application/dashboard-invoices.application.service';
 import { DashboardInvoicesController } from './presentation/dashboard-invoices.controller';
 
@@ -16,6 +17,7 @@ import { DashboardInvoicesController } from './presentation/dashboard-invoices.c
     MainApiPullModule,
     PlatformCorrelationModule,
     SalesModule,
+    OscuMappingModule,
   ],
   controllers: [DashboardInvoicesController],
   providers: [DashboardInvoicesApplicationService],

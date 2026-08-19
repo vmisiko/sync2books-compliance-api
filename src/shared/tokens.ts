@@ -6,6 +6,7 @@ export const CONNECTION_REPO = 'IComplianceConnectionRepository';
 export const ETIMS_ADAPTER = 'IEtimsAdapter';
 export const CATALOG_ITEM_REPO = 'ICatalogItemRepository';
 export const CLASSIFICATION_RESOLVER = 'IClassificationResolver';
+export const PAYMENT_TYPE_RESOLVER = 'IPaymentTypeResolver';
 export const STOCK_REPO = 'IStockRepository';
 export const STOCK_MOVEMENT_REPO = 'IStockMovementRepository';
 export const DASHBOARD_USER_REPO = 'IDashboardUserRepository';

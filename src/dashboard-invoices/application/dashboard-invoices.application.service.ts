@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -7,6 +8,8 @@ import {
 import type { Request } from 'express';
 import { randomUUID } from 'crypto';
 import { CatalogService } from '../../catalog/api/catalog.service';
+import { PAYMENT_TYPE_RESOLVER } from '../../shared/tokens';
+import type { IPaymentTypeResolver } from '../../regulatory/oscu/domain/ports/payment-type-resolver.port';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import {
@@ -65,6 +68,8 @@ export class DashboardInvoicesApplicationService {
     private readonly oscuCallback: PlatformOscuCallbackService,
     private readonly correlationPersistence: Sync2BooksCorrelationPersistenceService,
     private readonly mainApiOscuClient: Sync2BooksMainApiOscuClient,
+    @Inject(PAYMENT_TYPE_RESOLVER)
+    private readonly paymentTypeResolver: IPaymentTypeResolver,
   ) {}
 
   async pullInvoices(
@@ -187,6 +192,15 @@ export class DashboardInvoicesApplicationService {
       }),
     );
 
+    // QuickBooks Invoice objects are inherently on-credit documents by QuickBooks' own
+    // object model (a payment-now sale is a SalesReceipt, which this pull never touches) —
+    // so resolve to the tenant's CREDIT mapping rather than assuming CASH. Falls back to
+    // the raw '02' code only if the payment mapping table is somehow missing its global
+    // seed row, which oscu-mapping.seed.ts guarantees it isn't.
+    const paymentTypeCode = await this.paymentTypeResolver
+      .resolve(merchantId, 'CREDIT')
+      .catch(() => '02');
+
     const createResult = await this.sales.createDocument(
       {
         merchantId,
@@ -201,11 +215,8 @@ export class DashboardInvoicesApplicationService {
         creditNoteDate: null,
         creditNoteReasonCode: null,
         saleDate: pulled.issueDate.slice(0, 10),
-        // TODO: no reliable QuickBooks-side signal for payment method/status yet —
-        // '01' (cash) / '02' are the same MVP defaults DashboardSalesController
-        // uses for manually-entered sales. Revisit once a payment-type mapping exists.
         receiptTypeCode: 'S',
-        paymentTypeCode: '01',
+        paymentTypeCode,
         invoiceStatusCode: '02',
         currency: pulled.currency || 'KES',
         exchangeRate: 1,
