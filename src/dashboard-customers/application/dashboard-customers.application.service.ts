@@ -208,6 +208,8 @@ export class DashboardCustomersApplicationService {
           if (existing) {
             existing.name = name;
             existing.tin = mainApiCustomer.taxId ?? existing.tin;
+            existing.phoneNumber = mainApiCustomer.phone ?? existing.phoneNumber;
+            existing.email = mainApiCustomer.email ?? existing.email;
             const saved = await this.customerRepo.save(existing);
             results.push({
               mainApiCustomerId: mainApiCustomer.id,
@@ -222,8 +224,8 @@ export class DashboardCustomersApplicationService {
               externalId: mainApiCustomer.id,
               name,
               tin: mainApiCustomer.taxId ?? null,
-              phoneNumber: null,
-              email: null,
+              phoneNumber: mainApiCustomer.phone ?? null,
+              email: mainApiCustomer.email ?? null,
             });
             const saved = await this.customerRepo.save(entity);
             results.push({
