@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { forwardRef, Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogService } from './api/catalog.service';
 import { CatalogController } from './api/catalog.controller';
@@ -19,6 +19,7 @@ import { ComplianceOrganizationModule } from '../compliance-organization/complia
 import { EtimsModule } from '../regulatory/oscu/etims.module';
 import { ComplianceServiceAuthModule } from '../integration/compliance-service-auth.module';
 import { PlatformCorrelationModule } from '../integration/platform-correlation.module';
+import { InventoryModule } from '../inventory/inventory.module';
 
 @Module({
   imports: [
@@ -28,6 +29,10 @@ import { PlatformCorrelationModule } from '../integration/platform-correlation.m
     OscuReferenceModule,
     ComplianceOrganizationModule,
     EtimsModule,
+    // CatalogService seeds a zero-qty stock row on registerItem -- InventoryModule
+    // itself imports CatalogModule (for ITEM_REPO/ETIMS_ADAPTER), so this side is
+    // wrapped in forwardRef() to break the cycle; InventoryModule does the same.
+    forwardRef(() => InventoryModule),
     TypeOrmModule.forFeature([
       CatalogItemOrmEntity,
       TaxMappingOrmEntity,

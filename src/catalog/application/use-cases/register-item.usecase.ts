@@ -24,15 +24,6 @@ export interface RegisterItemInput {
   unitPrice?: number | null;
   /** OSCU country of origin (orgnNatCd). Defaults to 'KE' when unset. */
   originCountry?: string | null;
-  /**
-   * QuickBooks-derived stock signal for this registration attempt (not an
-   * override -- always the current QB-derived value, computed fresh by the
-   * mapper on every register/pull call). Ignored if the item already has a
-   * stockItemOverride set; use DashboardItemsApplicationService.overrideStockItem
-   * to set that. Defaults to false (not a stock item) when omitted, e.g. for
-   * Mode A's direct registration path which doesn't derive this yet.
-   */
-  isStockItem?: boolean;
 }
 
 export interface RegisterItemResult {
@@ -87,7 +78,12 @@ export async function registerItem(
     resolution.productTypeCode,
     'productTypeCode',
   );
-  const qbDerivedIsStockItem = input.isStockItem ?? false;
+  // Stock-tracking eligibility is fully determined by item type -- Goods
+  // (Raw Material/Finished Product) are stock-tracked, Service is not. This
+  // is recomputed here on every register/update call, uniformly regardless
+  // of source (manual, QuickBooks pull, or Mode A registration), and there
+  // is no override mechanism.
+  const isStockItem = input.itemType === ItemType.GOODS;
   const now = new Date();
 
   if (existing) {
@@ -104,8 +100,7 @@ export async function registerItem(
       productTypeCode,
       unitPrice: input.unitPrice ?? existing.unitPrice,
       originCountry: input.originCountry ?? existing.originCountry ?? 'KE',
-      // A manual override always wins over the QuickBooks-derived value.
-      isStockItem: existing.stockItemOverride ?? qbDerivedIsStockItem,
+      isStockItem,
       // Any change requires a resync to eTIMS (same itemCd can be reused).
       registrationStatus: 'PENDING',
       lastSyncedAt: null,
@@ -139,8 +134,7 @@ export async function registerItem(
     productTypeCode,
     unitPrice: input.unitPrice ?? null,
     originCountry: input.originCountry ?? 'KE',
-    isStockItem: qbDerivedIsStockItem,
-    stockItemOverride: null,
+    isStockItem,
     registrationStatus: 'PENDING',
     etimsItemCode: null,
     lastSyncResultCd: null,

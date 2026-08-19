@@ -183,9 +183,6 @@ export class DashboardItemsApplicationService {
 
     const isService = dto.productTypeCode === '3';
     const itemType = isService ? ItemType.SERVICE : ItemType.GOODS;
-    // Raw Material/Finished Product default to stock-tracked, Service to not;
-    // dashboard users can still flip this later via overrideStockItem.
-    const isStockItem = !isService;
     const taxCategory = TAX_CATEGORY_BY_CODE[dto.taxTyCd] ?? TaxCategory.OTHER;
 
     const result = await this.catalog.registerItem({
@@ -201,7 +198,6 @@ export class DashboardItemsApplicationService {
       productTypeCode: dto.productTypeCode,
       unitPrice: dto.unitPrice ?? null,
       originCountry: dto.originCountry ?? 'KE',
-      isStockItem,
     });
     return result.item;
   }
@@ -247,26 +243,8 @@ export class DashboardItemsApplicationService {
       itemType: existing.itemType,
       taxCategory: existing.taxCategory,
       classificationCode,
-      // No fresh QuickBooks data here -- pass the current value through so
-      // it isn't reset to the false default (a real override still wins
-      // over this via registerItem's stockItemOverride check either way).
-      isStockItem: existing.isStockItem,
     });
     return result.item;
-  }
-
-  /** Manual override for whether an item requires KRA stock tracking -- survives future pulls (see CatalogService.setStockItemOverride). */
-  async overrideStockItem(
-    complianceTenantId: string,
-    itemId: string,
-    isStockItem: boolean,
-  ) {
-    const merchantId = await this.resolveMerchantId(complianceTenantId);
-    const existing = await this.catalog.getItemById(itemId);
-    if (!existing || existing.merchantId !== merchantId) {
-      throw new NotFoundException(`Item ${itemId} not found`);
-    }
-    return this.catalog.setStockItemOverride(itemId, isStockItem);
   }
 
   private async resolveMerchantId(complianceTenantId: string): Promise<string> {

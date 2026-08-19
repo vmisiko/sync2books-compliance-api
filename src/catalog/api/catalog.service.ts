@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
 import { registerItem } from '../application/use-cases/register-item.usecase';
@@ -30,9 +30,12 @@ import {
   CLASSIFICATION_RESOLVER,
   CONNECTION_REPO,
   ETIMS_ADAPTER,
+  STOCK_REPO,
 } from '../../shared/tokens';
 import type { IComplianceConnectionRepository } from '../../shared/ports/repository.port';
 import type { IEtimsAdapter } from '../../regulatory/oscu/ports/etims-adapter.port';
+import type { IStockRepository } from '../../inventory/domain/ports/stock-repository.port';
+import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { OscuItemClassificationOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-item-classification.orm-entity';
 import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
 import { OscuCodeClassOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-code-class.orm-entity';
@@ -40,6 +43,8 @@ import { OscuCodeOrmEntity } from '../../regulatory/oscu/infrastructure/persiste
 
 @Injectable()
 export class CatalogService {
+  private readonly logger = new Logger(CatalogService.name);
+
   constructor(
     @Inject(CATALOG_ITEM_REPO)
     private readonly itemRepo: ICatalogItemRepository,
@@ -49,6 +54,9 @@ export class CatalogService {
     private readonly connectionRepo: IComplianceConnectionRepository,
     @Inject(ETIMS_ADAPTER)
     private readonly etimsAdapter: IEtimsAdapter,
+    @Inject(STOCK_REPO)
+    private readonly stockRepo: IStockRepository,
+    private readonly organization: ComplianceOrganizationApplicationService,
     @InjectRepository(OscuItemClassificationOrmEntity)
     private readonly itemClassificationRepo: Repository<OscuItemClassificationOrmEntity>,
     @InjectRepository(OscuSyncStateOrmEntity)
@@ -75,9 +83,46 @@ export class CatalogService {
     productTypeCode?: string;
     unitPrice?: number | null;
     originCountry?: string | null;
-    isStockItem?: boolean;
   }) {
-    return registerItem(params, this.itemRepo, this.classificationResolver);
+    const result = await registerItem(
+      params,
+      this.itemRepo,
+      this.classificationResolver,
+    );
+    if (result.item.isStockItem) {
+      await this.seedZeroStockRow(params.merchantId, result.item.id);
+    }
+    return result;
+  }
+
+  /**
+   * Best-effort: ensure a stock row exists (at 0) in the tenant's default/HQ
+   * branch for a newly-registered or re-registered stock item, so it shows
+   * up in the dashboard's Inventory "Stock Levels" list immediately rather
+   * than being invisible until a reconcile/adjust happens. A 0 delta can
+   * never trip the negative-stock guard, and this deliberately writes no
+   * StockMovement ledger entry -- it must never throw or block item
+   * registration/KRA-sync.
+   */
+  private async seedZeroStockRow(
+    merchantId: string,
+    catalogItemId: string,
+  ): Promise<void> {
+    try {
+      const tenant =
+        await this.organization.getTenantBySync2booksCompanyId(merchantId);
+      if (!tenant) return;
+      const branches = await this.organization.listBranches(tenant.id);
+      const branchId = branches[0]?.sync2booksBranchId;
+      if (!branchId) return;
+      await this.stockRepo.applyDelta(catalogItemId, branchId, 0);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to seed zero stock row for item ${catalogItemId} (merchant ${merchantId}): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   async listItems(merchantId: string) {
@@ -86,21 +131,6 @@ export class CatalogService {
 
   async getItemById(itemId: string) {
     return this.itemRepo.findById(itemId);
-  }
-
-  /** Manual override for isStockItem -- survives future pulls, unlike the QuickBooks-derived default. */
-  async setStockItemOverride(itemId: string, isStockItem: boolean) {
-    const existing = await this.itemRepo.findById(itemId);
-    if (!existing) {
-      throw new Error(`Item ${itemId} not found`);
-    }
-    const updated = {
-      ...existing,
-      isStockItem,
-      stockItemOverride: isStockItem,
-      updatedAt: new Date(),
-    };
-    return this.itemRepo.save(updated);
   }
 
   async findByExternalId(merchantId: string, externalId: string) {

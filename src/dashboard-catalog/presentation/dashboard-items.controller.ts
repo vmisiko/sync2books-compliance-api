@@ -22,7 +22,6 @@ import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/g
 import type { DashboardRequestUser } from '../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
 import { CreateItemDto } from './dto/create-item.dto';
 import { OverrideItemClassificationDto } from './dto/override-item-classification.dto';
-import { OverrideStockItemDto } from './dto/override-stock-item.dto';
 import { SyncItemsDto } from './dto/sync-items.dto';
 
 @Controller('dashboard-api/items')
@@ -100,29 +99,5 @@ export class DashboardItemsController {
       body.classificationCode,
     );
     return { success: true, message: 'Classification updated', data: { item } };
-  }
-
-  @Patch(':id/stock-item')
-  @ApiOperation({
-    summary:
-      'Manually set whether an item requires KRA stock tracking, overriding the QuickBooks-derived default',
-  })
-  @ApiResponse({ status: 200, description: 'Item stock-item flag updated' })
-  async overrideStockItem(
-    @Req() req: Request,
-    @Param('id') id: string,
-    @Body() body: OverrideStockItemDto,
-  ) {
-    const user = req.user as DashboardRequestUser;
-    const item = await this.items.overrideStockItem(
-      user.tenantId,
-      id,
-      body.isStockItem,
-    );
-    return {
-      success: true,
-      message: 'Stock item flag updated',
-      data: { item },
-    };
   }
 }

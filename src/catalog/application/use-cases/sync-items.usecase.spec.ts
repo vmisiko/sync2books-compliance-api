@@ -21,7 +21,6 @@ function makeItem(overrides: Partial<CatalogItem> = {}): CatalogItem {
     unitPrice: null,
     originCountry: null,
     isStockItem: true,
-    stockItemOverride: null,
     registrationStatus: 'PENDING',
     etimsItemCode: null,
     lastSyncResultCd: null,
@@ -36,7 +35,7 @@ function makeItem(overrides: Partial<CatalogItem> = {}): CatalogItem {
 }
 
 describe('syncItemsToEtims', () => {
-  it('sends the item\'s own unitPrice/originCountry as dftPrc/orgnNatCd instead of hardcoded 0/KE', async () => {
+  it("sends the item's own unitPrice/originCountry as dftPrc/orgnNatCd instead of hardcoded 0/KE", async () => {
     const item = makeItem({ unitPrice: 1999.5, originCountry: 'CN' });
     let capturedRequest: any = null;
 
@@ -56,7 +55,10 @@ describe('syncItemsToEtims', () => {
     const etimsAdapter = {
       saveItem: jest.fn().mockImplementation((request) => {
         capturedRequest = request;
-        return Promise.resolve({ success: true, rawResponse: { resultCd: '000', resultMsg: 'OK' } });
+        return Promise.resolve({
+          success: true,
+          rawResponse: { resultCd: '000', resultMsg: 'OK' },
+        });
       }),
     };
     const syncStateRepo = {
@@ -99,7 +101,10 @@ describe('syncItemsToEtims', () => {
     const etimsAdapter = {
       saveItem: jest.fn().mockImplementation((request) => {
         capturedRequest = request;
-        return Promise.resolve({ success: true, rawResponse: { resultCd: '000', resultMsg: 'OK' } });
+        return Promise.resolve({
+          success: true,
+          rawResponse: { resultCd: '000', resultMsg: 'OK' },
+        });
       }),
     };
     const syncStateRepo = {

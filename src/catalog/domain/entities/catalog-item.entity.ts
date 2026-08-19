@@ -33,13 +33,11 @@ export interface CatalogItem {
    * Not part of itemTyCd -- KRA's own item-type code list (cdCls 24: Raw
    * Material / Finished Product / Service) has no distinct "non-stock good"
    * value, so this is tracked as its own flag rather than folded into
-   * productTypeCode. Auto-derived from QuickBooks' item Type ('Inventory'
-   * -> true, 'Service'/'NonInventory' -> false) on every register/pull,
-   * unless stockItemOverride is set.
+   * productTypeCode. Fully derived from itemType on every register/update,
+   * uniformly regardless of source (manual, QuickBooks pull, Mode A):
+   * ItemType.GOODS -> true, ItemType.SERVICE -> false. No override.
    */
   isStockItem: boolean;
-  /** Manual override for isStockItem (null = no override, use the QuickBooks-derived default). Survives re-pulls, unlike isStockItem itself. */
-  stockItemOverride: boolean | null;
   registrationStatus: 'PENDING' | 'REGISTERED' | 'FAILED';
   /**
    * The eTIMS/OSCU item code (`itemCd`) assigned/managed by this system.

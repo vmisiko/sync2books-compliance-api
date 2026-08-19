@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ComplianceOrganizationModule } from '../compliance-organization/compliance-organization.module';
 import { InventoryService } from './api/inventory.service';
@@ -22,7 +22,9 @@ import { OscuSyncStateOrmEntity } from '../regulatory/oscu/infrastructure/persis
     // syncStockMovementToEtims/syncStockMasterToEtims (ETIMS_STOCK_SYNC /
     // ETIMS_STOCK_MASTER_SYNC) were silently undefined without these, so the
     // whole eTIMS stock-sync feature was a no-op regardless of env flags.
-    CatalogModule,
+    // CatalogModule also imports InventoryModule (CatalogService seeds a
+    // zero-qty stock row on registerItem), so forwardRef() breaks the cycle.
+    forwardRef(() => CatalogModule),
     EtimsModule,
     TypeOrmModule.forFeature([
       OscuSyncStateOrmEntity,
