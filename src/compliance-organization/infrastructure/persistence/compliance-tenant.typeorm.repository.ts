@@ -10,6 +10,7 @@ function toDomain(e: ComplianceTenantOrmEntity): ComplianceTenant {
     id: e.id,
     sync2booksCompanyId: e.sync2booksCompanyId,
     displayName: e.displayName,
+    organizationId: e.organizationId,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
   };
@@ -34,11 +35,17 @@ export class ComplianceTenantTypeOrmRepository implements IComplianceTenantRepos
     return e ? toDomain(e) : null;
   }
 
+  async findByOrganizationId(organizationId: string): Promise<ComplianceTenant[]> {
+    const rows = await this.repo.find({ where: { organizationId } });
+    return rows.map(toDomain);
+  }
+
   async save(tenant: ComplianceTenant): Promise<ComplianceTenant> {
     const e = this.repo.create({
       id: tenant.id,
       sync2booksCompanyId: tenant.sync2booksCompanyId ?? null,
       displayName: tenant.displayName,
+      organizationId: tenant.organizationId ?? null,
       createdAt: tenant.createdAt,
       updatedAt: tenant.updatedAt,
     });

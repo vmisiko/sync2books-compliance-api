@@ -5,5 +5,6 @@ export interface IComplianceTenantRepository {
   findBySync2booksCompanyId(
     sync2booksCompanyId: string,
   ): Promise<ComplianceTenant | null>;
+  findByOrganizationId(organizationId: string): Promise<ComplianceTenant[]>;
   save(tenant: ComplianceTenant): Promise<ComplianceTenant>;
 }

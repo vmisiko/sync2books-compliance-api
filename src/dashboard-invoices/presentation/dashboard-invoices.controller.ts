@@ -20,12 +20,13 @@ import {
 import type { Request } from 'express';
 import { DashboardInvoicesApplicationService } from '../application/dashboard-invoices.application.service';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
-import type { DashboardRequestUser } from '../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
+import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guards/active-tenant.guard';
+import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { CreateSaleFromInvoiceDto } from './dto/create-sale-from-invoice.dto';
 
 @Controller('dashboard-api/invoices')
 @ApiTags('Dashboard invoices (Mode B)')
-@UseGuards(DashboardJwtAuthGuard)
+@UseGuards(DashboardJwtAuthGuard, ActiveTenantGuard)
 @ApiBearerAuth()
 export class DashboardInvoicesController {
   constructor(private readonly invoices: DashboardInvoicesApplicationService) {}
@@ -38,12 +39,11 @@ export class DashboardInvoicesController {
   })
   @ApiResponse({ status: 200, description: 'Pull result' })
   async pull(
-    @Req() req: Request,
+    @ActiveTenant() tenantId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
-    const user = req.user as DashboardRequestUser;
-    const result = await this.invoices.pullInvoices(user.tenantId, {
+    const result = await this.invoices.pullInvoices(tenantId, {
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
     });
@@ -58,12 +58,11 @@ export class DashboardInvoicesController {
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   async list(
-    @Req() req: Request,
+    @ActiveTenant() tenantId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
-    const user = req.user as DashboardRequestUser;
-    const result = await this.invoices.listInvoices(user.tenantId, {
+    const result = await this.invoices.listInvoices(tenantId, {
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
     });
@@ -76,9 +75,8 @@ export class DashboardInvoicesController {
       'Get one pulled invoice with each line resolved against the classified catalog (readyForSale flag)',
   })
   @ApiResponse({ status: 200, description: 'Invoice detail' })
-  async getById(@Req() req: Request, @Param('id') id: string) {
-    const user = req.user as DashboardRequestUser;
-    const invoice = await this.invoices.getInvoiceById(user.tenantId, id);
+  async getById(@ActiveTenant() tenantId: string, @Param('id') id: string) {
+    const invoice = await this.invoices.getInvoiceById(tenantId, id);
     return { success: true, message: 'OK', data: invoice };
   }
 
@@ -97,13 +95,13 @@ export class DashboardInvoicesController {
     description: 'Invoice has unclassified items, or validation failed',
   })
   async createSale(
+    @ActiveTenant() tenantId: string,
     @Req() req: Request,
     @Param('id') id: string,
     @Body() body: CreateSaleFromInvoiceDto,
   ) {
-    const user = req.user as DashboardRequestUser;
     const data = await this.invoices.createSaleFromInvoice(
-      user.tenantId,
+      tenantId,
       id,
       { submit: body.submit },
       req,
@@ -118,14 +116,10 @@ export class DashboardInvoicesController {
   })
   @ApiResponse({ status: 200, description: 'Receipt-attachment status' })
   async getReceiptAttachmentStatus(
-    @Req() req: Request,
+    @ActiveTenant() tenantId: string,
     @Param('id') id: string,
   ) {
-    const user = req.user as DashboardRequestUser;
-    const data = await this.invoices.getReceiptAttachmentStatus(
-      user.tenantId,
-      id,
-    );
+    const data = await this.invoices.getReceiptAttachmentStatus(tenantId, id);
     return { success: true, message: 'OK', data };
   }
 
@@ -141,14 +135,10 @@ export class DashboardInvoicesController {
     description: 'No Main API sync item recorded for this invoice yet',
   })
   async retryReceiptAttachment(
-    @Req() req: Request,
+    @ActiveTenant() tenantId: string,
     @Param('id') id: string,
   ) {
-    const user = req.user as DashboardRequestUser;
-    const data = await this.invoices.retryReceiptAttachment(
-      user.tenantId,
-      id,
-    );
+    const data = await this.invoices.retryReceiptAttachment(tenantId, id);
     return { success: true, message: 'Retry triggered', data };
   }
 }

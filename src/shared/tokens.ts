@@ -11,3 +11,4 @@ export const STOCK_REPO = 'IStockRepository';
 export const STOCK_MOVEMENT_REPO = 'IStockMovementRepository';
 export const DASHBOARD_USER_REPO = 'IDashboardUserRepository';
 export const MAIN_API_CONNECTION_REPO = 'IMainApiConnectionRepository';
+export const DASHBOARD_ORGANIZATION_REPO = 'IDashboardOrganizationRepository';

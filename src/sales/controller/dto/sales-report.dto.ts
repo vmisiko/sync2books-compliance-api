@@ -94,6 +94,12 @@ export class SaleItemReportDto {
 
   @ApiProperty()
   itemId!: string;
+
+  @ApiProperty({ nullable: true })
+  itemName!: string | null;
+
+  @ApiProperty({ nullable: true })
+  itemDescription!: string | null;
 }
 
 export class SaleReportDto {
@@ -159,6 +165,18 @@ export class SaleReportDto {
       'Digitax-like status: completed|pending|failed|retrying|cancelled',
   })
   status!: string;
+
+  @ApiProperty({ nullable: true, description: "Trader's own business name (compliance tenant display name)" })
+  supplierName!: string | null;
+
+  @ApiProperty({ nullable: true, description: "Trader's own KRA PIN" })
+  supplierPin!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'OSCU pmtTyCd, e.g. "01"' })
+  paymentTypeCode!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'Human-readable payment method, e.g. "Cash"' })
+  paymentTypeDescription!: string | null;
 
   @ApiProperty({ type: SalesTaxSummaryDto })
   salesTaxSummary!: SalesTaxSummaryDto;

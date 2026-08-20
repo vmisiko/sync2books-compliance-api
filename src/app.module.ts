@@ -5,12 +5,15 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CatalogModule } from './catalog/catalog.module';
 import { ComplianceOrganizationModule } from './compliance-organization/compliance-organization.module';
+import { DashboardBusinessModule } from './dashboard-business/dashboard-business.module';
 import { DashboardCatalogModule } from './dashboard-catalog/dashboard-catalog.module';
 import { DashboardCustomersModule } from './dashboard-customers/dashboard-customers.module';
 import { DashboardIdentityModule } from './dashboard-identity/dashboard-identity.module';
 import { DashboardInventoryModule } from './dashboard-inventory/dashboard-inventory.module';
 import { DashboardInvoicesModule } from './dashboard-invoices/dashboard-invoices.module';
 import { DashboardMappingModule } from './dashboard-mapping/dashboard-mapping.module';
+import { DashboardOrganizationModule } from './dashboard-organization/dashboard-organization.module';
+import { DashboardPurchasesModule } from './dashboard-purchases/dashboard-purchases.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { OscuMappingModule } from './regulatory/oscu/oscu-mapping.module';
 import { OscuOperationsModule } from './regulatory/oscu/presentation/oscu-operations.module';
@@ -33,11 +36,13 @@ import { ComplianceEventOrmEntity } from './sales/infrastructure/persistence/com
 import { ComplianceLineOrmEntity } from './sales/infrastructure/persistence/compliance-line.orm-entity';
 import { CustomerOrmEntity } from './dashboard-customers/infrastructure/persistence/customer.orm-entity';
 import { DashboardUserOrmEntity } from './dashboard-identity/infrastructure/persistence/dashboard-user.orm-entity';
+import { DashboardOrganizationOrmEntity } from './dashboard-organization/infrastructure/persistence/dashboard-organization.orm-entity';
 import { InventoryStockOrmEntity } from './inventory/infrastructure/persistence/inventory-stock.orm-entity';
 import { StockMovementOrmEntity } from './inventory/infrastructure/persistence/stock-movement.orm-entity';
 import { MainApiConnectionOrmEntity } from './integration/main-api-pull/infrastructure/persistence/main-api-connection.orm-entity';
 import { MainApiPullModule } from './integration/main-api-pull/main-api-pull.module';
 import { PlatformCorrelationModule } from './integration/platform-correlation.module';
+import { PurchaseInvoiceOrmEntity } from './dashboard-purchases/infrastructure/persistence/purchase-invoice.orm-entity';
 
 @Module({
   imports: [
@@ -64,6 +69,7 @@ import { PlatformCorrelationModule } from './integration/platform-correlation.mo
         ComplianceLineOrmEntity,
         ComplianceTenantOrmEntity,
         CustomerOrmEntity,
+        DashboardOrganizationOrmEntity,
         DashboardUserOrmEntity,
         InventoryStockOrmEntity,
         MainApiConnectionOrmEntity,
@@ -73,6 +79,7 @@ import { PlatformCorrelationModule } from './integration/platform-correlation.mo
         OscuOperationLogOrmEntity,
         OscuSyncStateOrmEntity,
         PaymentTypeMappingOrmEntity,
+        PurchaseInvoiceOrmEntity,
         StockMovementOrmEntity,
         TaxMappingOrmEntity,
       ],
@@ -85,12 +92,15 @@ import { PlatformCorrelationModule } from './integration/platform-correlation.mo
     PlatformCorrelationModule,
     CatalogModule,
     ComplianceOrganizationModule,
+    DashboardBusinessModule,
     DashboardCatalogModule,
     DashboardCustomersModule,
     DashboardIdentityModule,
     DashboardInventoryModule,
     DashboardInvoicesModule,
     DashboardMappingModule,
+    DashboardOrganizationModule,
+    DashboardPurchasesModule,
     InventoryModule,
     MainApiPullModule,
     SalesModule,

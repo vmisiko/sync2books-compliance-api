@@ -16,16 +16,16 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import type { Request } from 'express';
 import { DashboardInventoryApplicationService } from '../application/dashboard-inventory.application.service';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
-import type { DashboardRequestUser } from '../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
+import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guards/active-tenant.guard';
+import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { DashboardAdjustStockDto } from './dto/dashboard-adjust-stock.dto';
 import { DashboardTransferStockDto } from './dto/dashboard-transfer-stock.dto';
 
 @Controller('dashboard-api/inventory')
 @ApiTags('Dashboard inventory (Mode B)')
-@UseGuards(DashboardJwtAuthGuard)
+@UseGuards(DashboardJwtAuthGuard, ActiveTenantGuard)
 @ApiBearerAuth()
 export class DashboardInventoryController {
   constructor(
@@ -34,9 +34,8 @@ export class DashboardInventoryController {
 
   @Get('branches')
   @ApiOperation({ summary: 'List branches for this tenant' })
-  async listBranches(@Req() req: Request) {
-    const user = req.user as DashboardRequestUser;
-    const branches = await this.inventory.listBranches(user.tenantId);
+  async listBranches(@ActiveTenant() tenantId: string) {
+    const branches = await this.inventory.listBranches(tenantId);
     return { success: true, message: 'OK', data: { branches } };
   }
 
@@ -92,9 +91,8 @@ export class DashboardInventoryController {
       'Pull current QtyOnHand from QuickBooks (via the main API) and reconcile it into the default branch\'s stock',
   })
   @ApiResponse({ status: 200, description: 'Reconciliation result' })
-  async reconcile(@Req() req: Request) {
-    const user = req.user as DashboardRequestUser;
-    const result = await this.inventory.reconcile(user.tenantId);
+  async reconcile(@ActiveTenant() tenantId: string) {
+    const result = await this.inventory.reconcile(tenantId);
     return { success: true, message: 'Stock reconciled', data: result };
   }
 }

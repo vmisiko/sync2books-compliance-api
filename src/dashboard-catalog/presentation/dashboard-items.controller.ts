@@ -7,7 +7,6 @@ import {
   Param,
   Patch,
   Post,
-  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -16,17 +15,17 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import type { Request } from 'express';
 import { DashboardItemsApplicationService } from '../application/dashboard-items.application.service';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
-import type { DashboardRequestUser } from '../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
+import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guards/active-tenant.guard';
+import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { CreateItemDto } from './dto/create-item.dto';
 import { OverrideItemClassificationDto } from './dto/override-item-classification.dto';
 import { SyncItemsDto } from './dto/sync-items.dto';
 
 @Controller('dashboard-api/items')
 @ApiTags('Dashboard items (Mode B)')
-@UseGuards(DashboardJwtAuthGuard)
+@UseGuards(DashboardJwtAuthGuard, ActiveTenantGuard)
 @ApiBearerAuth()
 export class DashboardItemsController {
   constructor(private readonly items: DashboardItemsApplicationService) {}
@@ -38,18 +37,16 @@ export class DashboardItemsController {
       'Pull items from the main API (sourced from QuickBooks etc.) and register/auto-classify them in the catalog',
   })
   @ApiResponse({ status: 200, description: 'Pull result' })
-  async pull(@Req() req: Request) {
-    const user = req.user as DashboardRequestUser;
-    const result = await this.items.pullItems(user.tenantId);
+  async pull(@ActiveTenant() tenantId: string) {
+    const result = await this.items.pullItems(tenantId);
     return { success: true, message: 'Items pulled', data: result };
   }
 
   @Get()
   @ApiOperation({ summary: 'List registered catalog items for this tenant' })
   @ApiResponse({ status: 200, description: 'Item list' })
-  async list(@Req() req: Request) {
-    const user = req.user as DashboardRequestUser;
-    const result = await this.items.listItems(user.tenantId);
+  async list(@ActiveTenant() tenantId: string) {
+    const result = await this.items.listItems(tenantId);
     return { success: true, message: 'OK', data: result };
   }
 
@@ -60,9 +57,8 @@ export class DashboardItemsController {
       'Create a manual catalog item (no ERP source) — created as PENDING, same as a pulled item',
   })
   @ApiResponse({ status: 201, description: 'Created item' })
-  async create(@Req() req: Request, @Body() body: CreateItemDto) {
-    const user = req.user as DashboardRequestUser;
-    const item = await this.items.createItem(user.tenantId, body);
+  async create(@ActiveTenant() tenantId: string, @Body() body: CreateItemDto) {
+    const item = await this.items.createItem(tenantId, body);
     return { success: true, message: 'Item created', data: { item } };
   }
 
@@ -73,9 +69,8 @@ export class DashboardItemsController {
       'Sync selected (or all PENDING/FAILED) catalog items to KRA eTIMS via OSCU saveItem',
   })
   @ApiResponse({ status: 200, description: 'Sync result' })
-  async sync(@Req() req: Request, @Body() body: SyncItemsDto) {
-    const user = req.user as DashboardRequestUser;
-    const result = await this.items.syncItems(user.tenantId, body.itemIds);
+  async sync(@ActiveTenant() tenantId: string, @Body() body: SyncItemsDto) {
+    const result = await this.items.syncItems(tenantId, body.itemIds);
     return { success: true, message: 'Items synced', data: result };
   }
 
@@ -88,13 +83,12 @@ export class DashboardItemsController {
     description: 'Item re-registered with the new classification',
   })
   async overrideClassification(
-    @Req() req: Request,
+    @ActiveTenant() tenantId: string,
     @Param('id') id: string,
     @Body() body: OverrideItemClassificationDto,
   ) {
-    const user = req.user as DashboardRequestUser;
     const item = await this.items.overrideClassification(
-      user.tenantId,
+      tenantId,
       id,
       body.classificationCode,
     );

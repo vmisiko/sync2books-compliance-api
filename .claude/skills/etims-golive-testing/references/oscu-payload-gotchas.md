@@ -308,6 +308,56 @@ supply `originalTraderInvoiceNumber` + `creditNoteReasonCode` directly.
 Reconfirmed live 2026-08-12 (`status: "completed"`, real `receiptNumber`/`receiptSignature`/`etimsUrl`) —
 this is the "Credit Note" Go-Live evidence screenshot.
 
+## updateImportItem (Update Imported Items) — SOLVED 2026-08-20: `remark` must be non-null
+
+**Field names are `itemClsCd` (with "s") and `imptItemSttsCd` (capital S) — same convention as `saveItem`.**
+Confirmed against KRA's own "eTIMS-OSCU-Integrator-Automated-Testing-Sandbox" Postman collection (their
+official reference), which uses exactly these names. Don't trust the OCR'd spec doc's attribute table
+(`itemClCd`, lowercase `imptItemsttsCd`) — it disagrees with its own JSON sample and is wrong; two earlier
+versions of this entry went down that dead end.
+
+**The actual bug: `remark: null` crashes the request specifically when `imptItemSttsCd` is `3` (Approved).**
+Isolated by testing all four field-name combinations, then all four status values, then finally comparing
+against the Postman collection's exact example body field-by-field:
+
+- Wrong field names (`itemClCd`, or lowercase `imptItemsttsCd`) get real, useful errors identifying the
+  problem (`resultCd 910 "required: <itemClsCd> and <itemCd>"`, or a canned "expected 3" that doesn't vary
+  with the value sent).
+- With correct field names, `imptItemSttsCd` values `1`/`2`/`4` all validate fine even with `remark: null`.
+- Only `imptItemSttsCd: "3"` combined with `remark: null` crashes with `resultCd 999 "There is an unknown
+  error. Please ask administrator"` — reproduced twice in a row, looked exactly like a KRA-side bug on the
+  Approve transition specifically.
+- **Sending `remark` as a non-empty string (e.g. `"Approved via Go-Live testing"`) instead of `null` fixes
+  it** — confirmed `resultCd: "000" "Successful"` on the real `/updateImportItem` path (not just the
+  `/importedItemConvertedInfo` alias, which returns success too but doesn't actually persist the status
+  change — see below).
+
+```json
+POST /updateImportItem
+{
+  "taskCd": "<real taskCd from selectImportItemList>",
+  "dclDe": "<real dclDe, same format as the seed record e.g. \"01022023\">",
+  "itemSeq": 1,
+  "hsCd": "<real hsCd from the seed record>",
+  "itemClsCd": "<your own valid classification>",
+  "itemCd": "<your own registered itemCd>",
+  "imptItemSttsCd": "3",
+  "remark": "Approved via Go-Live testing",
+  "modrId": "Admin", "modrNm": "Admin"
+}
+```
+
+Confirmed working live 2026-08-20 with `resultCd: "000"`. Note: `selectImportItemList`'s own read-back kept
+showing the old status (`"2"`) even after this succeeded — same "dashboard/lookup lags behind reality" class
+of staleness already documented elsewhere in this file (see `sendSalesTransaction`'s dashboard-badge note);
+trust the direct `resultCd 000` response from your own write call, not a subsequent read.
+
+**`/importedItemConvertedInfo` is NOT a reliable alias for `/updateImportItem`, despite an earlier note in
+this file claiming so** (based only on matching *error* responses for bad input on 2026-08-12). Calling
+`/importedItemConvertedInfo` with the same corrected payload also returns `resultCd 000`, but a following
+`selectImportItemList` still shows the old status — unlike `/updateImportItem`, which is the one KRA's own
+Go-Live dashboard actually tracks for this test case. Use `/updateImportItem`, not the "converted" alias.
+
 ## selectInvoiceDetail (Look Up Invoice Details)
 
 No special payload gotchas — straightforward once you have a real `invcNo` from your own successful sale.

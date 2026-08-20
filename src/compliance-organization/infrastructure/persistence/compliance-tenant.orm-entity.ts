@@ -17,6 +17,9 @@ export class ComplianceTenantOrmEntity {
   @Column('varchar', { nullable: true })
   displayName!: string | null;
 
+  @Column('varchar', { nullable: true })
+  organizationId!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

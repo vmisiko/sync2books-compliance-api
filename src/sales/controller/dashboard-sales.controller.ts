@@ -213,6 +213,13 @@ export class DashboardSalesController {
         originalDocumentNumber: original.documentNumber,
         originalSaleId: body.saleId,
         saleDate: body.returnDate,
+        // OSCU rfdDt (credit note date) is required -- KRA rejects a null value
+        // with "Missing RfdDt Date". Express credit notes don't take a separate
+        // date field, so derive it from returnDate (same fix as api-sales.controller.ts).
+        creditNoteDate: body.returnDate,
+        // OSCU rfdRsnCd is required too -- KRA rejects a missing value with
+        // "Invalid RfdRsnCd". Default to 06 (Refund).
+        creditNoteReasonCode: body.creditNoteReasonCode ?? '06',
         receiptTypeCode: 'R',
         paymentTypeCode:
           body.paymentTypeCode ?? original.paymentTypeCode ?? '01',

@@ -6,7 +6,12 @@ export class DashboardUserResponseDto {
   @ApiProperty() email!: string;
   @ApiPropertyOptional({ nullable: true }) displayName!: string | null;
   @ApiProperty({ enum: DashboardRole }) role!: DashboardRole;
-  @ApiProperty() complianceTenantId!: string;
+  @ApiProperty() organizationId!: string;
+}
+
+export class DashboardOrganizationResponseDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() displayName!: string;
 }
 
 export class DashboardTenantResponseDto {
@@ -30,8 +35,8 @@ export class DashboardTokensResponseDto {
 export class DashboardAuthResponseDto {
   @ApiProperty({ type: DashboardUserResponseDto })
   user!: DashboardUserResponseDto;
-  @ApiPropertyOptional({ type: DashboardTenantResponseDto, nullable: true })
-  tenant!: DashboardTenantResponseDto | null;
+  @ApiProperty({ type: DashboardOrganizationResponseDto })
+  organization!: DashboardOrganizationResponseDto;
   @ApiProperty({ type: DashboardTokensResponseDto })
   tokens!: DashboardTokensResponseDto;
 }

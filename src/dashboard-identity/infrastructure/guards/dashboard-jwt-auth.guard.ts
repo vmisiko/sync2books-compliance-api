@@ -3,10 +3,13 @@ import { AuthGuard } from '@nestjs/passport';
 import type { DashboardRequestUser } from '../strategies/dashboard-jwt.strategy';
 
 /**
- * Mode B guard. Populates `req.user: DashboardRequestUser`. Dashboard
- * controllers must read `req.user.tenantId` for data scoping — never trust a
- * client-supplied tenantId/branchId, unlike Mode A's ComplianceServiceAuthGuard
- * which trusts an already-validated caller.
+ * Mode B guard. Populates `req.user: DashboardRequestUser` (userId, role,
+ * organizationId — no tenantId: a JWT no longer implies one fixed business).
+ * Dashboard controllers that need to scope by business must additionally
+ * apply ActiveTenantGuard and read `@ActiveTenant()`, which resolves and
+ * verifies an `x-tenant-id` header against `req.user.organizationId` — never
+ * trust a client-supplied tenant id without that check, unlike Mode A's
+ * ComplianceServiceAuthGuard which trusts an already-validated caller.
  */
 @Injectable()
 export class DashboardJwtAuthGuard extends AuthGuard('dashboard-jwt') {

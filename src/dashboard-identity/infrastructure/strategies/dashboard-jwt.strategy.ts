@@ -7,14 +7,14 @@ export interface DashboardJwtPayload {
   sub: string;
   email: string;
   role: string;
-  tenantId: string;
+  organizationId: string;
 }
 
 export interface DashboardRequestUser {
   userId: string;
   email: string;
   role: string;
-  tenantId: string;
+  organizationId: string;
 }
 
 /**
@@ -40,7 +40,7 @@ export class DashboardJwtStrategy extends PassportStrategy(
       userId: payload.sub,
       email: payload.email,
       role: payload.role,
-      tenantId: payload.tenantId,
+      organizationId: payload.organizationId,
     };
   }
 }

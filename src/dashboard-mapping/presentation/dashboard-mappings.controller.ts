@@ -21,6 +21,8 @@ import {
 import type { Request } from 'express';
 import { DashboardMappingApplicationService } from '../application/dashboard-mapping.application.service';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
+import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guards/active-tenant.guard';
+import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import type { DashboardRequestUser } from '../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
 import { CreateMappingDto } from './dto/create-mapping.dto';
 import { UpdateMappingDto } from './dto/update-mapping.dto';
@@ -28,7 +30,7 @@ import { BulkClassifyMappingDto } from './dto/bulk-classify-mapping.dto';
 
 @Controller('dashboard-api/mappings')
 @ApiTags('Dashboard mapping center (Mode B)')
-@UseGuards(DashboardJwtAuthGuard)
+@UseGuards(DashboardJwtAuthGuard, ActiveTenantGuard)
 @ApiBearerAuth()
 export class DashboardMappingsController {
   constructor(private readonly mappings: DashboardMappingApplicationService) {}
@@ -45,9 +47,8 @@ export class DashboardMappingsController {
       'KRA code list',
   })
   @ApiResponse({ status: 200, description: 'Pull + suggestion result' })
-  async pull(@Req() req: Request) {
-    const user = req.user as DashboardRequestUser;
-    const result = await this.mappings.pullAll(user.tenantId);
+  async pull(@ActiveTenant() tenantId: string) {
+    const result = await this.mappings.pullAll(tenantId);
     return {
       success: true,
       message:
@@ -78,13 +79,12 @@ export class DashboardMappingsController {
   })
   @ApiResponse({ status: 200, description: 'Mapping list' })
   async list(
-    @Req() req: Request,
+    @ActiveTenant() tenantId: string,
     @Query('source') source?: string,
     @Query('type') type?: string,
     @Query('status') status?: string,
   ) {
-    const user = req.user as DashboardRequestUser;
-    const result = await this.mappings.list(user.tenantId, {
+    const result = await this.mappings.list(tenantId, {
       source,
       type,
       status,
@@ -166,9 +166,8 @@ export class DashboardMappingsController {
       'Aggregate mapped/total counts — global defaults and per-source-system, for the progress bars',
   })
   @ApiResponse({ status: 200, description: 'Summary counts' })
-  async summary(@Req() req: Request) {
-    const user = req.user as DashboardRequestUser;
-    const result = await this.mappings.summary(user.tenantId);
+  async summary(@ActiveTenant() tenantId: string) {
+    const result = await this.mappings.summary(tenantId);
     return { success: true, message: 'OK', data: result };
   }
 
@@ -179,9 +178,13 @@ export class DashboardMappingsController {
       'Approve a suggested mapping as-is (status -> MAPPED, activates it)',
   })
   @ApiResponse({ status: 200, description: 'Approved mapping' })
-  async approve(@Req() req: Request, @Param('id') id: string) {
+  async approve(
+    @ActiveTenant() tenantId: string,
+    @Req() req: Request,
+    @Param('id') id: string,
+  ) {
     const user = req.user as DashboardRequestUser;
-    const result = await this.mappings.approve(user.tenantId, id, user.email);
+    const result = await this.mappings.approve(tenantId, id, user.email);
     return { success: true, message: 'Mapping approved', data: result };
   }
 
@@ -192,12 +195,13 @@ export class DashboardMappingsController {
   })
   @ApiResponse({ status: 200, description: 'Bulk classify result' })
   async bulkClassify(
+    @ActiveTenant() tenantId: string,
     @Req() req: Request,
     @Body() body: BulkClassifyMappingDto,
   ) {
     const user = req.user as DashboardRequestUser;
     const result = await this.mappings.bulkClassify(
-      user.tenantId,
+      tenantId,
       body.ids,
       { itemClsCd: body.itemClsCd, itemType: body.itemType },
       user.email,
@@ -212,17 +216,13 @@ export class DashboardMappingsController {
   })
   @ApiResponse({ status: 200, description: 'Updated mapping' })
   async update(
+    @ActiveTenant() tenantId: string,
     @Req() req: Request,
     @Param('id') id: string,
     @Body() body: UpdateMappingDto,
   ) {
     const user = req.user as DashboardRequestUser;
-    const result = await this.mappings.update(
-      user.tenantId,
-      id,
-      body,
-      user.email,
-    );
+    const result = await this.mappings.update(tenantId, id, body, user.email);
     return { success: true, message: 'Mapping updated', data: result };
   }
 
@@ -233,13 +233,13 @@ export class DashboardMappingsController {
       'Create a manual mapping (source MANUAL) — created already MAPPED and active',
   })
   @ApiResponse({ status: 201, description: 'Created mapping' })
-  async create(@Req() req: Request, @Body() body: CreateMappingDto) {
+  async create(
+    @ActiveTenant() tenantId: string,
+    @Req() req: Request,
+    @Body() body: CreateMappingDto,
+  ) {
     const user = req.user as DashboardRequestUser;
-    const result = await this.mappings.createManual(
-      user.tenantId,
-      body,
-      user.email,
-    );
+    const result = await this.mappings.createManual(tenantId, body, user.email);
     return { success: true, message: 'Mapping created', data: result };
   }
 }

@@ -17,8 +17,8 @@ export class DashboardUserOrmEntity {
   @Column('varchar')
   email!: string;
 
-  @Column('varchar')
-  passwordHash!: string;
+  @Column('varchar', { nullable: true })
+  passwordHash!: string | null;
 
   @Column('varchar', { nullable: true })
   displayName!: string | null;
@@ -27,7 +27,16 @@ export class DashboardUserOrmEntity {
   role!: DashboardRole;
 
   @Column('varchar')
-  complianceTenantId!: string;
+  organizationId!: string;
+
+  @Column('varchar', { nullable: true })
+  status!: string | null;
+
+  @Column('varchar', { nullable: true })
+  oauthProvider!: string | null;
+
+  @Column('varchar', { nullable: true })
+  oauthSubject!: string | null;
 
   @CreateDateColumn()
   createdAt!: Date;

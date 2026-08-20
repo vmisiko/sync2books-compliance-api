@@ -97,7 +97,15 @@ export class OscuOperationsController {
   @Post('imported-items/convert')
   @ApiOperation({
     summary:
-      'importedItemConvertedInfo — send converted imported item info (taskCd, dclDe, itemSeq, hsCd, itemClsCd, itemCd, imptItemSttsCd, ...)',
+      // Field names DO match saveItem's convention: "itemClsCd" (with "s") and
+      // "imptItemSttsCd" (capital S) -- matches KRA's own "eTIMS-OSCU-Integrator-Automated-
+      // Testing-Sandbox" Postman collection example. Don't trust the OCR'd spec doc's
+      // attribute table, which disagrees with its own JSON sample and is wrong.
+      // `remark` MUST be a non-empty string (e.g. "Approved via Go-Live testing"), NOT null
+      // -- sending null caused resultCd 999 "unknown error" specifically when
+      // imptItemSttsCd=3 (Approved); values 1/2/4 tolerated null remark fine. Confirmed
+      // 2026-08-20 against the live sandbox. See oscu-payload-gotchas.md.
+      'importedItemConvertedInfo — send converted imported item info (taskCd, dclDe, itemSeq, hsCd, itemClsCd, itemCd, imptItemSttsCd, remark [required, non-null], ...)',
   })
   @ApiResponse({
     status: 201,

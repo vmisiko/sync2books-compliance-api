@@ -52,6 +52,8 @@ export type UpsertTenantInput = {
   environment?: ConnectionEnvironment;
   /** false = Test (SANDBOX), true = Live (PRODUCTION). Used when `environment` is omitted. */
   isLiveBusiness?: boolean;
+  /** Owning DashboardOrganization. Only applied on create — an existing tenant's org is not reassigned by an update. */
+  organizationId?: string | null;
 };
 
 export type TenantUpsertResult = {
@@ -126,6 +128,10 @@ export class ComplianceOrganizationApplicationService {
         sync2booksCompanyId:
           companyId === undefined ? existing.sync2booksCompanyId : companyId,
         displayName: input.displayName ?? existing.displayName,
+        organizationId:
+          input.organizationId === undefined
+            ? existing.organizationId
+            : input.organizationId,
         updatedAt: now,
       };
       saved = await this.tenantRepo.save(updated);
@@ -144,6 +150,7 @@ export class ComplianceOrganizationApplicationService {
           id: randomUUID(),
           sync2booksCompanyId: companyId,
           displayName: input.displayName ?? null,
+          organizationId: input.organizationId ?? null,
           createdAt: now,
           updatedAt: now,
         };
@@ -155,6 +162,7 @@ export class ComplianceOrganizationApplicationService {
         id: randomUUID(),
         sync2booksCompanyId: null,
         displayName: input.displayName ?? null,
+        organizationId: input.organizationId ?? null,
         createdAt: now,
         updatedAt: now,
       };
@@ -225,6 +233,45 @@ export class ComplianceOrganizationApplicationService {
     sync2booksCompanyId: string,
   ): Promise<ComplianceTenant | null> {
     return this.tenantRepo.findBySync2booksCompanyId(sync2booksCompanyId);
+  }
+
+  /** Businesses owned by a DashboardOrganization, for the dashboard's business list. */
+  async listTenantsByOrganizationId(
+    organizationId: string,
+  ): Promise<ComplianceTenant[]> {
+    return this.tenantRepo.findByOrganizationId(organizationId);
+  }
+
+  /** Tenant + default branch + its eTIMS connection (PIN/env/serial), for one business-list card. */
+  async getTenantSummary(tenantId: string): Promise<{
+    tenant: ComplianceTenant;
+    branch: ComplianceBranch;
+    etimsConnection: ComplianceConnection | null;
+  } | null> {
+    const tenant = await this.tenantRepo.findById(tenantId);
+    if (!tenant) return null;
+    const branch = await this.getOrCreateDefaultBranch(tenantId);
+    const found =
+      await this.orgConnectionRepo.findBranchTenantEtimsByBranchId(branch.id);
+    const etimsConnection =
+      found?.etims && found.tenant && found.branch
+        ? {
+            id: found.etims.id,
+            merchantId: tenant.sync2booksCompanyId ?? tenant.id,
+            branchId: branch.sync2booksBranchId ?? branch.id,
+            kraBhfId: branch.kraBhfId,
+            kraPin: found.etims.kraPin,
+            deviceId: found.etims.deviceId,
+            dvcSrlNo: found.etims.dvcSrlNo,
+            environment: found.etims.environment as ConnectionEnvironment,
+            status: found.etims.status as ConnectionStatus,
+            cmcKey: found.etims.cmcKey,
+            lastCodeSyncAt: found.etims.lastCodeSyncAt,
+            createdAt: found.etims.createdAt,
+            updatedAt: found.etims.updatedAt,
+          }
+        : null;
+    return { tenant, branch, etimsConnection };
   }
 
   async getTenantById(tenantId: string): Promise<ComplianceTenant | null> {

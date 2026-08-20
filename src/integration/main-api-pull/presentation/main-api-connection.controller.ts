@@ -1,22 +1,14 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Put,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Post, Put, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import type { Request } from 'express';
 import { MainApiConnectionApplicationService } from '../application/main-api-connection.application.service';
 import { DashboardJwtAuthGuard } from '../../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
-import type { DashboardRequestUser } from '../../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
+import { ActiveTenantGuard } from '../../../dashboard-identity/infrastructure/guards/active-tenant.guard';
+import { ActiveTenant } from '../../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import {
   RecordIntegrationConnectionDto,
   UpsertMainApiConnectionDto,
@@ -24,7 +16,7 @@ import {
 
 @Controller('dashboard-api/erp/main-api-connection')
 @ApiTags('Dashboard ERP connection (Mode B)')
-@UseGuards(DashboardJwtAuthGuard)
+@UseGuards(DashboardJwtAuthGuard, ActiveTenantGuard)
 @ApiBearerAuth()
 export class MainApiConnectionController {
   constructor(
@@ -36,9 +28,8 @@ export class MainApiConnectionController {
     summary: "Get this tenant's main-API connection status (apiKey masked)",
   })
   @ApiResponse({ status: 200, description: 'Connection status' })
-  async getStatus(@Req() req: Request) {
-    const user = req.user as DashboardRequestUser;
-    const status = await this.connections.getStatus(user.tenantId);
+  async getStatus(@ActiveTenant() tenantId: string) {
+    const status = await this.connections.getStatus(tenantId);
     return { success: true, message: 'OK', data: status };
   }
 
@@ -48,16 +39,18 @@ export class MainApiConnectionController {
       'Save this main-API Application id + api key so items/invoices can be pulled',
   })
   @ApiResponse({ status: 200, description: 'Connection saved' })
-  async upsert(@Req() req: Request, @Body() body: UpsertMainApiConnectionDto) {
-    const user = req.user as DashboardRequestUser;
-    await this.connections.upsert(user.tenantId, {
+  async upsert(
+    @ActiveTenant() tenantId: string,
+    @Body() body: UpsertMainApiConnectionDto,
+  ) {
+    await this.connections.upsert(tenantId, {
       mainApiApplicationId: body.mainApiApplicationId,
       mainApiApiKey: body.mainApiApiKey,
     });
     // Auto-creates the main-API Company on first save, per the documented
     // flow — no manual companyId entry needed (concepts/companies-and-connections.mdx).
-    await this.connections.ensureCompany(user.tenantId);
-    const status = await this.connections.getStatus(user.tenantId);
+    await this.connections.ensureCompany(tenantId);
+    const status = await this.connections.getStatus(tenantId);
     return { success: true, message: 'Connection saved', data: status };
   }
 
@@ -68,16 +61,15 @@ export class MainApiConnectionController {
   })
   @ApiResponse({ status: 200, description: 'Connection recorded' })
   async recordConnection(
-    @Req() req: Request,
+    @ActiveTenant() tenantId: string,
     @Body() body: RecordIntegrationConnectionDto,
   ) {
-    const user = req.user as DashboardRequestUser;
     await this.connections.recordConnection(
-      user.tenantId,
+      tenantId,
       body.integrationKey,
       body.connectionId,
     );
-    const status = await this.connections.getStatus(user.tenantId);
+    const status = await this.connections.getStatus(tenantId);
     return { success: true, message: 'Connection recorded', data: status };
   }
 
@@ -89,11 +81,8 @@ export class MainApiConnectionController {
       'accepted tradeoff of following the widget as documented, not an oversight.',
   })
   @ApiResponse({ status: 200, description: 'Widget config' })
-  async getLinkCredentials(@Req() req: Request) {
-    const user = req.user as DashboardRequestUser;
-    const credentials = await this.connections.getLinkCredentials(
-      user.tenantId,
-    );
+  async getLinkCredentials(@ActiveTenant() tenantId: string) {
+    const credentials = await this.connections.getLinkCredentials(tenantId);
     return { success: true, message: 'OK', data: credentials };
   }
 }

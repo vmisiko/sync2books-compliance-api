@@ -24,6 +24,7 @@ import { ItemType } from '../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
 import type { ComplianceConnection } from '../../shared/domain/entities/compliance-connection.entity';
 import { InventoryService } from '../../inventory/api/inventory.service';
+import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { MovementType } from '../../inventory/domain/enums/movement-type.enum';
 import { DocumentType } from '../../shared/domain/enums/document-type.enum';
 import { generateEtimsReceiptPdf } from './receipt/etims-receipt-pdf.generator';
@@ -63,6 +64,7 @@ export class SalesService {
     private readonly inventoryService: InventoryService,
     @InjectRepository(OscuSyncStateOrmEntity)
     private readonly syncStateRepo: Repository<OscuSyncStateOrmEntity>,
+    private readonly organizationService: ComplianceOrganizationApplicationService,
   ) {}
 
   async createDocument(
@@ -260,6 +262,9 @@ export class SalesService {
       document.merchantId,
       document.branchId,
     );
+    const tenant = await this.organizationService.getTenantBySync2booksCompanyId(
+      document.merchantId,
+    );
 
     const saleDate = document.saleDate ?? null;
     const date = saleDate ? formatDdMmYyyy(saleDate) : null;
@@ -302,6 +307,10 @@ export class SalesService {
       originalSaleId: document.originalSaleId,
       offlineUrl: null,
       status: mapComplianceStatusToDigitax(document.complianceStatus),
+      supplierName: tenant?.displayName ?? null,
+      supplierPin: connection?.kraPin ?? null,
+      paymentTypeCode: document.paymentTypeCode,
+      paymentTypeDescription: paymentTypeDescription(document.paymentTypeCode),
       salesTaxSummary: {
         taxableAmountA: taxBuckets.taxableAmountA,
         taxableAmountB: taxBuckets.taxableAmountB,
@@ -345,6 +354,8 @@ export class SalesService {
           etimsItemCode: null,
           isStockable: item ? item.itemType === ItemType.GOODS : null,
           itemId: l.itemId,
+          itemName: item?.name ?? null,
+          itemDescription: l.description || null,
         };
       }),
     };
@@ -374,6 +385,9 @@ export class SalesService {
       document.merchantId,
       document.branchId,
     );
+    const tenant = await this.organizationService.getTenantBySync2booksCompanyId(
+      document.merchantId,
+    );
 
     const etimsUrl =
       connection?.kraPin && rcptSign
@@ -384,6 +398,8 @@ export class SalesService {
     const items: ComplianceItem[] = await this.itemRepo.findByIds(itemIds);
     const itemsById = new Map(items.map((i) => [i.id, i]));
 
+    const taxBuckets = computeTaxBuckets(document);
+
     return generateEtimsReceiptPdf({
       document,
       connection,
@@ -392,6 +408,9 @@ export class SalesService {
       receiptSignature: rcptSign,
       internalData: intrlData,
       etimsUrl,
+      supplierName: tenant?.displayName ?? null,
+      paymentTypeDescription: paymentTypeDescription(document.paymentTypeCode),
+      taxBuckets,
     });
   }
 
@@ -476,15 +495,32 @@ export class SalesService {
       return c;
     };
 
+    // Cache tenant display names within page (merchantId only)
+    const supplierNameByMerchant = new Map<string, string | null>();
+    const getSupplierName = async (merchantId: string): Promise<string | null> => {
+      if (supplierNameByMerchant.has(merchantId)) {
+        return supplierNameByMerchant.get(merchantId) ?? null;
+      }
+      const tenant =
+        await this.organizationService.getTenantBySync2booksCompanyId(
+          merchantId,
+        );
+      const name = tenant?.displayName ?? null;
+      supplierNameByMerchant.set(merchantId, name);
+      return name;
+    };
+
     const data = await Promise.all(
       pageDocs.map(async (d) => {
         const kra = kraByDocId.get(d.id) ?? null;
         const conn = await getConn(d.merchantId, d.branchId);
+        const supplierName = await getSupplierName(d.merchantId);
         return buildNormalizedSaleReport({
           document: d,
           kraRaw: kra,
           connection: conn,
           itemsById,
+          supplierName,
         });
       }),
     );
@@ -608,6 +644,23 @@ function taxRateByTaxTypeCode(code: string | null): number {
   return oscuTaxRateForCode(code);
 }
 
+/** OSCU pmtTyCd (code classification 07 per spec) -> human-readable label, matching oscu-mapping.seed.ts's internalPaymentMethod bucketing. */
+const PAYMENT_TYPE_LABELS: Record<string, string> = {
+  '01': 'Cash',
+  '02': 'Credit',
+  '03': 'Cash/Credit',
+  '04': 'Bank Check',
+  '05': 'Debit and Credit Card',
+  '06': 'Card',
+  '07': 'Mobile Money',
+  '08': 'Other',
+};
+
+function paymentTypeDescription(pmtTyCd: string | null): string | null {
+  if (!pmtTyCd) return null;
+  return PAYMENT_TYPE_LABELS[pmtTyCd] ?? null;
+}
+
 function resolveTaxTypeCode(
   snapshot: string | null,
   taxCategory: TaxCategory,
@@ -710,8 +763,9 @@ function buildNormalizedSaleReport(input: {
   kraRaw: Record<string, unknown> | null;
   connection: ComplianceConnection | null;
   itemsById: Map<string, ComplianceItem>;
+  supplierName: string | null;
 }): import('../controller/dto/sales-report.dto').SaleReportDto {
-  const { document, kraRaw, connection, itemsById } = input;
+  const { document, kraRaw, connection, itemsById, supplierName } = input;
   const kraData = (kraRaw?.data as Record<string, unknown> | null) ?? null;
   const curRcptNoRaw =
     kraData?.curRcptNo ?? (kraData as Record<string, unknown>)?.['curRcptNo '];
@@ -752,6 +806,10 @@ function buildNormalizedSaleReport(input: {
     originalSaleId: document.originalSaleId,
     offlineUrl: null,
     status: mapComplianceStatusToDigitax(document.complianceStatus),
+    supplierName,
+    supplierPin: connection?.kraPin ?? null,
+    paymentTypeCode: document.paymentTypeCode,
+    paymentTypeDescription: paymentTypeDescription(document.paymentTypeCode),
     salesTaxSummary: {
       taxableAmountA: taxBuckets.taxableAmountA,
       taxableAmountB: taxBuckets.taxableAmountB,
@@ -795,6 +853,8 @@ function buildNormalizedSaleReport(input: {
         etimsItemCode: null,
         isStockable: item ? item.itemType === ItemType.GOODS : null,
         itemId: l.itemId,
+        itemName: item?.name ?? null,
+        itemDescription: l.description || null,
       };
     }),
   };

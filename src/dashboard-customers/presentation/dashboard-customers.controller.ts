@@ -18,9 +18,9 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import type { Request } from 'express';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
-import type { DashboardRequestUser } from '../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
+import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guards/active-tenant.guard';
+import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { DashboardCustomersApplicationService } from '../application/dashboard-customers.application.service';
 import {
   CreateCustomerDto,
@@ -31,7 +31,8 @@ import {
  * Guarded the same way as `DashboardSalesController`: trusts `merchantId`
  * from the request body/query rather than deriving it from the verified
  * token. Keep consistent with that controller until the shared auth fix
- * lands for both.
+ * lands for both. `pull` is the one exception — it derives the tenant from
+ * ActiveTenantGuard since it has no merchantId query param at all.
  */
 @Controller('dashboard-api/customers')
 @ApiTags('Dashboard Customers')
@@ -76,9 +77,9 @@ export class DashboardCustomersController {
       'Pull customers from QuickBooks (via the main API) and upsert them locally, matched by external customer id',
   })
   @ApiResponse({ status: 200, description: 'Pull result' })
-  async pull(@Req() req: Request) {
-    const user = req.user as DashboardRequestUser;
-    return this.customers.pullCustomers(user.tenantId);
+  @UseGuards(ActiveTenantGuard)
+  async pull(@ActiveTenant() tenantId: string) {
+    return this.customers.pullCustomers(tenantId);
   }
 
   @Get('verify-kra')

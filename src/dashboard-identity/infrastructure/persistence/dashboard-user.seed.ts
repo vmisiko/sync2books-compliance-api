@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DashboardAuthApplicationService } from '../../application/dashboard-auth.application.service';
 import { ComplianceOrganizationApplicationService } from '../../../compliance-organization/application/compliance-organization.application.service';
+import { DashboardOrganizationApplicationService } from '../../../dashboard-organization/application/dashboard-organization.application.service';
 import { DashboardRole } from '../../../shared/domain/enums/dashboard-role.enum';
 
 /** Same dev tenant seeded by ComplianceOrganizationSeed. */
@@ -36,6 +37,7 @@ export class DashboardUserSeed {
   constructor(
     private readonly auth: DashboardAuthApplicationService,
     private readonly organization: ComplianceOrganizationApplicationService,
+    private readonly dashboardOrganizations: DashboardOrganizationApplicationService,
   ) {}
 
   async runIfEmpty(): Promise<void> {
@@ -46,6 +48,20 @@ export class DashboardUserSeed {
         `Skipped dashboard user seed: no tenant for ${DEV_MERCHANT_ID} yet (ComplianceOrganizationSeed should run first).`,
       );
       return;
+    }
+
+    // Dev org has no real main-API signup behind it (mainApiApiKey stays
+    // null) — reuses the tenant ComplianceOrganizationSeed already created
+    // rather than minting a second one, so local dev isn't stuck empty.
+    let organizationId = tenant.organizationId;
+    if (!organizationId) {
+      const devOrg = await this.dashboardOrganizations.createLocal('Dev Org');
+      await this.organization.upsertTenant({
+        id: tenant.id,
+        organizationId: devOrg.id,
+      });
+      organizationId = devOrg.id;
+      this.logger.log(`Seeded dev DashboardOrganization ${devOrg.id}`);
     }
 
     for (const user of DEV_USERS) {
@@ -59,11 +75,11 @@ export class DashboardUserSeed {
         password: DEV_PASSWORD,
         displayName: user.displayName,
         role: user.role,
-        complianceTenantId: tenant.id,
+        organizationId,
       });
 
       this.logger.log(
-        `Seeded dev dashboard user ${user.email} / ${DEV_PASSWORD} (${user.role}) for tenant ${tenant.id}`,
+        `Seeded dev dashboard user ${user.email} / ${DEV_PASSWORD} (${user.role}) for org ${organizationId}`,
       );
     }
   }

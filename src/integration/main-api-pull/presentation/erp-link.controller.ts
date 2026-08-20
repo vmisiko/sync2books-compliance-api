@@ -6,7 +6,6 @@ import {
   Param,
   Post,
   Query,
-  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -16,14 +15,14 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import type { Request } from 'express';
 import { MainApiConnectionApplicationService } from '../application/main-api-connection.application.service';
 import {
   MainApiPullClient,
   type MainApiIntegrationKey,
 } from '../infrastructure/http/main-api-pull.client';
 import { DashboardJwtAuthGuard } from '../../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
-import type { DashboardRequestUser } from '../../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
+import { ActiveTenantGuard } from '../../../dashboard-identity/infrastructure/guards/active-tenant.guard';
+import { ActiveTenant } from '../../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { ConnectOdooDto } from './dto/connect-odoo.dto';
 import { FinalizeDynamicsDto } from './dto/finalize-dynamics.dto';
 import { RecordConnectionDto } from './dto/record-connection.dto';
@@ -38,7 +37,7 @@ import { RecordConnectionDto } from './dto/record-connection.dto';
  */
 @Controller('dashboard-api/erp/link')
 @ApiTags('Dashboard ERP connect widget (Mode B)')
-@UseGuards(DashboardJwtAuthGuard)
+@UseGuards(DashboardJwtAuthGuard, ActiveTenantGuard)
 @ApiBearerAuth()
 export class ErpLinkController {
   constructor(
@@ -53,11 +52,11 @@ export class ErpLinkController {
   @ApiQuery({ name: 'integrationKey', required: true })
   @ApiQuery({ name: 'connectionId', required: false })
   async getAuthUrl(
-    @Req() req: Request,
+    @ActiveTenant() tenantId: string,
     @Query('integrationKey') integrationKey: MainApiIntegrationKey,
     @Query('connectionId') connectionId?: string,
   ) {
-    const { apiKey, companyId } = await this.resolve(req);
+    const { apiKey, companyId } = await this.resolve(tenantId);
     return this.mainApiPull.getAuthUrl(
       apiKey,
       companyId,
@@ -72,10 +71,10 @@ export class ErpLinkController {
   })
   @ApiQuery({ name: 'integrationKey', required: true })
   async getConnection(
-    @Req() req: Request,
+    @ActiveTenant() tenantId: string,
     @Query('integrationKey') integrationKey: MainApiIntegrationKey,
   ) {
-    const { apiKey, companyId } = await this.resolve(req);
+    const { apiKey, companyId } = await this.resolve(tenantId);
     return this.mainApiPull.getConnectionByIntegration(
       apiKey,
       companyId,
@@ -88,10 +87,10 @@ export class ErpLinkController {
     summary: 'List Business Central companies for a Dynamics connection',
   })
   async listDynamicsCompanies(
-    @Req() req: Request,
+    @ActiveTenant() tenantId: string,
     @Param('connectionId') connectionId: string,
   ) {
-    const { apiKey } = await this.resolve(req);
+    const { apiKey } = await this.resolve(tenantId);
     return this.mainApiPull.listDynamicsCompanies(apiKey, connectionId);
   }
 
@@ -101,11 +100,11 @@ export class ErpLinkController {
       'Finish a Dynamics connection by choosing a Business Central company',
   })
   async finalizeDynamics(
-    @Req() req: Request,
+    @ActiveTenant() tenantId: string,
     @Param('connectionId') connectionId: string,
     @Body() body: FinalizeDynamicsDto,
   ) {
-    const { apiKey } = await this.resolve(req);
+    const { apiKey } = await this.resolve(tenantId);
     return this.mainApiPull.finalizeDynamicsConnection(
       apiKey,
       connectionId,
@@ -117,8 +116,11 @@ export class ErpLinkController {
   @ApiOperation({
     summary: 'Connect Odoo (no OAuth — credentials validated synchronously)',
   })
-  async connectOdoo(@Req() req: Request, @Body() body: ConnectOdooDto) {
-    const { apiKey, companyId } = await this.resolve(req);
+  async connectOdoo(
+    @ActiveTenant() tenantId: string,
+    @Body() body: ConnectOdooDto,
+  ) {
+    const { apiKey, companyId } = await this.resolve(tenantId);
     return this.mainApiPull.connectOdoo(
       apiKey,
       companyId,
@@ -135,10 +137,10 @@ export class ErpLinkController {
   @Post(':connectionId/disconnect')
   @ApiOperation({ summary: 'Disconnect a connection' })
   async disconnect(
-    @Req() req: Request,
+    @ActiveTenant() tenantId: string,
     @Param('connectionId') connectionId: string,
   ) {
-    const { apiKey } = await this.resolve(req);
+    const { apiKey } = await this.resolve(tenantId);
     return this.mainApiPull.disconnectConnection(apiKey, connectionId);
   }
 
@@ -148,12 +150,11 @@ export class ErpLinkController {
       'Remember the connectionId from a successful Sync2BooksLink connect, so items/invoices pulls can trigger a fresh bookkeeping sync',
   })
   async recordConnection(
-    @Req() req: Request,
+    @ActiveTenant() tenantId: string,
     @Body() body: RecordConnectionDto,
   ) {
-    const user = req.user as DashboardRequestUser;
     await this.connections.recordConnection(
-      user.tenantId,
+      tenantId,
       body.integrationKey,
       body.connectionId,
     );
@@ -161,13 +162,12 @@ export class ErpLinkController {
   }
 
   private async resolve(
-    req: Request,
+    tenantId: string,
   ): Promise<{ apiKey: string; companyId: string }> {
-    const user = req.user as DashboardRequestUser;
     // ensureCompany (not getForTenant) so a mainApiCompanyId that was deleted
     // or never created on the main API side gets (re)created here, before
     // any auth-url/connect call is attempted against it.
-    const connection = await this.connections.ensureCompany(user.tenantId);
+    const connection = await this.connections.ensureCompany(tenantId);
     if (!connection.mainApiCompanyId) {
       throw new BadRequestException(
         'This tenant has no mainApiCompanyId configured — set it on the ERP connection before connecting an integration',
