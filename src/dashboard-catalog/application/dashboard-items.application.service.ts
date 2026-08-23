@@ -12,6 +12,7 @@ import { MainApiConnectionApplicationService } from '../../integration/main-api-
 import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { mapMainApiItemToRegisterItemInput } from '../../catalog/infrastructure/main-api/standardized-item.mapper';
 import { ClassificationMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
+import { MappingSuggestionService } from '../../regulatory/oscu/application/mapping-suggestion.service';
 import { ItemType } from '../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
 import type { CreateItemDto } from '../presentation/dto/create-item.dto';
@@ -54,6 +55,7 @@ export class DashboardItemsApplicationService {
     private readonly organization: ComplianceOrganizationApplicationService,
     private readonly mainApiConnections: MainApiConnectionApplicationService,
     private readonly mainApiPull: MainApiPullClient,
+    private readonly suggestions: MappingSuggestionService,
     @InjectRepository(ClassificationMappingOrmEntity)
     private readonly clsRepo: Repository<ClassificationMappingOrmEntity>,
   ) {}
@@ -116,23 +118,27 @@ export class DashboardItemsApplicationService {
               active: true,
             },
           });
-          // Main API now resolves itemType/taxCategory itself (see the
-          // `standardized` field on MainApiItem) — a null value means this
-          // item's source ERP isn't supported by that standardization layer
-          // yet, so surface a clear per-item error instead of silently
-          // registering with an undefined itemType/taxCategory.
+          // Main API resolves itemType (ERP-shape normalization) itself, but
+          // not tax category — that's KRA-specific classification, still
+          // this repo's job. A null `standardized` means this item's source
+          // ERP isn't supported by main API's standardization layer yet, so
+          // surface a clear per-item error instead of silently registering
+          // with an undefined itemType.
           if (!mainApiItem.standardized) {
             throw new Error(
-              `Item ${mainApiItem.id} has no standardized itemType/taxCategory — its source ERP is not yet supported by main API's standardization layer`,
+              `Item ${mainApiItem.id} has no standardized itemType — its source ERP is not yet supported by main API's standardization layer`,
             );
           }
+          const taxCategory =
+            this.suggestions.suggestTaxCodeMapping(mainApiItem.defaultTaxCodeRef?.name ?? '')
+              ?.internalTaxCategory ?? TaxCategory.OTHER;
           const input = mapMainApiItemToRegisterItemInput({
             merchantId,
             item: {
               ...mainApiItem,
               itemType: mainApiItem.standardized.itemType,
-              taxCategory: mainApiItem.standardized.taxCategory,
             },
+            taxCategory,
             classificationCodeOverride: clsRow?.itemClsCd ?? undefined,
             qtyUnitCdOverride: clsRow?.qtyUnitCd ?? undefined,
             packagingUnitCdOverride: clsRow?.pkgUnitCd ?? undefined,

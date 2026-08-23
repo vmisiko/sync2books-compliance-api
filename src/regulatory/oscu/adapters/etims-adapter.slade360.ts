@@ -149,6 +149,36 @@ function extractSlade360ReceiptNumber(
   return undefined;
 }
 
+/**
+ * Slade360's branch-list response has no confirmed field-level schema (their
+ * own docs give only a bare "fetched successfully" message, not a structured
+ * example) — so rather than guess a field name like `kra_bhf_id` and risk a
+ * false negative, this walks the whole response looking for `needle` as a
+ * string value anywhere in it. A false positive here would be worse than a
+ * false negative (it would let a genuinely unonboarded branch "go live"), so
+ * this only returns true on an exact, case-insensitive string match — no
+ * fuzzy matching.
+ */
+function containsStringValueDeep(
+  value: unknown,
+  needle: string,
+  depth = 0,
+): boolean {
+  if (depth > 6) return false;
+  if (typeof value === 'string') {
+    return value.trim().toLowerCase() === needle.trim().toLowerCase();
+  }
+  if (Array.isArray(value)) {
+    return value.some((v) => containsStringValueDeep(v, needle, depth + 1));
+  }
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).some((v) =>
+      containsStringValueDeep(v, needle, depth + 1),
+    );
+  }
+  return false;
+}
+
 /** `AddbusinessitemproductRequest` (docs.slade360.com/etims-api/~schemas). */
 function mapItemToSlade360Product(
   req: OscuItemSaveReq,
@@ -234,8 +264,14 @@ function mapCreditNoteToSlade360SignDirectly(
  * already expect. See the architecture plan (eTIMS Provider Swap) for the
  * design decisions this encodes:
  *
- * - `initializeOscu` is intentionally a no-op: Slade360 automates VSCU/device
- *   deployment on their side rather than exposing it as an API call.
+ * - `initializeOscu` makes no real device-init call — Slade360 automates VSCU
+ *   deployment on their side rather than exposing it as an API. But this is
+ *   the one place in the codebase that gates a connection going ACTIVE
+ *   (`initializeEtimsConnection` in compliance-organization.application.service.ts),
+ *   so it isn't a blind no-op either: it calls `fetch_etims_organisation_branches`
+ *   and confirms the branch is actually present before reporting success —
+ *   a business/branch that hasn't been onboarded on Slade360's own platform
+ *   (their self-serve wizard or integration team) cannot go live on this connection.
  * - `submitInvoice`, `saveItem`, `branchList`, and `branchSendCustomerInfo` are
  *   wired to real, confirmed endpoints (paths verified against
  *   docs.slade360.com/etims-api/sales and /etims-api/item, not guessed).
@@ -501,34 +537,79 @@ export class EtimsAdapterSlade360 implements IEtimsAdapter {
     }
   }
 
-  // ---- initializeOscu: no-op by design, see class docstring ----
+  // ---- initializeOscu: no real device-init call (Slade360 automates VSCU
+  // deployment on their side), but this is the one place in the codebase that
+  // gates a connection going ACTIVE (see `initializeEtimsConnection` in
+  // compliance-organization.application.service.ts) — so it still has to do
+  // real work: confirm the branch actually exists on Slade360's platform
+  // before reporting success, rather than rubber-stamping every request. ----
 
-  initializeOscu(
+  async initializeOscu(
     body: Record<string, unknown>,
-    _ctx: EtimsConnectionContext,
+    ctx: EtimsConnectionContext,
   ): Promise<OscuEnvelopeResponse> {
-    void _ctx;
     const tin = typeof body.tin === 'string' ? body.tin : '';
     const bhfId = typeof body.bhfId === 'string' ? body.bhfId : '';
     const dvcSrlNo = typeof body.dvcSrlNo === 'string' ? body.dvcSrlNo : '';
-    return Promise.resolve({
-      success: true,
-      rawResponse: {
-        resultCd: '000',
-        resultMsg:
-          'Slade360 manages VSCU/device deployment automatically — no device-init call made',
-        resultDt: nowYyyyMMddhhmmss(),
-        data: {
-          info: {
-            tin,
-            bhfId,
-            dvcSrlNo,
-            dvcId: `slade360-managed-${bhfId || 'branch'}`,
-            cmcKey: 'slade360-managed',
+
+    if (!bhfId) {
+      return {
+        success: false,
+        error:
+          'Slade360 adapter: cannot verify go-live readiness without a bhfId to check for',
+      };
+    }
+
+    try {
+      const { ok, status, raw } = await this.request(
+        'GET',
+        CONFIRMED_PATHS.fetchOrganisationBranches,
+        undefined,
+        ctx,
+      );
+      if (!ok) {
+        return {
+          success: false,
+          error: `Slade360 branch verification failed (cannot confirm the business/branch is onboarded on Slade360): ${describeHttpRejection(status, raw)}`,
+          rawResponse: raw,
+        };
+      }
+      if (!containsStringValueDeep(raw, bhfId)) {
+        return {
+          success: false,
+          error:
+            `Branch "${bhfId}" was not found in Slade360's organisation branch list. ` +
+            'The business/branch must be onboarded on Slade360 first — via their ' +
+            'self-serve wizard (dev.advantage.slade360.com/auth/welcome) or their ' +
+            'integration team — before this connection can go live on the Slade360 provider.',
+          rawResponse: raw,
+        };
+      }
+
+      return {
+        success: true,
+        rawResponse: {
+          resultCd: '000',
+          resultMsg: `Confirmed branch "${bhfId}" is onboarded on Slade360 — no separate device-init call made (Slade360 automates VSCU deployment)`,
+          resultDt: nowYyyyMMddhhmmss(),
+          data: {
+            info: {
+              tin,
+              bhfId,
+              dvcSrlNo,
+              dvcId: `slade360-managed-${bhfId}`,
+              cmcKey: 'slade360-managed',
+            },
           },
         },
-      },
-    });
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : safeString(e);
+      return {
+        success: false,
+        error: `Slade360 branch verification threw: ${msg}`,
+      };
+    }
   }
 
   // ---- branch endpoints (real calls — confirmed paths) ----

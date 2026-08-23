@@ -1,6 +1,4 @@
 import { Injectable, Logger, BadGatewayException } from '@nestjs/common';
-import { ItemType } from '../../../../shared/domain/enums/item-type.enum';
-import { TaxCategory } from '../../../../shared/domain/enums/tax-category.enum';
 import { SourceSystem } from '../../../../shared/domain/enums/source-system.enum';
 
 /**
@@ -19,14 +17,23 @@ export interface MainApiStandardizedAddress {
 }
 
 /**
- * Additive, computed-at-response-time normalization main API now attaches to
- * every Item row (or null if that row's source ERP isn't standardized yet) —
- * see the Phase A refactor that moved ERP-shape parsing (QuickBooks
- * Type/SalesTaxCodeRef heuristics, etc.) out of this repo and into main API.
+ * Main API's actual, Codat-faithful item-type vocabulary — deliberately not collapsed to a
+ * GOODS/SERVICE bucket there (see standardized-item.mapper.ts#collapseItemType, which does that
+ * collapse in this repo instead, since it's a KRA-specific simplification).
+ */
+export type MainApiStandardizedItemType = 'Unknown' | 'Inventory' | 'NonInventory' | 'Service';
+
+/**
+ * Additive, computed-at-response-time normalization main API now attaches to every Item row (or
+ * null if that row's source ERP isn't standardized yet) — see the standardization refactor that
+ * moved ERP-shape parsing (QuickBooks Type/SalesTaxCodeRef field-name differences, etc.) out of
+ * this repo and into main API. Deliberately carries no tax-category bucket — that's tax-
+ * authority-specific (KRA's VAT_STANDARD/VAT_ZERO/EXEMPT/VAT_8 etc.), not universal, so main API
+ * doesn't compute it; this repo resolves it itself via MappingSuggestionService, same as it
+ * already does for tax rates/codes.
  */
 export interface MainApiStandardizedItem {
-  itemType: ItemType;
-  taxCategory: TaxCategory;
+  itemType: MainApiStandardizedItemType;
   status: 'Active' | 'Archived' | 'Unknown';
   unitOfMeasureCode?: string;
   sourceSystem: SourceSystem;
@@ -38,8 +45,8 @@ export interface MainApiStandardizedParty {
   sourceSystem: SourceSystem;
 }
 
+/** No tax-category bucket here either — see MainApiStandardizedItem's doc comment. */
 export interface MainApiStandardizedTax {
-  taxCategory: TaxCategory;
   sourceSystem: SourceSystem;
 }
 
@@ -62,7 +69,7 @@ export interface MainApiItem {
   bookType?: string | null;
   /** QuickBooks QtyOnHand, captured on item pull/sync. Undefined for non-inventory items. */
   qtyOnHand?: number | null;
-  /** Pre-resolved itemType/taxCategory from main API's standardization layer — null if this row's source ERP isn't supported by it yet. See standardized-item.mapper.ts, the sole consumer. */
+  /** ERP-normalized (not KRA-categorized) itemType from main API's standardization layer — null if this row's source ERP isn't supported by it yet. See standardized-item.mapper.ts, the sole consumer. */
   standardized: MainApiStandardizedItem | null;
 }
 

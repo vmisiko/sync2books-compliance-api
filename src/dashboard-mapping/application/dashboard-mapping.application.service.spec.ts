@@ -14,7 +14,6 @@ import { CatalogService } from '../../catalog/api/catalog.service';
 import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
 import { MappingStatus } from '../../shared/domain/enums/mapping-status.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
-import { ItemType } from '../../shared/domain/enums/item-type.enum';
 import type { MainApiConnection } from '../../integration/main-api-pull/domain/entities/main-api-connection.entity';
 import type {
   MainApiTaxRateListResponse,
@@ -570,15 +569,14 @@ describe('DashboardMappingApplicationService', () => {
         itemCode: 'IC-default',
         name: 'Item',
         active: true,
-        // Realistic default now that main API pre-resolves this via its own
-        // standardization layer — pullClassifications() reads
-        // item.standardized.taxCategory directly (falling back to OTHER
-        // when standardized is null), it no longer derives this from a raw
-        // QuickBooks SalesTaxCodeRef heuristic. Individual tests override
-        // this where the resolved category matters.
+        // Main API's standardization layer normalizes itemType (ERP shape) but
+        // deliberately not tax category -- that's still resolved locally via
+        // MappingSuggestionService.suggestTaxCodeMapping against
+        // defaultTaxCodeRef.name (falling back to OTHER for an unresolvable
+        // label, same as an absent one here). Individual tests override
+        // defaultTaxCodeRef where the resolved category matters.
         standardized: {
-          itemType: ItemType.GOODS,
-          taxCategory: TaxCategory.OTHER,
+          itemType: 'NonInventory',
           status: 'Active',
           sourceSystem: SourceSystem.QUICKBOOKS,
         },
@@ -707,14 +705,13 @@ describe('DashboardMappingApplicationService', () => {
               itemCode: 'QB_1',
               name: 'Rice 2kg',
               unitOfMeasure: 'kg',
-              // Resolved via main API's standardized.taxCategory directly now
-              // (no local QB-tax-label heuristic runs in this repo anymore —
-              // the old ".includes('0%')" bug that heuristic had for labels
-              // like "16.0% S" was fixed in Phase A's port to main API).
+              // Resolved via MappingSuggestionService.suggestTaxCodeMapping against
+              // defaultTaxCodeRef.name -- the same heuristic already covers this exact
+              // "16.0% S" -> VAT_STANDARD case elsewhere in this file (its own
+              // suggestTaxCodeMapping.spec-level tests), so no local override needed here.
               defaultTaxCodeRef: { id: 'tc1', name: '16.0% S' },
               standardized: {
-                itemType: ItemType.GOODS,
-                taxCategory: TaxCategory.VAT_STANDARD,
+                itemType: 'NonInventory',
                 status: 'Active',
                 sourceSystem: SourceSystem.QUICKBOOKS,
               },
@@ -726,8 +723,7 @@ describe('DashboardMappingApplicationService', () => {
               unitOfMeasure: 'each',
               defaultTaxCodeRef: undefined,
               standardized: {
-                itemType: ItemType.SERVICE,
-                taxCategory: TaxCategory.OTHER,
+                itemType: 'Service',
                 status: 'Active',
                 sourceSystem: SourceSystem.QUICKBOOKS,
               },
@@ -736,8 +732,8 @@ describe('DashboardMappingApplicationService', () => {
         ),
       );
 
-      // Approve a tax mapping for VAT_STANDARD -- matches the "Rice 2kg"
-      // item's standardized.taxCategory above.
+      // Approve a tax mapping for VAT_STANDARD -- matches what "Rice 2kg"'s
+      // "16.0% S" defaultTaxCodeRef resolves to via suggestTaxCodeMapping above.
       await service.createManual(
         TENANT_ID,
         {
@@ -759,9 +755,9 @@ describe('DashboardMappingApplicationService', () => {
       expect(rice.resolvedInternalTaxCategory).toBe(TaxCategory.VAT_STANDARD);
       expect(rice.resolvedTaxTyCd).toBe('B');
 
-      // standardized.taxCategory OTHER, and no active tax mapping exists for
-      // OTHER in this test, so it should resolve to null, not throw or
-      // silently default.
+      // "Consulting Service" has no defaultTaxCodeRef, so suggestTaxCodeMapping
+      // falls back to OTHER, and no active tax mapping exists for OTHER in this
+      // test, so it should resolve to null, not throw or silently default.
       expect(consulting.resolvedInternalTaxCategory).toBe(TaxCategory.OTHER);
       expect(consulting.resolvedTaxTyCd).toBeNull();
     });

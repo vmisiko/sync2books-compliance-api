@@ -860,14 +860,15 @@ export class DashboardMappingApplicationService {
       // ever lacks all three fields.
       if (!placeholder) continue;
 
-      // Main API now pre-resolves this via its own standardization layer
-      // (see MainApiItem.standardized in main-api-pull.client.ts) — no local
-      // QuickBooks-tax-label heuristic runs in this repo anymore. A null
-      // `standardized` (source ERP not yet supported by that layer) falls
-      // back to OTHER, the same default the old heuristic used for an
-      // unresolvable/missing SalesTaxCodeRef, rather than blocking the pull.
+      // Main API's standardization layer normalizes ERP shape (itemType etc.) but
+      // deliberately doesn't compute a tax category -- that's KRA-specific
+      // classification, which stays this repo's job. Reuse the same
+      // MappingSuggestionService heuristic the tax-rate/tax-code pull already
+      // uses, against this item's own tax-code-ref label, falling back to
+      // OTHER for an unresolvable/missing label rather than blocking the pull.
       const resolvedInternalTaxCategory =
-        item.standardized?.taxCategory ?? TaxCategory.OTHER;
+        this.suggestions.suggestTaxCodeMapping(item.defaultTaxCodeRef?.name ?? '')
+          ?.internalTaxCategory ?? TaxCategory.OTHER;
 
       const rawUnit = item.unitOfMeasure ?? '';
       const qtyMatch = await this.matchKraCode(
