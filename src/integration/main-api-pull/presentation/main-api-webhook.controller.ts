@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  forwardRef,
   Headers,
   HttpCode,
   HttpStatus,
+  Inject,
   Logger,
   Param,
   Post,
@@ -14,6 +16,7 @@ import type { RawBodyRequest } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { MainApiConnectionApplicationService } from '../application/main-api-connection.application.service';
+import { DashboardMappingApplicationService } from '../../../dashboard-mapping/application/dashboard-mapping.application.service';
 
 interface InboundWebhookBody {
   id: string;
@@ -36,6 +39,8 @@ export class MainApiWebhookController {
 
   constructor(
     private readonly connections: MainApiConnectionApplicationService,
+    @Inject(forwardRef(() => DashboardMappingApplicationService))
+    private readonly mappings: DashboardMappingApplicationService,
   ) {}
 
   @Post(':complianceTenantId')
@@ -61,7 +66,7 @@ export class MainApiWebhookController {
       body?.payload ?? {},
     );
 
-    if (result === 'unknown_tenant') {
+    if (result.status === 'unknown_tenant') {
       // 200, not 404: an unregistered tenant is not something the sender should
       // retry — but we also don't want to reveal tenant existence via status code.
       this.logger.warn(
@@ -69,7 +74,7 @@ export class MainApiWebhookController {
       );
       return { received: true };
     }
-    if (result === 'bad_signature') {
+    if (result.status === 'bad_signature') {
       this.logger.warn(
         `Rejected webhook for tenant ${complianceTenantId}: bad signature`,
       );
@@ -77,6 +82,22 @@ export class MainApiWebhookController {
       // mismatch shows up as a failed delivery in the main API's own
       // webhook stats/retry logic, instead of looking like success.
       throw new UnauthorizedException('Invalid webhook signature');
+    }
+
+    if (result.triggerPull && result.integrationKey) {
+      // Fire-and-forget: a Mapping Center pull can take a while (paginated
+      // item fetch for QuickBooks) and the main API just wants a fast ack of
+      // the webhook itself. A failure here just means the user falls back
+      // to the manual "Pull" button — logged, not surfaced as a webhook
+      // delivery failure that'd trigger the main API's retry logic.
+      const integrationKey = result.integrationKey;
+      this.mappings
+        .pullAll(complianceTenantId, integrationKey)
+        .catch((error) => {
+          this.logger.warn(
+            `Auto-pull after ${integrationKey} connect failed for tenant ${complianceTenantId}: ${(error as Error).message}`,
+          );
+        });
     }
 
     return { received: true };

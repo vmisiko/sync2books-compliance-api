@@ -10,7 +10,7 @@ import { CatalogService } from '../../catalog/api/catalog.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
-import { mapMainApiItemToRegisterItemInput } from '../../catalog/infrastructure/main-api/main-api-item.mapper';
+import { mapMainApiItemToRegisterItemInput } from '../../catalog/infrastructure/main-api/standardized-item.mapper';
 import { ClassificationMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
 import { ItemType } from '../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
@@ -116,9 +116,23 @@ export class DashboardItemsApplicationService {
               active: true,
             },
           });
+          // Main API now resolves itemType/taxCategory itself (see the
+          // `standardized` field on MainApiItem) — a null value means this
+          // item's source ERP isn't supported by that standardization layer
+          // yet, so surface a clear per-item error instead of silently
+          // registering with an undefined itemType/taxCategory.
+          if (!mainApiItem.standardized) {
+            throw new Error(
+              `Item ${mainApiItem.id} has no standardized itemType/taxCategory — its source ERP is not yet supported by main API's standardization layer`,
+            );
+          }
           const input = mapMainApiItemToRegisterItemInput({
             merchantId,
-            item: mainApiItem,
+            item: {
+              ...mainApiItem,
+              itemType: mainApiItem.standardized.itemType,
+              taxCategory: mainApiItem.standardized.taxCategory,
+            },
             classificationCodeOverride: clsRow?.itemClsCd ?? undefined,
             qtyUnitCdOverride: clsRow?.qtyUnitCd ?? undefined,
             packagingUnitCdOverride: clsRow?.pkgUnitCd ?? undefined,

@@ -23,6 +23,12 @@ export type EtimsConnectionContext = {
   apigeeAppId?: string;
   /** Bearer token from `https://…/v1/token/generate?grant_type=client_credentials`. */
   bearerAccessToken?: string;
+  /**
+   * Slade360 `X-Workstation` header — per their docs "the workstation ID of the
+   * user", a session-level concept rather than a branch id. Falls back to the
+   * adapter's configured default when unset; only meaningful to `EtimsAdapterSlade360`.
+   */
+  workstationId?: string;
 };
 
 export interface EtimsSubmissionResult {

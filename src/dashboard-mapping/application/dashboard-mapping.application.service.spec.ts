@@ -14,6 +14,7 @@ import { CatalogService } from '../../catalog/api/catalog.service';
 import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
 import { MappingStatus } from '../../shared/domain/enums/mapping-status.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
+import { ItemType } from '../../shared/domain/enums/item-type.enum';
 import type { MainApiConnection } from '../../integration/main-api-pull/domain/entities/main-api-connection.entity';
 import type {
   MainApiTaxRateListResponse,
@@ -569,6 +570,18 @@ describe('DashboardMappingApplicationService', () => {
         itemCode: 'IC-default',
         name: 'Item',
         active: true,
+        // Realistic default now that main API pre-resolves this via its own
+        // standardization layer — pullClassifications() reads
+        // item.standardized.taxCategory directly (falling back to OTHER
+        // when standardized is null), it no longer derives this from a raw
+        // QuickBooks SalesTaxCodeRef heuristic. Individual tests override
+        // this where the resolved category matters.
+        standardized: {
+          itemType: ItemType.GOODS,
+          taxCategory: TaxCategory.OTHER,
+          status: 'Active',
+          sourceSystem: SourceSystem.QUICKBOOKS,
+        },
         ...overrides,
       };
     }
@@ -694,11 +707,17 @@ describe('DashboardMappingApplicationService', () => {
               itemCode: 'QB_1',
               name: 'Rice 2kg',
               unitOfMeasure: 'kg',
-              // Deliberately not "16.0% S" -- mapQbTaxToInternalTaxCategory's
-              // isZeroRate check does a crude `.includes('0%')`, which also
-              // matches inside "16.0%" (a real pre-existing bug, flagged
-              // separately -- not something this test is about).
-              defaultTaxCodeRef: { id: 'tc1', name: '16% Standard VAT' },
+              // Resolved via main API's standardized.taxCategory directly now
+              // (no local QB-tax-label heuristic runs in this repo anymore —
+              // the old ".includes('0%')" bug that heuristic had for labels
+              // like "16.0% S" was fixed in Phase A's port to main API).
+              defaultTaxCodeRef: { id: 'tc1', name: '16.0% S' },
+              standardized: {
+                itemType: ItemType.GOODS,
+                taxCategory: TaxCategory.VAT_STANDARD,
+                status: 'Active',
+                sourceSystem: SourceSystem.QUICKBOOKS,
+              },
             }),
             item({
               id: 'i2',
@@ -706,13 +725,19 @@ describe('DashboardMappingApplicationService', () => {
               name: 'Consulting Service',
               unitOfMeasure: 'each',
               defaultTaxCodeRef: undefined,
+              standardized: {
+                itemType: ItemType.SERVICE,
+                taxCategory: TaxCategory.OTHER,
+                status: 'Active',
+                sourceSystem: SourceSystem.QUICKBOOKS,
+              },
             }),
           ],
         ),
       );
 
-      // Approve a tax mapping for VAT_STANDARD -- matches what
-      // mapQbTaxToInternalTaxCategory derives for the "Rice 2kg" item above.
+      // Approve a tax mapping for VAT_STANDARD -- matches the "Rice 2kg"
+      // item's standardized.taxCategory above.
       await service.createManual(
         TENANT_ID,
         {
@@ -734,7 +759,7 @@ describe('DashboardMappingApplicationService', () => {
       expect(rice.resolvedInternalTaxCategory).toBe(TaxCategory.VAT_STANDARD);
       expect(rice.resolvedTaxTyCd).toBe('B');
 
-      // No SalesTaxCodeRef -> OTHER, and no active tax mapping exists for
+      // standardized.taxCategory OTHER, and no active tax mapping exists for
       // OTHER in this test, so it should resolve to null, not throw or
       // silently default.
       expect(consulting.resolvedInternalTaxCategory).toBe(TaxCategory.OTHER);
@@ -1306,10 +1331,20 @@ describe('DashboardMappingApplicationService', () => {
       const service = await buildService(
         fakeOrg(),
         fakeConnections('qb-conn-1'),
-        fakeMainApiPull([], [], [], [
-          { id: 'pm-1', name: 'M-Pesa', type: 'OTHER', active: true },
-          { id: 'pm-2', name: 'Store Loyalty Points', type: 'OTHER', active: true },
-        ]),
+        fakeMainApiPull(
+          [],
+          [],
+          [],
+          [
+            { id: 'pm-1', name: 'M-Pesa', type: 'OTHER', active: true },
+            {
+              id: 'pm-2',
+              name: 'Store Loyalty Points',
+              type: 'OTHER',
+              active: true,
+            },
+          ],
+        ),
       );
 
       const result = await service.pullPaymentMethods(TENANT_ID);
@@ -1344,9 +1379,12 @@ describe('DashboardMappingApplicationService', () => {
       const service = await buildService(
         fakeOrg(),
         fakeConnections('qb-conn-1'),
-        fakeMainApiPull([], [], [], [
-          { id: 'pm-1', name: 'Cash', type: 'CASH', active: true },
-        ]),
+        fakeMainApiPull(
+          [],
+          [],
+          [],
+          [{ id: 'pm-1', name: 'Cash', type: 'CASH', active: true }],
+        ),
       );
 
       const first = await service.pullPaymentMethods(TENANT_ID);
@@ -1370,9 +1408,12 @@ describe('DashboardMappingApplicationService', () => {
       const service = await buildService(
         fakeOrg(),
         fakeConnections('qb-conn-1'),
-        fakeMainApiPull([], [], [], [
-          { id: 'pm-1', name: 'Store Loyalty Points', active: true },
-        ]),
+        fakeMainApiPull(
+          [],
+          [],
+          [],
+          [{ id: 'pm-1', name: 'Store Loyalty Points', active: true }],
+        ),
       );
       const result = await service.pullPaymentMethods(TENANT_ID);
       const mappingId = result.results[0].mappingId!;
@@ -1386,9 +1427,12 @@ describe('DashboardMappingApplicationService', () => {
       const service = await buildService(
         fakeOrg(),
         fakeConnections('qb-conn-1'),
-        fakeMainApiPull([], [], [], [
-          { id: 'pm-1', name: 'Store Loyalty Points', active: true },
-        ]),
+        fakeMainApiPull(
+          [],
+          [],
+          [],
+          [{ id: 'pm-1', name: 'Store Loyalty Points', active: true }],
+        ),
       );
       const pulled = await service.pullPaymentMethods(TENANT_ID);
       const mappingId = pulled.results[0].mappingId!;
@@ -1407,10 +1451,16 @@ describe('DashboardMappingApplicationService', () => {
 
   describe('listPaymentMethodOptions', () => {
     it('returns the 8 seeded internal payment methods with their pmtTyCd', async () => {
-      const service = await buildService(fakeOrg(), fakeConnections(null), fakeMainApiPull([]));
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null),
+        fakeMainApiPull([]),
+      );
       const options = service.listPaymentMethodOptions();
       expect(options).toHaveLength(8);
-      expect(options.find((o) => o.internalPaymentMethod === 'MOBILE_MONEY')).toEqual({
+      expect(
+        options.find((o) => o.internalPaymentMethod === 'MOBILE_MONEY'),
+      ).toEqual({
         internalPaymentMethod: 'MOBILE_MONEY',
         pmtTyCd: '07',
         label: 'Mobile Money',

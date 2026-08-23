@@ -76,9 +76,10 @@ export class ClassificationMappingOrmEntity {
   externalValue!: string | null;
 
   /**
-   * This item's internalTaxCategory as derived at pull time by the exact
-   * same heuristic registration uses (mapQbTaxToInternalTaxCategory) —
-   * captured here (not just computed live) so the Mapping Center can show,
+   * This item's internalTaxCategory as derived at pull time from the source
+   * ERP's own standardized tax category (resolved by main-api, see
+   * standardized-item.mapper.ts) — captured here (not just computed live) so
+   * the Mapping Center can show,
    * per item, whether its tax dimension will actually resolve at
    * registration without needing a fresh ERP call. Cross-referenced against
    * tax_mappings at list time (see DashboardMappingApplicationService.list)

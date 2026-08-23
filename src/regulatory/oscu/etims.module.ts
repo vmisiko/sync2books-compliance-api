@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { EtimsAdapterStub } from './adapters/etims-adapter.stub';
 import { EtimsAdapterHttp } from './adapters/etims-adapter.http';
+import { EtimsAdapterSlade360 } from './adapters/etims-adapter.slade360';
 import { ETIMS_ADAPTER } from '../../shared/tokens';
 import { InMemoryApigeeTokenCache } from './infrastructure/apigee-token-cache.memory';
 import { RedisApigeeTokenCache } from './infrastructure/apigee-token-cache.redis';
@@ -39,6 +40,36 @@ function createRedisApigeeTokenCache(redisUrl: string): RedisApigeeTokenCache {
         const isTest = process.env.NODE_ENV === 'test';
         if (isTest || mode === '' || mode === 'stub') {
           return new EtimsAdapterStub();
+        }
+        if (mode === 'slade360') {
+          const clientId = process.env.SLADE360_CLIENT_ID;
+          const clientSecret = process.env.SLADE360_CLIENT_SECRET;
+          if (!clientId || !clientSecret) {
+            throw new Error(
+              'ETIMS_ADAPTER_MODE=slade360 requires SLADE360_CLIENT_ID and SLADE360_CLIENT_SECRET',
+            );
+          }
+          const redisUrl = process.env.ETIMS_OSCU_REDIS_URL;
+          const tokenCache = redisUrl
+            ? createRedisApigeeTokenCache(redisUrl)
+            : new InMemoryApigeeTokenCache();
+
+          return new EtimsAdapterSlade360({
+            authBaseUrl: process.env.SLADE360_AUTH_BASE_URL,
+            apiBaseUrl: process.env.SLADE360_API_BASE_URL,
+            clientId,
+            clientSecret,
+            defaultWorkstationId: process.env.SLADE360_WORKSTATION_ID,
+            timeoutMs: process.env.SLADE360_TIMEOUT_MS
+              ? Number(process.env.SLADE360_TIMEOUT_MS)
+              : undefined,
+            tokenCache,
+            saveItemPath: process.env.SLADE360_SAVE_ITEM_PATH,
+            signInvoiceDirectlyPath:
+              process.env.SLADE360_SIGN_INVOICE_DIRECTLY_PATH,
+            signCreditNoteDirectlyPath:
+              process.env.SLADE360_SIGN_CREDIT_NOTE_DIRECTLY_PATH,
+          });
         }
         if (mode === 'http') {
           const pathStyle: OscuPathStyle =

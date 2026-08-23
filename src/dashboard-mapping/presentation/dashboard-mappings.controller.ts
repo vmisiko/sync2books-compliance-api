@@ -40,15 +40,26 @@ export class DashboardMappingsController {
   @ApiOperation({
     summary:
       'Pull tax rates, tax codes, item classifications, and payment methods from the main API ' +
-      '(QuickBooks) and run confidence-scored auto-suggestion in one pass: creates/refreshes ' +
-      'NEEDS_REVIEW tax_mappings and payment_type_mappings rows, resolves a taxCodeId where ' +
-      'possible, and creates a classification_mappings placeholder row per item with itemClsCd ' +
-      'left for manual review and qtyUnitCd/pkgUnitCd auto-matched directly against the real ' +
-      'KRA code list',
+      'for the given ERP source and run confidence-scored auto-suggestion in one pass: ' +
+      'creates/refreshes NEEDS_REVIEW tax_mappings and payment_type_mappings rows, resolves a ' +
+      'taxCodeId where possible, and creates a classification_mappings placeholder row per ' +
+      'item with itemClsCd left for manual review and qtyUnitCd/pkgUnitCd auto-matched ' +
+      'directly against the real KRA code list. Item-classification and payment-method pulls ' +
+      'are currently QuickBooks-only (no equivalent main-API endpoint exists yet for other ' +
+      'sources) and come back with a `skipped` note rather than failing the whole pull.',
+  })
+  @ApiQuery({
+    name: 'source',
+    required: false,
+    description:
+      'quickbooks | xero | sage | odoo | microsoft-dynamics-365-business-central (default quickbooks)',
   })
   @ApiResponse({ status: 200, description: 'Pull + suggestion result' })
-  async pull(@ActiveTenant() tenantId: string) {
-    const result = await this.mappings.pullAll(tenantId);
+  async pull(
+    @ActiveTenant() tenantId: string,
+    @Query('source') source?: string,
+  ) {
+    const result = await this.mappings.pullAll(tenantId, source);
     return {
       success: true,
       message:

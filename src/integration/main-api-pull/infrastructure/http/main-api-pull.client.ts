@@ -1,4 +1,51 @@
 import { Injectable, Logger, BadGatewayException } from '@nestjs/common';
+import { ItemType } from '../../../../shared/domain/enums/item-type.enum';
+import { TaxCategory } from '../../../../shared/domain/enums/tax-category.enum';
+import { SourceSystem } from '../../../../shared/domain/enums/source-system.enum';
+
+/**
+ * Mirrors main-api's Address (nest-sync-2-books-api/src/standardization/domain/entities/shared.ts)
+ * closely enough for our own `standardized` fields below — own copy since main-api and
+ * compliance-api are separate deployables with no shared package.
+ */
+export interface MainApiStandardizedAddress {
+  type: 'Unknown' | 'Billing' | 'Delivery';
+  line1?: string;
+  line2?: string;
+  city?: string;
+  region?: string;
+  country?: string;
+  postalCode?: string;
+}
+
+/**
+ * Additive, computed-at-response-time normalization main API now attaches to
+ * every Item row (or null if that row's source ERP isn't standardized yet) —
+ * see the Phase A refactor that moved ERP-shape parsing (QuickBooks
+ * Type/SalesTaxCodeRef heuristics, etc.) out of this repo and into main API.
+ */
+export interface MainApiStandardizedItem {
+  itemType: ItemType;
+  taxCategory: TaxCategory;
+  status: 'Active' | 'Archived' | 'Unknown';
+  unitOfMeasureCode?: string;
+  sourceSystem: SourceSystem;
+}
+
+export interface MainApiStandardizedParty {
+  status: 'Active' | 'Archived' | 'Unknown';
+  addresses: MainApiStandardizedAddress[];
+  sourceSystem: SourceSystem;
+}
+
+export interface MainApiStandardizedTax {
+  taxCategory: TaxCategory;
+  sourceSystem: SourceSystem;
+}
+
+export interface MainApiStandardizedInvoice {
+  sourceSystem: SourceSystem;
+}
 
 export interface MainApiItem {
   id: string;
@@ -15,6 +62,8 @@ export interface MainApiItem {
   bookType?: string | null;
   /** QuickBooks QtyOnHand, captured on item pull/sync. Undefined for non-inventory items. */
   qtyOnHand?: number | null;
+  /** Pre-resolved itemType/taxCategory from main API's standardization layer — null if this row's source ERP isn't supported by it yet. See standardized-item.mapper.ts, the sole consumer. */
+  standardized: MainApiStandardizedItem | null;
 }
 
 export interface MainApiInvoiceLineItem {
@@ -39,6 +88,8 @@ export interface MainApiInvoice {
   taxAmount: number;
   totalAmount: number;
   customerRef?: { id: string; companyName?: string };
+  /** Pre-resolved provenance from main API's standardization layer — null if this row's source ERP isn't supported by it yet. Optional (unlike MainApiItem's) since nothing in this repo constructs/consumes it yet — kept `| null`-typed rather than fully required so existing fixtures/call sites aren't forced to supply it. */
+  standardized?: MainApiStandardizedInvoice | null;
 }
 
 export interface MainApiListResponse<T> {
@@ -102,6 +153,8 @@ export interface MainApiTaxRate {
   totalTaxRate: number;
   connectionId: string;
   bookType?: string | null;
+  /** Pre-resolved taxCategory from main API's standardization layer — null if this row's source ERP isn't supported by it yet. Optional (unlike MainApiItem's) since pullTaxRates still uses the raw name/effectiveTaxRate heuristic via MappingSuggestionService rather than this field — kept `| null`-typed rather than fully required so existing fixtures/call sites aren't forced to supply it. */
+  standardized?: MainApiStandardizedTax | null;
 }
 
 export interface MainApiTaxRateListResponse {
@@ -166,6 +219,8 @@ export interface MainApiTaxCode {
   salesTaxRateRefs: MainApiTaxCodeRateRef[];
   /** Can be empty for sales-only codes. */
   purchaseTaxRateRefs: MainApiTaxCodeRateRef[];
+  /** Pre-resolved taxCategory from main API's standardization layer — null if this row's source ERP isn't supported by it yet. Optional (unlike MainApiItem's) since pullTaxCodes still uses the raw name heuristic via MappingSuggestionService rather than this field — kept `| null`-typed rather than fully required so existing fixtures/call sites aren't forced to supply it. */
+  standardized?: MainApiStandardizedTax | null;
 }
 
 export interface MainApiTaxCodeListResponse {
@@ -188,6 +243,8 @@ export interface MainApiSupplier {
   supplierName?: string | null;
   taxNumber?: string | null;
   bookType?: string | null;
+  /** Pre-resolved provenance/address data from main API's standardization layer — null if this row's source ERP isn't supported by it yet. Optional (unlike MainApiItem's) since nothing in this repo constructs/consumes it yet — see getSuppliers' doc comment — kept `| null`-typed rather than fully required so existing fixtures/call sites aren't forced to supply it. */
+  standardized?: MainApiStandardizedParty | null;
 }
 
 export interface MainApiSupplierListResponse {
@@ -208,6 +265,8 @@ export interface MainApiCustomer {
   bookType?: string | null;
   email?: string | null;
   phone?: string | null;
+  /** Pre-resolved provenance/address data from main API's standardization layer — null if this row's source ERP isn't supported by it yet. Optional (unlike MainApiItem's) since nothing in this repo constructs/consumes it yet — see getCustomers' doc comment — kept `| null`-typed rather than fully required so existing fixtures/call sites aren't forced to supply it. */
+  standardized?: MainApiStandardizedParty | null;
 }
 
 export interface MainApiCustomerListResponse {

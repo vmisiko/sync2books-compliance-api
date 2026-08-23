@@ -18,10 +18,6 @@ import { OscuCodeOrmEntity } from '../../regulatory/oscu/infrastructure/persiste
 import { searchCodes } from '../../catalog/application/use-cases/search-codes.usecase';
 import { CatalogService } from '../../catalog/api/catalog.service';
 import {
-  mapQbTaxToInternalTaxCategory,
-  type QuickBooksItem,
-} from '../../catalog/infrastructure/quickbooks/qb-item.mapper';
-import {
   MainApiItem,
   MainApiPaymentMethod,
   MainApiPullClient,
@@ -183,6 +179,36 @@ const SOURCE_FILTER: Record<string, SourceSystem> = {
   api: SourceSystem.API,
 };
 
+/**
+ * Sources a pull can actually target — mirrors
+ * MainApiConnectionApplicationService.SUPPORTED_INTEGRATION_KEYS exactly
+ * (the ERP Connection page's real connectable set), not the broader
+ * SOURCE_FILTER above, which also accepts `xero`/`sage`/`manual`/`api` for
+ * *list filtering* even though none of those have a connection to pull from.
+ */
+const PULL_SOURCE_KEYS = [
+  'quickbooks',
+  'odoo',
+  'microsoft-dynamics-365-business-central',
+] as const;
+type PullSource = (typeof PULL_SOURCE_KEYS)[number];
+
+const SOURCE_DISPLAY_NAME: Record<PullSource, string> = {
+  quickbooks: 'QuickBooks',
+  odoo: 'Odoo',
+  'microsoft-dynamics-365-business-central': 'Dynamics 365 Business Central',
+};
+
+function resolvePullSource(source: string | undefined): PullSource {
+  const key = (source ?? 'quickbooks').toLowerCase();
+  if (!(PULL_SOURCE_KEYS as readonly string[]).includes(key)) {
+    throw new BadRequestException(
+      `Unsupported pull source: ${source}. Must be one of ${PULL_SOURCE_KEYS.join(', ')}`,
+    );
+  }
+  return key as PullSource;
+}
+
 const STATUS_FILTER: Record<string, MappingStatus> = {
   mapped: MappingStatus.MAPPED,
   needs_review: MappingStatus.NEEDS_REVIEW,
@@ -278,33 +304,39 @@ export class DashboardMappingApplicationService {
    * dashboard click populates both mapping types instead of requiring a
    * separate action per tab.
    */
-  async pullAll(complianceTenantId: string) {
+  async pullAll(complianceTenantId: string, source?: string) {
+    const pullSource = resolvePullSource(source);
     const [tax, classifications, paymentMethods] = await Promise.all([
-      this.pullTaxRates(complianceTenantId),
-      this.pullItemClassifications(complianceTenantId),
-      this.pullPaymentMethods(complianceTenantId),
+      this.pullTaxRates(complianceTenantId, pullSource),
+      this.pullItemClassifications(complianceTenantId, pullSource),
+      this.pullPaymentMethods(complianceTenantId, pullSource),
     ]);
+    // tax already carries `source` (see pullTaxRates' return) — no need to
+    // repeat it here.
     return { ...tax, classifications, paymentMethods };
   }
 
-  async pullTaxRates(complianceTenantId: string) {
+  async pullTaxRates(complianceTenantId: string, source?: string) {
+    const pullSource = resolvePullSource(source);
+    const sourceSystem = SOURCE_FILTER[pullSource];
+    const sourceName = SOURCE_DISPLAY_NAME[pullSource];
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     // ensureCompany(), not getForTenant() -- self-heals a mainApiCompanyId
     // that no longer exists on the main API (see 195869c) instead of just
     // reading a stale reference and failing.
     const connection =
       await this.mainApiConnections.ensureCompany(complianceTenantId);
-    const quickbooksConnectionId =
-      connection.integrations?.quickbooks?.connectionId ?? null;
-    if (!quickbooksConnectionId) {
+    const connectionId =
+      connection.integrations?.[pullSource]?.connectionId ?? null;
+    if (!connectionId) {
       throw new BadRequestException(
-        'No connected QuickBooks connection for this tenant yet — connect QuickBooks before pulling tax rates.',
+        `No connected ${sourceName} connection for this tenant yet — connect ${sourceName} before pulling tax rates.`,
       );
     }
 
     const response = await this.mainApiPull.getTaxRates(
       connection.mainApiApiKey,
-      quickbooksConnectionId,
+      connectionId,
       {
         status: 'Active',
       },
@@ -336,6 +368,7 @@ export class DashboardMappingApplicationService {
           merchantId,
           rate.id,
           externalValue,
+          sourceSystem,
         );
         results.push({
           externalId: rate.id,
@@ -353,6 +386,7 @@ export class DashboardMappingApplicationService {
         rate.id,
         externalValue,
         suggestion,
+        sourceSystem,
       );
       results.push({
         externalId: rate.id,
@@ -367,10 +401,12 @@ export class DashboardMappingApplicationService {
     const taxCodes = await this.pullTaxCodes(
       merchantId,
       connection.mainApiApiKey,
-      quickbooksConnectionId,
+      connectionId,
+      sourceSystem,
     );
 
     return {
+      source: pullSource,
       merchantId,
       attempted: results.length,
       suggested: results.filter((r) => r.status === MappingStatus.NEEDS_REVIEW)
@@ -394,8 +430,36 @@ export class DashboardMappingApplicationService {
    * (payment_type_mappings, global fallback tier) like tax, not per-item
    * like classification — see the class doc comment.
    */
-  async pullPaymentMethods(complianceTenantId: string) {
+  async pullPaymentMethods(complianceTenantId: string, source?: string) {
+    const pullSource = resolvePullSource(source);
     const merchantId = await this.resolveMerchantId(complianceTenantId);
+
+    // The main API's payment-methods live-read is QuickBooks-only today
+    // (PaymentMethodController.getPaymentMethodsForConnection ->
+    // getPaymentMethodsFromQuickBooksLive rejects any non-QuickBooks
+    // connection with a 400) -- there's no equivalent catalog concept wired
+    // up for Odoo/Xero/Sage/Dynamics yet. Skip rather than let that 400
+    // reject pullAll()'s Promise.all and take the tax-rate pull down with it.
+    if (pullSource !== 'quickbooks') {
+      const results: Array<{
+        externalId: string;
+        externalValue: string;
+        mappingId: string | null;
+        status: MappingStatus;
+        confidenceScore: number | null;
+        internalPaymentMethod: string | null;
+      }> = [];
+      return {
+        merchantId,
+        attempted: 0,
+        suggested: 0,
+        alreadyMapped: 0,
+        unmapped: 0,
+        results,
+        skipped: `Payment method pull is currently only available for QuickBooks connections — ${SOURCE_DISPLAY_NAME[pullSource]} has no equivalent payment-method catalog exposed by the main API yet.`,
+      };
+    }
+
     const connection =
       await this.mainApiConnections.ensureCompany(complianceTenantId);
     const quickbooksConnectionId =
@@ -629,11 +693,12 @@ export class DashboardMappingApplicationService {
   private async pullTaxCodes(
     merchantId: string,
     mainApiApiKey: string,
-    quickbooksConnectionId: string,
+    connectionId: string,
+    sourceSystem: SourceSystem,
   ) {
     const response = await this.mainApiPull.getTaxCodes(
       mainApiApiKey,
-      quickbooksConnectionId,
+      connectionId,
       { active: true },
     );
 
@@ -668,6 +733,7 @@ export class DashboardMappingApplicationService {
         code.id,
         code.name,
         suggestion,
+        sourceSystem,
       );
       results.push({
         externalId: code.id,
@@ -694,7 +760,30 @@ export class DashboardMappingApplicationService {
    * the first) and derives classification placeholders (one per item,
    * carrying its own auto-matched qtyUnitCd/pkgUnitCd too) from that fetch.
    */
-  private async pullItemClassifications(complianceTenantId: string) {
+  private async pullItemClassifications(
+    complianceTenantId: string,
+    source?: string,
+  ) {
+    const pullSource = resolvePullSource(source);
+
+    // Same story as pullPaymentMethods: no item/product sync exists for
+    // Odoo/Xero/Sage/Dynamics on the main API yet (GET /items only ever
+    // reflects QuickBooks-sourced items), so there's nothing real to pull.
+    if (pullSource !== 'quickbooks') {
+      const results: Array<{
+        externalId: string;
+        externalValue: string;
+        mappingId: string;
+        status: MappingStatus;
+      }> = [];
+      return {
+        attempted: 0,
+        needsReview: 0,
+        results,
+        skipped: `Item classification pull is currently only available for QuickBooks connections — no item/product sync exists yet for ${SOURCE_DISPLAY_NAME[pullSource]}.`,
+      };
+    }
+
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const connection =
       await this.mainApiConnections.ensureCompany(complianceTenantId);
@@ -739,7 +828,7 @@ export class DashboardMappingApplicationService {
    *
    * externalId MUST be item.bookId ?? item.itemCode — the same value
    * mapMainApiItemToRegisterItemInput uses as RegisterItemInput.externalId
-   * (main-api-item.mapper.ts). Registration's ClassificationResolverTypeOrm
+   * (standardized-item.mapper.ts). Registration's ClassificationResolverTypeOrm
    * looks up an EXTERNAL_ID classification_mappings row by that exact value;
    * keying this placeholder on item.id (a sync2books-internal UUID with no
    * relation to QuickBooks) would mean a classification assigned here could
@@ -771,17 +860,14 @@ export class DashboardMappingApplicationService {
       // ever lacks all three fields.
       if (!placeholder) continue;
 
-      const qbItem: QuickBooksItem = {
-        Id: externalId,
-        Name: item.name,
-        SalesTaxCodeRef: item.defaultTaxCodeRef
-          ? {
-              value: item.defaultTaxCodeRef.id,
-              name: item.defaultTaxCodeRef.name,
-            }
-          : undefined,
-      };
-      const resolvedInternalTaxCategory = mapQbTaxToInternalTaxCategory(qbItem);
+      // Main API now pre-resolves this via its own standardization layer
+      // (see MainApiItem.standardized in main-api-pull.client.ts) — no local
+      // QuickBooks-tax-label heuristic runs in this repo anymore. A null
+      // `standardized` (source ERP not yet supported by that layer) falls
+      // back to OTHER, the same default the old heuristic used for an
+      // unresolvable/missing SalesTaxCodeRef, rather than blocking the pull.
+      const resolvedInternalTaxCategory =
+        item.standardized?.taxCategory ?? TaxCategory.OTHER;
 
       const rawUnit = item.unitOfMeasure ?? '';
       const qtyMatch = await this.matchKraCode(
@@ -940,6 +1026,7 @@ export class DashboardMappingApplicationService {
       taxTyCd: string;
       confidenceScore: number;
     },
+    sourceSystem: SourceSystem = SourceSystem.QUICKBOOKS,
   ): Promise<TaxMappingOrmEntity> {
     const approved = await this.taxRepo.findOne({
       where: {
@@ -962,7 +1049,7 @@ export class DashboardMappingApplicationService {
       merchantId,
       internalTaxCategory: suggestion.internalTaxCategory,
       taxTyCd: suggestion.taxTyCd,
-      sourceSystem: SourceSystem.QUICKBOOKS,
+      sourceSystem,
       status: MappingStatus.NEEDS_REVIEW,
       confidenceScore: suggestion.confidenceScore,
       externalValue,
@@ -1000,9 +1087,10 @@ export class DashboardMappingApplicationService {
     merchantId: string,
     externalId: string,
     externalValue: string,
+    sourceSystem: SourceSystem = SourceSystem.QUICKBOOKS,
   ): Promise<TaxMappingOrmEntity> {
     const existing = await this.taxRepo.findOne({
-      where: { merchantId, sourceSystem: SourceSystem.QUICKBOOKS, externalId },
+      where: { merchantId, sourceSystem, externalId },
     });
     if (existing) {
       if (existing.active) return existing;
@@ -1018,7 +1106,7 @@ export class DashboardMappingApplicationService {
         taxTyCd: null,
         version: 1,
         active: false,
-        sourceSystem: SourceSystem.QUICKBOOKS,
+        sourceSystem,
         status: MappingStatus.UNMAPPED,
         confidenceScore: 0,
         externalValue,
@@ -1060,6 +1148,7 @@ export class DashboardMappingApplicationService {
       taxTyCd: string;
       confidenceScore: number;
     },
+    sourceSystem: SourceSystem = SourceSystem.QUICKBOOKS,
   ): Promise<TaxMappingOrmEntity> {
     const applyIfBetter = async (
       row: TaxMappingOrmEntity,
@@ -1100,7 +1189,7 @@ export class DashboardMappingApplicationService {
         taxTyCd: suggestion.taxTyCd,
         version: 1,
         active: false,
-        sourceSystem: SourceSystem.QUICKBOOKS,
+        sourceSystem,
         status: MappingStatus.NEEDS_REVIEW,
         confidenceScore: suggestion.confidenceScore,
         externalValue: null,

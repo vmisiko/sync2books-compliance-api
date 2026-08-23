@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { ComplianceOrganizationModule } from '../compliance-organization/compliance-organization.module';
 import { DashboardIdentityModule } from '../dashboard-identity/dashboard-identity.module';
 import { MainApiPullModule } from '../integration/main-api-pull/main-api-pull.module';
@@ -14,7 +14,9 @@ import { DashboardMappingsController } from './presentation/dashboard-mappings.c
     OscuReferenceModule,
     ComplianceOrganizationModule,
     DashboardIdentityModule,
-    MainApiPullModule,
+    // forwardRef(): MainApiPullModule now also imports this module (see its
+    // doc comment) so its webhook controller can auto-trigger a pull.
+    forwardRef(() => MainApiPullModule),
     CatalogModule,
   ],
   controllers: [DashboardMappingsController],

@@ -275,6 +275,12 @@ export class MainApiConnectionApplicationService {
    * Verifies and applies an inbound connection.* webhook against the
    * relevant integration's slot. Returns the outcome so the controller can
    * respond appropriately without leaking which failure occurred.
+   *
+   * `triggerPull` tells the caller whether this event just brought an
+   * integration into the `connected` state for the first time in this call
+   * (connect/reconnect) — the signal the webhook controller uses to
+   * auto-kick a Mapping Center pull so a freshly connected ERP shows up
+   * there without the user having to click "Pull" manually.
    */
   async handleInboundWebhookEvent(
     complianceTenantId: string,
@@ -283,21 +289,25 @@ export class MainApiConnectionApplicationService {
     eventId: string,
     eventType: string,
     payload: Record<string, unknown>,
-  ): Promise<'ok' | 'bad_signature' | 'unknown_tenant'> {
+  ): Promise<{
+    status: 'ok' | 'bad_signature' | 'unknown_tenant';
+    integrationKey?: string;
+    triggerPull?: boolean;
+  }> {
     const connection = await this.repo.findByTenantId(complianceTenantId);
     if (!connection || !connection.webhookSecret) {
-      return 'unknown_tenant';
+      return { status: 'unknown_tenant' };
     }
 
     if (
       !this.verifySignature(rawBody, connection.webhookSecret, signatureHeader)
     ) {
-      return 'bad_signature';
+      return { status: 'bad_signature' };
     }
 
     // Idempotency: the main API retries the exact same event id on delivery failure.
     if (eventId && eventId === connection.lastWebhookEventId) {
-      return 'ok';
+      return { status: 'ok' };
     }
 
     const integrationKey =
@@ -316,7 +326,7 @@ export class MainApiConnectionApplicationService {
         lastWebhookEventId: eventId,
         updatedAt: new Date(),
       });
-      return 'ok';
+      return { status: 'ok' };
     }
 
     const now = new Date();
@@ -374,7 +384,12 @@ export class MainApiConnectionApplicationService {
       lastWebhookEventId: eventId,
       updatedAt: now,
     });
-    return 'ok';
+
+    const triggerPull =
+      (eventType === 'connection.connected' ||
+        eventType === 'connection.reconnected') &&
+      current.status !== 'connected';
+    return { status: 'ok', integrationKey, triggerPull };
   }
 
   private verifySignature(

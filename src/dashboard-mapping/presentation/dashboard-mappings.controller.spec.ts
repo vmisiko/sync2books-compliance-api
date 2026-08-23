@@ -67,13 +67,19 @@ describe('DashboardMappingsController', () => {
   it('pull() delegates to pullAll with the active tenant (ActiveTenantGuard)', async () => {
     service.pullAll.mockResolvedValue({ attempted: 1 });
     const result = await controller.pull(TENANT_ID);
-    expect(service.pullAll).toHaveBeenCalledWith(TENANT_ID);
+    expect(service.pullAll).toHaveBeenCalledWith(TENANT_ID, undefined);
     expect(result).toEqual({
       success: true,
       message:
         'Tax rates, tax codes, classifications, and payment methods pulled and scored',
       data: { attempted: 1 },
     });
+  });
+
+  it('pull() forwards an explicit source to pullAll', async () => {
+    service.pullAll.mockResolvedValue({ attempted: 1 });
+    await controller.pull(TENANT_ID, 'odoo');
+    expect(service.pullAll).toHaveBeenCalledWith(TENANT_ID, 'odoo');
   });
 
   it('list() forwards query filters and the active tenant to the service', async () => {
@@ -107,7 +113,11 @@ describe('DashboardMappingsController', () => {
     service.approve.mockResolvedValue({ id: 'taxmap-1', status: 'MAPPED' });
     // Note: approve() takes no request body at all — there is no field a
     // caller could use to spoof approvedBy even if they tried.
-    const result = await controller.approve(TENANT_ID, reqFor(user), 'taxmap-1');
+    const result = await controller.approve(
+      TENANT_ID,
+      reqFor(user),
+      'taxmap-1',
+    );
     expect(service.approve).toHaveBeenCalledWith(
       TENANT_ID,
       'taxmap-1',
