@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -34,11 +35,14 @@ export class DashboardItemsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Pull items from the main API (sourced from QuickBooks etc.) and register/auto-classify them in the catalog',
+      "Pull items from the main API (sourced from whichever ERP is connected) and register/auto-classify them in the catalog. Defaults to whichever ERP is actually connected -- pass ?source= explicitly (quickbooks | odoo | microsoft-dynamics-365-business-central) when more than one is connected.",
   })
   @ApiResponse({ status: 200, description: 'Pull result' })
-  async pull(@ActiveTenant() tenantId: string) {
-    const result = await this.items.pullItems(tenantId);
+  async pull(
+    @ActiveTenant() tenantId: string,
+    @Query('source') source?: string,
+  ) {
+    const result = await this.items.pullItems(tenantId, source);
     return { success: true, message: 'Items pulled', data: result };
   }
 

@@ -24,6 +24,8 @@ export interface RegisterItemInput {
   unitPrice?: number | null;
   /** OSCU country of origin (orgnNatCd). Defaults to 'KE' when unset. */
   originCountry?: string | null;
+  /** The ERP this item was pulled from (e.g. QUICKBOOKS, ODOO) — null for a manually-created item. */
+  sourceSystem?: string | null;
 }
 
 export interface RegisterItemResult {
@@ -100,6 +102,7 @@ export async function registerItem(
       productTypeCode,
       unitPrice: input.unitPrice ?? existing.unitPrice,
       originCountry: input.originCountry ?? existing.originCountry ?? 'KE',
+      sourceSystem: input.sourceSystem ?? existing.sourceSystem,
       isStockItem,
       // Any change requires a resync to eTIMS (same itemCd can be reused).
       registrationStatus: 'PENDING',
@@ -134,6 +137,7 @@ export async function registerItem(
     productTypeCode,
     unitPrice: input.unitPrice ?? null,
     originCountry: input.originCountry ?? 'KE',
+    sourceSystem: input.sourceSystem ?? null,
     isStockItem,
     registrationStatus: 'PENDING',
     etimsItemCode: null,

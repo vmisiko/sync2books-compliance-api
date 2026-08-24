@@ -29,6 +29,13 @@ export interface CatalogItem {
   /** OSCU country of origin (orgnNatCd). Defaults to 'KE' when unset. */
   originCountry: string | null;
   /**
+   * The ERP this item was pulled from (e.g. QUICKBOOKS, ODOO,
+   * MICROSOFT_DYNAMICS_365_BUSINESS_CENTRAL — see SourceSystem enum), or
+   * null for a manually-created item / an item pulled before this field
+   * existed.
+   */
+  sourceSystem: string | null;
+  /**
    * Whether this item requires KRA stock tracking (insertStockIO etc).
    * Not part of itemTyCd -- KRA's own item-type code list (cdCls 24: Raw
    * Material / Finished Product / Service) has no distinct "non-stock good"

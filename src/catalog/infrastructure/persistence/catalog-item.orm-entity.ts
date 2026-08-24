@@ -83,4 +83,13 @@ export class CatalogItemOrmEntity {
   /** Pattern 2 headers from Main API (for `POST .../oscu-outcome` retries). */
   @Column({ type: 'json', nullable: true })
   sync2booksCorrelation!: Record<string, unknown> | null;
+
+  /**
+   * The ERP this item was pulled from (e.g. QUICKBOOKS, ODOO,
+   * MICROSOFT_DYNAMICS_365_BUSINESS_CENTRAL — see SourceSystem enum), or
+   * null for a manually-created item / an item pulled before this field
+   * existed. Mirrors CustomerOrmEntity.sourceSystem.
+   */
+  @Column('varchar', { nullable: true })
+  sourceSystem!: string | null;
 }

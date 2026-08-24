@@ -83,6 +83,7 @@ export class CatalogService {
     productTypeCode?: string;
     unitPrice?: number | null;
     originCountry?: string | null;
+    sourceSystem?: string | null;
   }) {
     const result = await registerItem(
       params,

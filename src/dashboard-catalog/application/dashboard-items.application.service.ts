@@ -8,7 +8,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CatalogService } from '../../catalog/api/catalog.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
-import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
+import {
+  MainApiConnectionApplicationService,
+  SUPPORTED_INTEGRATION_KEYS,
+  type SupportedIntegrationKey,
+} from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { mapMainApiItemToRegisterItemInput } from '../../catalog/infrastructure/main-api/standardized-item.mapper';
 import { ClassificationMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
@@ -31,8 +35,44 @@ const TAX_CATEGORY_BY_CODE: Record<string, TaxCategory> = {
   E: TaxCategory.VAT_8,
 };
 
+const SOURCE_DISPLAY_NAME: Record<SupportedIntegrationKey, string> = {
+  quickbooks: 'QuickBooks',
+  odoo: 'Odoo',
+  'microsoft-dynamics-365-business-central': 'Dynamics 365 Business Central',
+};
+
+/**
+ * Mirrors resolveCustomerPullSource in dashboard-customers.application.service.ts:
+ * an explicit `source` (the dashboard's ERP selector) always wins; otherwise
+ * don't default to QuickBooks blindly -- pick whichever supported integration
+ * actually has a connectionId, so an Odoo-only tenant doesn't silently see
+ * "0 synced" forever.
+ */
+function resolveItemPullSource(
+  source: string | undefined,
+  integrations: Partial<
+    Record<SupportedIntegrationKey, { connectionId: string | null }>
+  >,
+): SupportedIntegrationKey {
+  if (source) {
+    const key = source.toLowerCase();
+    if (!(SUPPORTED_INTEGRATION_KEYS as readonly string[]).includes(key)) {
+      throw new BadRequestException(
+        `Unsupported pull source: ${source}. Must be one of ${SUPPORTED_INTEGRATION_KEYS.join(', ')}`,
+      );
+    }
+    return key as SupportedIntegrationKey;
+  }
+
+  const connected = SUPPORTED_INTEGRATION_KEYS.find(
+    (key) => integrations?.[key]?.connectionId,
+  );
+  return connected ?? 'quickbooks';
+}
+
 export type PullItemsResult = {
   merchantId: string;
+  source: SupportedIntegrationKey;
   attempted: number;
   succeeded: number;
   failed: number;
@@ -60,29 +100,36 @@ export class DashboardItemsApplicationService {
     private readonly clsRepo: Repository<ClassificationMappingOrmEntity>,
   ) {}
 
-  async pullItems(complianceTenantId: string): Promise<PullItemsResult> {
+  async pullItems(
+    complianceTenantId: string,
+    source?: string,
+  ): Promise<PullItemsResult> {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const connection =
       await this.mainApiConnections.getForTenant(complianceTenantId);
 
-    // Best-effort: refresh the main API's own cache from QuickBooks first, so
-    // the list below isn't stale. A failure here (e.g. QuickBooks token expired)
-    // shouldn't block reading whatever the main API already has.
-    const quickbooksConnectionId =
-      connection.integrations['quickbooks']?.connectionId;
-    if (quickbooksConnectionId) {
-      try {
-        await this.mainApiPull.syncItemsFromBookkeeping(
-          connection.mainApiApiKey,
-          quickbooksConnectionId,
-        );
-      } catch (error) {
-        this.logger.warn(
-          `sync-from-bookkeeping (items) failed for tenant ${complianceTenantId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
+    const pullSource = resolveItemPullSource(source, connection.integrations);
+    const connectionId = connection.integrations[pullSource]?.connectionId;
+    if (!connectionId) {
+      throw new BadRequestException(
+        `No connected ${SOURCE_DISPLAY_NAME[pullSource]} connection for this tenant yet — connect ${SOURCE_DISPLAY_NAME[pullSource]} before pulling items.`,
+      );
+    }
+
+    // Best-effort: refresh the main API's own cache from the source ERP
+    // first, so the list below isn't stale. A failure here (e.g. token
+    // expired) shouldn't block reading whatever the main API already has.
+    try {
+      await this.mainApiPull.syncItemsFromBookkeeping(
+        connection.mainApiApiKey,
+        connectionId,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `sync-from-bookkeeping (items) failed for tenant ${complianceTenantId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
 
     const results: PullItemsResult['results'] = [];
@@ -132,17 +179,23 @@ export class DashboardItemsApplicationService {
           const taxCategory =
             this.suggestions.suggestTaxCodeMapping(mainApiItem.defaultTaxCodeRef?.name ?? '')
               ?.internalTaxCategory ?? TaxCategory.OTHER;
-          const input = mapMainApiItemToRegisterItemInput({
-            merchantId,
-            item: {
-              ...mainApiItem,
-              itemType: mainApiItem.standardized.itemType,
-            },
-            taxCategory,
-            classificationCodeOverride: clsRow?.itemClsCd ?? undefined,
-            qtyUnitCdOverride: clsRow?.qtyUnitCd ?? undefined,
-            packagingUnitCdOverride: clsRow?.pkgUnitCd ?? undefined,
-          });
+          const input = {
+            ...mapMainApiItemToRegisterItemInput({
+              merchantId,
+              item: {
+                ...mainApiItem,
+                itemType: mainApiItem.standardized.itemType,
+              },
+              taxCategory,
+              classificationCodeOverride: clsRow?.itemClsCd ?? undefined,
+              qtyUnitCdOverride: clsRow?.qtyUnitCd ?? undefined,
+              packagingUnitCdOverride: clsRow?.pkgUnitCd ?? undefined,
+            }),
+            sourceSystem:
+              mainApiItem.standardized?.sourceSystem ??
+              mainApiItem.bookType?.toUpperCase() ??
+              null,
+          };
           const result = await this.catalog.registerItem(input);
           results.push({
             mainApiItemId: mainApiItem.id,
@@ -164,6 +217,7 @@ export class DashboardItemsApplicationService {
 
     return {
       merchantId,
+      source: pullSource,
       attempted: results.length,
       succeeded: results.filter((r) => r.status === 'ok').length,
       failed: results.filter((r) => r.status === 'error').length,
