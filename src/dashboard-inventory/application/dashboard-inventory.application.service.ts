@@ -7,8 +7,57 @@ import {
 import { CatalogService } from '../../catalog/api/catalog.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { InventoryService } from '../../inventory/api/inventory.service';
-import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
+import {
+  MainApiConnectionApplicationService,
+  SUPPORTED_INTEGRATION_KEYS,
+  type SupportedIntegrationKey,
+} from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
+import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
+
+/**
+ * Maps a resolved pull-source integration key to the SourceSystem value
+ * written into the stock movement row. Kept as a plain string (not the enum
+ * type itself) on write since StockMovementOrmEntity.sourceSystem is typed
+ * `string | null`, matching the pre-existing hardcoded 'QUICKBOOKS' literal
+ * this replaces.
+ */
+const PULL_SOURCE_TO_SOURCE_SYSTEM: Record<SupportedIntegrationKey, SourceSystem> = {
+  quickbooks: SourceSystem.QUICKBOOKS,
+  odoo: SourceSystem.ODOO,
+  'microsoft-dynamics-365-business-central':
+    SourceSystem.MICROSOFT_DYNAMICS_365_BUSINESS_CENTRAL,
+};
+
+/**
+ * Resolves which ERP a reconcile pull should target -- mirrors
+ * resolveCustomerPullSource in dashboard-customers.application.service.ts.
+ * An explicit `source` (the dashboard's ERP selector, once connected to more
+ * than one integration) always wins. Otherwise, don't default to QuickBooks
+ * blindly -- pick whichever supported integration actually has a
+ * connectionId instead.
+ */
+function resolveReconcilePullSource(
+  source: string | undefined,
+  integrations: Partial<
+    Record<SupportedIntegrationKey, { connectionId: string | null }>
+  >,
+): SupportedIntegrationKey {
+  if (source) {
+    const key = source.toLowerCase();
+    if (!(SUPPORTED_INTEGRATION_KEYS as readonly string[]).includes(key)) {
+      throw new BadRequestException(
+        `Unsupported pull source: ${source}. Must be one of ${SUPPORTED_INTEGRATION_KEYS.join(', ')}`,
+      );
+    }
+    return key as SupportedIntegrationKey;
+  }
+
+  const connected = SUPPORTED_INTEGRATION_KEYS.find(
+    (key) => integrations?.[key]?.connectionId,
+  );
+  return connected ?? 'quickbooks';
+}
 
 export type ReconcileResult = {
   merchantId: string;
@@ -99,19 +148,26 @@ export class DashboardInventoryApplicationService {
    * per this session's confirmed decision. Best-effort per item: one item
    * failing (e.g. no default branch link) doesn't block the rest.
    */
-  async reconcile(complianceTenantId: string): Promise<ReconcileResult> {
+  async reconcile(
+    complianceTenantId: string,
+    source?: string,
+  ): Promise<ReconcileResult> {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const branchId = await this.resolveDefaultBranchId(complianceTenantId);
     const connection =
       await this.mainApiConnections.getForTenant(complianceTenantId);
 
-    const quickbooksConnectionId =
-      connection.integrations['quickbooks']?.connectionId;
-    if (quickbooksConnectionId) {
+    const pullSource = resolveReconcilePullSource(
+      source,
+      connection.integrations,
+    );
+    const connectionId = connection.integrations[pullSource]?.connectionId;
+    const sourceSystem = PULL_SOURCE_TO_SOURCE_SYSTEM[pullSource];
+    if (connectionId) {
       try {
         await this.mainApiPull.syncItemsFromBookkeeping(
           connection.mainApiApiKey,
-          quickbooksConnectionId,
+          connectionId,
         );
       } catch (error) {
         this.logger.warn(
@@ -150,7 +206,7 @@ export class DashboardInventoryApplicationService {
             itemId: catalogItem.id,
             branchId,
             externalQtyOnHand,
-            sourceSystem: 'QUICKBOOKS',
+            sourceSystem,
             unitPrice: catalogItem.unitPrice ?? undefined,
           });
           results.push({

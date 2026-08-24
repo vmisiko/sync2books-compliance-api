@@ -88,11 +88,14 @@ export class DashboardInventoryController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Pull current QtyOnHand from QuickBooks (via the main API) and reconcile it into the default branch\'s stock',
+      "Pull current QtyOnHand (via the main API) and reconcile it into the default branch's stock. Defaults to whichever ERP is actually connected -- pass ?source= explicitly (quickbooks | odoo | microsoft-dynamics-365-business-central) when more than one is connected.",
   })
   @ApiResponse({ status: 200, description: 'Reconciliation result' })
-  async reconcile(@ActiveTenant() tenantId: string) {
-    const result = await this.inventory.reconcile(tenantId);
+  async reconcile(
+    @ActiveTenant() tenantId: string,
+    @Query('source') source?: string,
+  ) {
+    const result = await this.inventory.reconcile(tenantId, source);
     return { success: true, message: 'Stock reconciled', data: result };
   }
 }
