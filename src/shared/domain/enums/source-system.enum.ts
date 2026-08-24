@@ -8,11 +8,13 @@ export enum SourceSystem {
   /**
    * A mapping (or other record) entered directly by a dashboard user, not
    * derived from any pulled ERP data. Deliberately distinct from API: API
-   * means "arrived via the main-API pull integration" (see
-   * DashboardInvoicesApplicationService, which tags pulled sales with it even
-   * though the ultimate source is QuickBooks) — MANUAL means "a human typed
-   * this into the mapping-review dashboard," which is a different provenance
-   * the UI needs to tell apart (e.g. it never carries a confidenceScore).
+   * means "arrived via the main-API pull integration, but main API hadn't
+   * standardized that row's ERP yet" (see DashboardInvoicesApplicationService,
+   * which now prefers the pulled invoice's real standardized.sourceSystem —
+   * QUICKBOOKS/ODOO/etc. — and only falls back to this generic API tag when
+   * that's unavailable) — MANUAL means "a human typed this into the
+   * mapping-review dashboard," which is a different provenance the UI needs
+   * to tell apart (e.g. it never carries a confidenceScore).
    */
   MANUAL = 'MANUAL',
 }

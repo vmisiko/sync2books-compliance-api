@@ -309,6 +309,7 @@ export class SalesService {
       status: mapComplianceStatusToDigitax(document.complianceStatus),
       supplierName: tenant?.displayName ?? null,
       supplierPin: connection?.kraPin ?? null,
+      sourceSystem: document.sourceSystem,
       paymentTypeCode: document.paymentTypeCode,
       paymentTypeDescription: paymentTypeDescription(document.paymentTypeCode),
       salesTaxSummary: {
@@ -808,6 +809,7 @@ function buildNormalizedSaleReport(input: {
     status: mapComplianceStatusToDigitax(document.complianceStatus),
     supplierName,
     supplierPin: connection?.kraPin ?? null,
+    sourceSystem: document.sourceSystem,
     paymentTypeCode: document.paymentTypeCode,
     paymentTypeDescription: paymentTypeDescription(document.paymentTypeCode),
     salesTaxSummary: {

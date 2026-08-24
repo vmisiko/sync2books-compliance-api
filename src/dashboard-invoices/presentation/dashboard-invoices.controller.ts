@@ -35,17 +35,19 @@ export class DashboardInvoicesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Refresh invoices from the main API (sourced from QuickBooks etc.) and return the current list, previewed only (nothing is submitted to eTIMS)',
+      "Refresh invoices from the main API and return the current list, previewed only (nothing is submitted to eTIMS). Defaults to whichever ERP is actually connected -- pass ?source= explicitly (quickbooks | odoo | microsoft-dynamics-365-business-central) when more than one is connected.",
   })
   @ApiResponse({ status: 200, description: 'Pull result' })
   async pull(
     @ActiveTenant() tenantId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('source') source?: string,
   ) {
     const result = await this.invoices.pullInvoices(tenantId, {
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
+      source,
     });
     return { success: true, message: 'Invoices pulled', data: result };
   }

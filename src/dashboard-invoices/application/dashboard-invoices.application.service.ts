@@ -11,7 +11,11 @@ import { CatalogService } from '../../catalog/api/catalog.service';
 import { PAYMENT_TYPE_RESOLVER } from '../../shared/tokens';
 import type { IPaymentTypeResolver } from '../../regulatory/oscu/domain/ports/payment-type-resolver.port';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
-import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
+import {
+  MainApiConnectionApplicationService,
+  SUPPORTED_INTEGRATION_KEYS,
+  type SupportedIntegrationKey,
+} from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import {
   MainApiPullClient,
   type MainApiInvoice,
@@ -52,7 +56,38 @@ export type PulledInvoice = {
   lines: PulledInvoiceLine[];
   /** false if any line's item hasn't been registered/classified in the catalog yet. */
   readyForSale: boolean;
+  sourceSystem: SourceSystem | null;
 };
+
+/**
+ * Resolves which ERP an invoice pull should target — mirrors
+ * DashboardCustomersApplicationService's resolveCustomerPullSource. An
+ * explicit `source` (the dashboard's ERP selector, once connected to more
+ * than one integration) always wins; otherwise pick whichever supported
+ * integration actually has a connectionId instead of blindly defaulting to
+ * QuickBooks, which would silently show "0 pulled" for an Odoo-only tenant.
+ */
+function resolveInvoicePullSource(
+  source: string | undefined,
+  integrations: Partial<
+    Record<SupportedIntegrationKey, { connectionId: string | null }>
+  >,
+): SupportedIntegrationKey {
+  if (source) {
+    const key = source.toLowerCase();
+    if (!(SUPPORTED_INTEGRATION_KEYS as readonly string[]).includes(key)) {
+      throw new BadRequestException(
+        `Unsupported pull source: ${source}. Must be one of ${SUPPORTED_INTEGRATION_KEYS.join(', ')}`,
+      );
+    }
+    return key as SupportedIntegrationKey;
+  }
+
+  const connected = SUPPORTED_INTEGRATION_KEYS.find(
+    (key) => integrations?.[key]?.connectionId,
+  );
+  return connected ?? 'quickbooks';
+}
 
 @Injectable()
 export class DashboardInvoicesApplicationService {
@@ -75,18 +110,21 @@ export class DashboardInvoicesApplicationService {
 
   async pullInvoices(
     complianceTenantId: string,
-    params: { page?: number; limit?: number } = {},
+    params: { page?: number; limit?: number; source?: string } = {},
   ) {
     const connection =
       await this.mainApiConnections.getForTenant(complianceTenantId);
 
-    const quickbooksConnectionId =
-      connection.integrations['quickbooks']?.connectionId;
-    if (quickbooksConnectionId) {
+    const pullSource = resolveInvoicePullSource(
+      params.source,
+      connection.integrations,
+    );
+    const connectionId = connection.integrations[pullSource]?.connectionId;
+    if (connectionId) {
       try {
         await this.mainApiPull.syncInvoicesFromBookkeeping(
           connection.mainApiApiKey,
-          quickbooksConnectionId,
+          connectionId,
         );
       } catch (error) {
         this.logger.warn(
@@ -216,7 +254,11 @@ export class DashboardInvoicesApplicationService {
       {
         merchantId,
         branchId: branch.id,
-        sourceSystem: SourceSystem.API,
+        // Prefer the real ERP provenance main API's standardization layer
+        // resolved for this invoice (see enrich()); fall back to the generic
+        // API tag only when that ERP isn't standardized yet, so this doesn't
+        // regress to always claiming QuickBooks/API for every pulled sale.
+        sourceSystem: pulled.sourceSystem ?? SourceSystem.API,
         sourceDocumentId: pulled.invoiceCode,
         documentType: DocumentType.SALE,
         documentNumber: pulled.reference ?? pulled.invoiceCode,
@@ -484,6 +526,7 @@ export class DashboardInvoicesApplicationService {
       customerName: invoice.customerRef?.companyName,
       lines,
       readyForSale: lines.length > 0 && lines.every((l) => l.classified),
+      sourceSystem: invoice.standardized?.sourceSystem ?? null,
     };
   }
 

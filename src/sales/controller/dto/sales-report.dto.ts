@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { SourceSystem } from '../../../shared/domain/enums/source-system.enum';
 
 export class CursorPaginationDto {
   @ApiProperty({ nullable: true })
@@ -171,6 +172,9 @@ export class SaleReportDto {
 
   @ApiProperty({ nullable: true, description: "Trader's own KRA PIN" })
   supplierPin!: string | null;
+
+  @ApiProperty({ enum: SourceSystem, description: 'ERP provenance of this document, e.g. QUICKBOOKS/ODOO/API/MANUAL' })
+  sourceSystem!: SourceSystem;
 
   @ApiProperty({ nullable: true, description: 'OSCU pmtTyCd, e.g. "01"' })
   paymentTypeCode!: string | null;
