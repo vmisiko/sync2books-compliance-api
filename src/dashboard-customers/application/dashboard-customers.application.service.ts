@@ -252,11 +252,17 @@ export class DashboardCustomersApplicationService {
             where: { merchantId, externalId: mainApiCustomer.id },
           });
 
+          const sourceSystem =
+            mainApiCustomer.standardized?.sourceSystem ??
+            mainApiCustomer.bookType?.toUpperCase() ??
+            null;
+
           if (existing) {
             existing.name = name;
             existing.tin = mainApiCustomer.taxId ?? existing.tin;
             existing.phoneNumber = mainApiCustomer.phone ?? existing.phoneNumber;
             existing.email = mainApiCustomer.email ?? existing.email;
+            existing.sourceSystem = sourceSystem ?? existing.sourceSystem;
             const saved = await this.customerRepo.save(existing);
             results.push({
               mainApiCustomerId: mainApiCustomer.id,
@@ -273,6 +279,7 @@ export class DashboardCustomersApplicationService {
               tin: mainApiCustomer.taxId ?? null,
               phoneNumber: mainApiCustomer.phone ?? null,
               email: mainApiCustomer.email ?? null,
+              sourceSystem,
             });
             const saved = await this.customerRepo.save(entity);
             results.push({

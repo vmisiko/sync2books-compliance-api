@@ -33,6 +33,10 @@ export class CustomerOrmEntity {
   @Column('varchar', { nullable: true })
   email!: string | null;
 
+  /** ERP provenance (SourceSystem enum value, e.g. QUICKBOOKS/ODOO), when pulled from an ERP rather than added manually. */
+  @Column('varchar', { nullable: true })
+  sourceSystem!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

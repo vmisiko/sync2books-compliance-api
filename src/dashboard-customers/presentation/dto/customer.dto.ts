@@ -50,6 +50,9 @@ export class CustomerResponseDto {
   @ApiProperty({ nullable: true })
   email!: string | null;
 
+  @ApiProperty({ nullable: true, description: 'ERP provenance (SourceSystem enum value), when pulled from an ERP' })
+  sourceSystem!: string | null;
+
   @ApiProperty()
   createdAt!: Date;
 }
