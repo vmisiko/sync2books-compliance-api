@@ -512,6 +512,31 @@ export class MainApiPullClient {
     );
   }
 
+  /**
+   * Tax rates/codes use a different main-API route shape than the other
+   * sync-from-bookkeeping endpoints (POST /tax-rates/sync/:connectionId, not
+   * .../connection/:connectionId/sync-from-bookkeeping) -- confirmed against
+   * tax-rate.controller.ts/tax-code.controller.ts. Without calling these
+   * first, main API's own tax_rates/tax_codes tables stay empty for any
+   * connection that was never explicitly synced, so getTaxRates()/
+   * getTaxCodes() below silently return nothing even when the ERP itself
+   * has real tax data -- confirmed live against a QuickBooks connection
+   * that had 18 real tax rates but had never once been synced.
+   */
+  async syncTaxRatesFromBookkeeping(
+    apiKey: string,
+    connectionId: string,
+  ): Promise<unknown> {
+    return this.post(apiKey, `/tax-rates/sync/${connectionId}`);
+  }
+
+  async syncTaxCodesFromBookkeeping(
+    apiKey: string,
+    connectionId: string,
+  ): Promise<unknown> {
+    return this.post(apiKey, `/tax-codes/sync/${connectionId}`);
+  }
+
   // --- Sync2Books Link (ERP connect widget) proxy calls ---
   // Mirrors src/lib/sync2books-link/client.ts in sync2books-react, but kept
   // server-side here so the main-API key never reaches the browser.

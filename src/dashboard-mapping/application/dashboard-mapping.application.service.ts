@@ -334,6 +334,37 @@ export class DashboardMappingApplicationService {
       );
     }
 
+    // Best-effort: refresh main API's own tax_rates/tax_codes cache from the
+    // source ERP first. Unlike items/customers/invoices, a connection that's
+    // never had this called returns nothing here even when the ERP itself
+    // has real tax data -- main API never auto-populates these tables on
+    // its own. A failure here (e.g. token expired) shouldn't block reading
+    // whatever main API already has cached.
+    try {
+      await this.mainApiPull.syncTaxRatesFromBookkeeping(
+        connection.mainApiApiKey,
+        connectionId,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `sync-from-bookkeeping (tax rates) failed for tenant ${complianceTenantId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    try {
+      await this.mainApiPull.syncTaxCodesFromBookkeeping(
+        connection.mainApiApiKey,
+        connectionId,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `sync-from-bookkeeping (tax codes) failed for tenant ${complianceTenantId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
     const response = await this.mainApiPull.getTaxRates(
       connection.mainApiApiKey,
       connectionId,
