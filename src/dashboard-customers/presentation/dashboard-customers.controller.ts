@@ -74,12 +74,15 @@ export class DashboardCustomersController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Pull customers from QuickBooks (via the main API) and upsert them locally, matched by external customer id',
+      "Pull customers (via the main API) and upsert them locally, matched by external customer id. Defaults to whichever ERP is actually connected -- pass ?source= explicitly (quickbooks | odoo | microsoft-dynamics-365-business-central) when more than one is connected.",
   })
   @ApiResponse({ status: 200, description: 'Pull result' })
   @UseGuards(ActiveTenantGuard)
-  async pull(@ActiveTenant() tenantId: string) {
-    return this.customers.pullCustomers(tenantId);
+  async pull(
+    @ActiveTenant() tenantId: string,
+    @Query('source') source?: string,
+  ) {
+    return this.customers.pullCustomers(tenantId, source);
   }
 
   @Get('verify-kra')

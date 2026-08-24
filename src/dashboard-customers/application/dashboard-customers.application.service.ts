@@ -8,7 +8,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import type { Repository } from 'typeorm';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
-import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
+import {
+  MainApiConnectionApplicationService,
+  SUPPORTED_INTEGRATION_KEYS,
+  type SupportedIntegrationKey,
+} from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { OscuOperationsService } from '../../regulatory/oscu/presentation/oscu-operations.service';
 import { CustomerOrmEntity } from '../infrastructure/persistence/customer.orm-entity';
@@ -20,6 +24,7 @@ import type {
 
 export type PullCustomersResult = {
   merchantId: string;
+  source: SupportedIntegrationKey;
   attempted: number;
   succeeded: number;
   failed: number;
@@ -31,6 +36,42 @@ export type PullCustomersResult = {
     error?: string;
   }>;
 };
+
+const SOURCE_DISPLAY_NAME: Record<SupportedIntegrationKey, string> = {
+  quickbooks: 'QuickBooks',
+  odoo: 'Odoo',
+  'microsoft-dynamics-365-business-central': 'Dynamics 365 Business Central',
+};
+
+/**
+ * Resolves which ERP a customer pull should target. An explicit `source`
+ * (the dashboard's ERP selector, once connected to more than one integration)
+ * always wins. Otherwise, don't default to QuickBooks blindly -- a tenant
+ * that only has Odoo connected (this API's own go-live test tenant hit this)
+ * would silently see "0 synced" forever. Pick whichever supported
+ * integration actually has a connectionId instead.
+ */
+function resolveCustomerPullSource(
+  source: string | undefined,
+  integrations: Partial<
+    Record<SupportedIntegrationKey, { connectionId: string | null }>
+  >,
+): SupportedIntegrationKey {
+  if (source) {
+    const key = source.toLowerCase();
+    if (!(SUPPORTED_INTEGRATION_KEYS as readonly string[]).includes(key)) {
+      throw new BadRequestException(
+        `Unsupported pull source: ${source}. Must be one of ${SUPPORTED_INTEGRATION_KEYS.join(', ')}`,
+      );
+    }
+    return key as SupportedIntegrationKey;
+  }
+
+  const connected = SUPPORTED_INTEGRATION_KEYS.find(
+    (key) => integrations?.[key]?.connectionId,
+  );
+  return connected ?? 'quickbooks';
+}
 
 @Injectable()
 export class DashboardCustomersApplicationService {
@@ -152,23 +193,29 @@ export class DashboardCustomersApplicationService {
    * upsert by externalId (main API's customer id / bookId) so a re-pull
    * updates existing rows instead of duplicating them.
    */
-  async pullCustomers(complianceTenantId: string): Promise<PullCustomersResult> {
+  async pullCustomers(
+    complianceTenantId: string,
+    source?: string,
+  ): Promise<PullCustomersResult> {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const connection =
       await this.mainApiConnections.getForTenant(complianceTenantId);
 
-    const quickbooksConnectionId =
-      connection.integrations['quickbooks']?.connectionId;
-    if (!quickbooksConnectionId) {
+    const pullSource = resolveCustomerPullSource(
+      source,
+      connection.integrations,
+    );
+    const connectionId = connection.integrations[pullSource]?.connectionId;
+    if (!connectionId) {
       throw new BadRequestException(
-        'No QuickBooks connection configured for this tenant',
+        `No connected ${SOURCE_DISPLAY_NAME[pullSource]} connection for this tenant yet — connect ${SOURCE_DISPLAY_NAME[pullSource]} before pulling customers.`,
       );
     }
 
     try {
       await this.mainApiPull.syncCustomersFromBookkeeping(
         connection.mainApiApiKey,
-        quickbooksConnectionId,
+        connectionId,
       );
     } catch (error) {
       this.logger.warn(
@@ -186,7 +233,7 @@ export class DashboardCustomersApplicationService {
     do {
       const response = await this.mainApiPull.getCustomers(
         connection.mainApiApiKey,
-        quickbooksConnectionId,
+        connectionId,
         { page, limit },
       );
       totalPages = response.totalPages || 1;
@@ -248,6 +295,7 @@ export class DashboardCustomersApplicationService {
 
     return {
       merchantId,
+      source: pullSource,
       attempted: results.length,
       succeeded: results.filter((r) => r.status === 'ok').length,
       failed: results.filter((r) => r.status === 'error').length,
