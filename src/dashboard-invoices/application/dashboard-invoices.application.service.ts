@@ -21,6 +21,7 @@ import { Sync2BooksCorrelationPersistenceService } from '../../integration/platf
 import { Sync2BooksMainApiOscuClient } from '../../integration/platform-outbound/sync2books-main-api-oscu.client';
 import { parseSync2BooksCorrelation } from '../../integration/platform-outbound/sync2books-request-headers.util';
 import { SalesService } from '../../sales/application/sales.service';
+import { expectedTaxAmount } from '../../sales/domain/rules/tax-rule.engine';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import { DocumentType } from '../../shared/domain/enums/document-type.enum';
 import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
@@ -181,13 +182,23 @@ export class DashboardInvoicesApplicationService {
             `Catalog item ${line.catalogItemId} no longer exists`,
           );
         }
+        // Don't trust the pulled line's own taxAmount -- QuickBooks (and
+        // likely other ERPs) only total tax at the invoice header
+        // (TxnTaxDetail), never per SalesItemLine, so it's reliably absent
+        // here. Compute it the same way SalesService's tax-rule engine will
+        // validate it, from the catalog item's actual taxCategory, so this
+        // never submits a line doomed to fail TAX_VAT_STANDARD_RATE/TAX_VAT_8_RATE.
         return {
           itemId: catalogItem.id,
           description: line.description ?? catalogItem.name,
           quantity: line.quantity,
           unitPrice: line.unitAmount,
           taxCategory: catalogItem.taxCategory,
-          taxAmount: line.taxAmount ?? 0,
+          taxAmount: expectedTaxAmount(
+            catalogItem.taxCategory,
+            line.quantity,
+            line.unitAmount,
+          ),
         };
       }),
     );

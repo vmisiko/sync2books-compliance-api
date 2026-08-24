@@ -12,6 +12,28 @@ const VAT_STANDARD_RATE = 0.16;
 const VAT_EIGHT_RATE = 0.08;
 
 /**
+ * The rate this engine's own validation rules below expect per taxCategory —
+ * exported so callers building a sale's lines (e.g. from a pulled invoice
+ * whose source ERP doesn't carry a reliable per-line tax amount, like
+ * QuickBooks which only totals tax at the invoice header) can compute a
+ * taxAmount that is guaranteed to pass `runTaxRules` rather than guessing.
+ */
+export function expectedTaxAmount(
+  taxCategory: TaxCategory,
+  quantity: number,
+  unitPrice: number,
+): number {
+  switch (taxCategory) {
+    case TaxCategory.VAT_STANDARD:
+      return quantity * unitPrice * VAT_STANDARD_RATE;
+    case TaxCategory.VAT_8:
+      return quantity * unitPrice * VAT_EIGHT_RATE;
+    default:
+      return 0;
+  }
+}
+
+/**
  * Tax rules - VAT_STANDARD, VAT_ZERO, EXEMPT.
  */
 export function runTaxRules(lines: ComplianceLine[]): ValidationResult {
