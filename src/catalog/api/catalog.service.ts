@@ -2,6 +2,10 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
 import { registerItem } from '../application/use-cases/register-item.usecase';
+import {
+  updateManualItem,
+  type UpdateManualItemInput,
+} from '../application/use-cases/update-manual-item.usecase';
 import { listItems } from '../application/use-cases/list-items.usecase';
 import { syncItemsToEtims } from '../application/use-cases/sync-items.usecase';
 import {
@@ -134,8 +138,21 @@ export class CatalogService {
     return this.itemRepo.findById(itemId);
   }
 
-  async findByExternalId(merchantId: string, externalId: string) {
-    return this.itemRepo.findByMerchantAndExternalId(merchantId, externalId);
+  /** See update-manual-item.usecase.ts -- only for items with no externalId. */
+  async updateManualItem(input: UpdateManualItemInput) {
+    return updateManualItem(input, this.itemRepo, this.classificationResolver);
+  }
+
+  async findByExternalId(
+    merchantId: string,
+    externalId: string,
+    sourceSystem?: string | null,
+  ) {
+    return this.itemRepo.findByMerchantAndExternalId(
+      merchantId,
+      externalId,
+      sourceSystem,
+    );
   }
 
   async syncItems(params: {

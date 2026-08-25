@@ -492,11 +492,22 @@ export class DashboardInvoicesApplicationService {
     merchantId: string,
     invoice: MainApiInvoice,
   ): Promise<PulledInvoice> {
+    // Every line on one invoice shares the invoice's own source ERP -- pass
+    // it through so a line's item lookup can't resolve to a different ERP's
+    // catalog item that happens to share the same small numeric externalId
+    // (see ClassificationResolverTypeOrm's doc comment for the same bug
+    // class; this call site bypasses that resolver entirely, so it needs
+    // its own fix).
+    const invoiceSourceSystem = invoice.standardized?.sourceSystem ?? null;
     const lines = await Promise.all(
       invoice.lineItems.map(async (line) => {
         const itemExternalId = line.itemRef?.id ?? null;
         const catalogItem = itemExternalId
-          ? await this.catalog.findByExternalId(merchantId, itemExternalId)
+          ? await this.catalog.findByExternalId(
+              merchantId,
+              itemExternalId,
+              invoiceSourceSystem,
+            )
           : null;
 
         return {

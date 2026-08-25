@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import type { CatalogItem } from '../../domain/entities/catalog-item.entity';
 import type { ICatalogItemRepository } from '../../domain/ports/item-repository.port';
 import type { IComplianceItemRepository } from '../../../shared/ports/repository.port';
@@ -106,9 +106,13 @@ export class CatalogItemTypeOrmRepository
   async findByMerchantAndExternalId(
     merchantId: string,
     externalId: string,
+    sourceSystem?: string | null,
   ): Promise<CatalogItem | null> {
     const row = await this.repo.findOne({
-      where: { merchantId, externalId },
+      where:
+        sourceSystem !== undefined
+          ? { merchantId, externalId, sourceSystem: sourceSystem ?? IsNull() }
+          : { merchantId, externalId },
     });
     return row ? ormToDomain(row) : null;
   }

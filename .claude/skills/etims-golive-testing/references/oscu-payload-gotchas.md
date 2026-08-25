@@ -515,6 +515,28 @@ real bug in `sync-code-list.usecase.ts` (fixed 2026-08-12): it unconditionally t
 or `/oscu/*` sync route, check `oscu_operation_logs` for a `resultCd: "001"` first before assuming something
 is actually broken — the same class of bug could exist in other sync usecases that haven't been audited yet.
 
+## saveItem — `pkgUnitCd` allow-list is narrower than `selectCodeList`'s `useYn`
+
+Confirmed 2026-08-25: `saveItem` rejects `pkgUnitCd: "BX"` ("Box") with `400 "The Package unit code can ony
+be among the following list: [JY, KZ, LZ, NT, OU, PD, PG, PI, PO, PU, RL, RO, RZ, SK, TY, VG, VL, VO, VQ, VR,
+AM, BA, BC, BE, BF, BG, BJ, BK, BL, BQ, BR, BV, BZ, CA, CH, CJ, CL, CR, CS, CT, CTN, CY, DR, GT, HH, IZ, JR,
+JU, VT, VY, ML, TN]"` — 52 codes. But a full re-sync of `selectCodeList` (cdCls `17`, "Packing Unit") still
+reports `BX` with `useYn: "Y"`, identical to before. **KRA's own reference-code lookup does not reflect
+`saveItem`'s actual validation rule** — re-fetching `selectCodeList` will not surface this, since the
+inconsistency is on KRA's sandbox side between two different endpoints, not stale local data.
+
+Fixed locally by setting `useYn='N'` on the `oscu_codes` row for `(cdCls='17', cd='BX')` after confirming the
+live rejection — `searchCodes()`/`GET /catalog/codes` already filters `useYn='Y'` by default, so this
+immediately removes `BX` from the packaging-unit dropdown without touching sync logic. If a future
+`selectCodeList` full re-sync runs again, it will re-upsert `BX` back to `useYn='Y'` (KRA's data, not ours) —
+check this override still holds after any full codes resync, and re-apply if it got clobbered. If another
+`pkgUnitCd` value gets accepted by `selectCodeList` but rejected by `saveItem` with the same "Package unit
+code can ony be among the following list" error, add it here and disable it the same way rather than
+re-debugging from scratch. For an item already assigned an `itemCd` with a bad code embedded, don't just
+edit `packagingUnitCode` — the `itemCd`'s packaging slot (`itemCdSlice()` in `sync-items.usecase.ts`) must
+also be regenerated to match, or `saveItem` fails again with `"Incorrect Packaging Unit Prefix"` even though
+the real `pkgUnitCd` field is now valid.
+
 ## importedItemConvertedInfo — persistent `999` as of 2026-08-12
 
 Previously documented as usually resolving on immediate retry (see the `insertStockIO` section's cross

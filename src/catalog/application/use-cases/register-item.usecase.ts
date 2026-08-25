@@ -49,6 +49,7 @@ export async function registerItem(
     ? await itemRepo.findByMerchantAndExternalId(
         input.merchantId,
         input.externalId,
+        input.sourceSystem ?? null,
       )
     : null;
 
@@ -58,6 +59,7 @@ export async function registerItem(
     itemName: input.name,
     sku: input.sku ?? undefined,
     externalId: input.externalId ?? undefined,
+    sourceSystem: input.sourceSystem ?? null,
     classificationCode: input.classificationCode,
     unitCode: input.unitCode,
     packagingUnitCode: input.packagingUnitCode,
@@ -89,10 +91,45 @@ export async function registerItem(
   const now = new Date();
 
   if (existing) {
+    const nextSku = input.sku ?? existing.sku;
+    const nextUnitPrice = input.unitPrice ?? existing.unitPrice;
+    const nextOriginCountry = input.originCountry ?? existing.originCountry ?? 'KE';
+    const nextSourceSystem = input.sourceSystem ?? existing.sourceSystem;
+    const changed =
+      input.name !== existing.name ||
+      nextSku !== existing.sku ||
+      input.itemType !== existing.itemType ||
+      input.taxCategory !== existing.taxCategory ||
+      classificationCode !== existing.classificationCode ||
+      unitCode !== existing.unitCode ||
+      packagingUnitCode !== existing.packagingUnitCode ||
+      taxTyCd !== existing.taxTyCd ||
+      productTypeCode !== existing.productTypeCode ||
+      nextUnitPrice !== existing.unitPrice ||
+      nextOriginCountry !== existing.originCountry ||
+      nextSourceSystem !== existing.sourceSystem ||
+      isStockItem !== existing.isStockItem;
+
+    // A re-pull (main API's own item cache refreshing, or a human clicking
+    // "Pull from ERP" again) reprocesses every item every time, including
+    // ones that already registered successfully with KRA. Previously this
+    // branch unconditionally reset registrationStatus to PENDING and wiped
+    // lastSyncedAt/lastSyncResultCd -- meaning simply re-pulling (for any
+    // reason, e.g. to pick up one new item) silently discarded every already-
+    // REGISTERED item's sync history and staged it for a pointless resync,
+    // risking a real, unnecessary KRA saveItem call reusing the same itemCd
+    // the next time someone clicks Sync. Only actually reset when something
+    // KRA-relevant changed. A FAILED or already-PENDING item still gets
+    // re-staged unconditionally below -- re-pulling has always been the way
+    // to retry those, and that's preserved.
+    if (!changed && existing.registrationStatus === 'REGISTERED') {
+      return { item: existing, created: false };
+    }
+
     const updated: CatalogItem = {
       ...existing,
       name: input.name,
-      sku: input.sku ?? existing.sku,
+      sku: nextSku,
       itemType: input.itemType,
       taxCategory: input.taxCategory,
       classificationCode,
@@ -100,9 +137,9 @@ export async function registerItem(
       packagingUnitCode,
       taxTyCd,
       productTypeCode,
-      unitPrice: input.unitPrice ?? existing.unitPrice,
-      originCountry: input.originCountry ?? existing.originCountry ?? 'KE',
-      sourceSystem: input.sourceSystem ?? existing.sourceSystem,
+      unitPrice: nextUnitPrice,
+      originCountry: nextOriginCountry,
+      sourceSystem: nextSourceSystem,
       isStockItem,
       // Any change requires a resync to eTIMS (same itemCd can be reused).
       registrationStatus: 'PENDING',
@@ -120,9 +157,16 @@ export async function registerItem(
   const newItem: CatalogItem = {
     // Stable id so other systems (sales, ERP sync) can reference it reliably.
     // Manual entries (no externalId) get a random suffix instead, since
-    // there's no ERP-provided id to key off of.
+    // there's no ERP-provided id to key off of. sourceSystem is folded in
+    // here (not just used for the `existing` lookup above) because two ERPs
+    // routinely assign the same small numeric externalId to unrelated
+    // products for the same merchant -- without it, this id would collide
+    // with an already-registered item from a different ERP and silently
+    // overwrite it on insert instead of creating a distinct row. Existing
+    // rows created before this fix keep their old (unscoped) id -- this
+    // only affects newly-inserted rows going forward.
     id: input.externalId
-      ? `item-${input.merchantId}-${input.externalId}`
+      ? `item-${input.merchantId}-${input.sourceSystem ?? 'legacy'}-${input.externalId}`
       : `item-${input.merchantId}-manual-${randomUUID()}`,
     merchantId: input.merchantId,
     externalId: input.externalId ?? null,

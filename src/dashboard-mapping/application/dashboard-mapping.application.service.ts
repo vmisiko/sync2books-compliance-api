@@ -452,9 +452,10 @@ export class DashboardMappingApplicationService {
   }
 
   /**
-   * Pulls QuickBooks' PaymentMethod catalog (Cash, Check, Credit Card, ...)
-   * and auto-suggests each against the 8 internal payment methods via
-   * MappingSuggestionService.suggestPaymentMethodMapping, same shape as
+   * Pulls the connected ERP's PaymentMethod catalog (QuickBooks' Cash/Check/
+   * Credit Card/..., or Odoo's pos.payment.method Cash/Card/Customer
+   * Account) and auto-suggests each against the 8 internal payment methods
+   * via MappingSuggestionService.suggestPaymentMethodMapping, same shape as
    * pullTaxRates above: confident suggestion -> NEEDS_REVIEW row with a
    * pmtTyCd already filled in; no confident suggestion -> UNMAPPED
    * placeholder row a human fills in directly. Payment stays category-keyed
@@ -463,15 +464,15 @@ export class DashboardMappingApplicationService {
    */
   async pullPaymentMethods(complianceTenantId: string, source?: string) {
     const pullSource = resolvePullSource(source);
+    const sourceSystem = SOURCE_FILTER[pullSource];
     const merchantId = await this.resolveMerchantId(complianceTenantId);
 
-    // The main API's payment-methods live-read is QuickBooks-only today
-    // (PaymentMethodController.getPaymentMethodsForConnection ->
-    // getPaymentMethodsFromQuickBooksLive rejects any non-QuickBooks
-    // connection with a 400) -- there's no equivalent catalog concept wired
-    // up for Odoo/Xero/Sage/Dynamics yet. Skip rather than let that 400
+    // The main API's payment-methods live-read now covers QuickBooks and
+    // Odoo (PaymentMethodController.getPaymentMethodsForConnection ->
+    // PaymentMethodService.getPaymentMethodsLive) -- Dynamics still has no
+    // equivalent catalog concept wired up. Skip rather than let that 400
     // reject pullAll()'s Promise.all and take the tax-rate pull down with it.
-    if (pullSource !== 'quickbooks') {
+    if (pullSource !== 'quickbooks' && pullSource !== 'odoo') {
       const results: Array<{
         externalId: string;
         externalValue: string;
@@ -487,23 +488,22 @@ export class DashboardMappingApplicationService {
         alreadyMapped: 0,
         unmapped: 0,
         results,
-        skipped: `Payment method pull is currently only available for QuickBooks connections — ${SOURCE_DISPLAY_NAME[pullSource]} has no equivalent payment-method catalog exposed by the main API yet.`,
+        skipped: `Payment method pull is currently only available for QuickBooks and Odoo connections — ${SOURCE_DISPLAY_NAME[pullSource]} has no equivalent payment-method catalog exposed by the main API yet.`,
       };
     }
 
     const connection =
       await this.mainApiConnections.ensureCompany(complianceTenantId);
-    const quickbooksConnectionId =
-      connection.integrations?.quickbooks?.connectionId ?? null;
-    if (!quickbooksConnectionId) {
+    const connectionId = connection.integrations?.[pullSource]?.connectionId ?? null;
+    if (!connectionId) {
       throw new BadRequestException(
-        'No connected QuickBooks connection for this tenant yet — connect QuickBooks before pulling payment methods.',
+        `No connected ${SOURCE_DISPLAY_NAME[pullSource]} connection for this tenant yet — connect ${SOURCE_DISPLAY_NAME[pullSource]} before pulling payment methods.`,
       );
     }
 
     const response = await this.mainApiPull.getPaymentMethods(
       connection.mainApiApiKey,
-      quickbooksConnectionId,
+      connectionId,
     );
 
     const results: Array<{
@@ -527,6 +527,7 @@ export class DashboardMappingApplicationService {
           merchantId,
           method.id,
           externalValue,
+          sourceSystem,
         );
         results.push({
           externalId: method.id,
@@ -544,6 +545,7 @@ export class DashboardMappingApplicationService {
         method.id,
         externalValue,
         suggestion,
+        sourceSystem,
       );
       results.push({
         externalId: method.id,
@@ -583,6 +585,7 @@ export class DashboardMappingApplicationService {
       pmtTyCd: string;
       confidenceScore: number;
     },
+    sourceSystem: SourceSystem,
   ): Promise<PaymentTypeMappingOrmEntity> {
     const approved = await this.paymentRepo.findOne({
       where: {
@@ -605,7 +608,7 @@ export class DashboardMappingApplicationService {
       merchantId,
       internalPaymentMethod: suggestion.internalPaymentMethod,
       pmtTyCd: suggestion.pmtTyCd,
-      sourceSystem: SourceSystem.QUICKBOOKS,
+      sourceSystem,
       status: MappingStatus.NEEDS_REVIEW,
       confidenceScore: suggestion.confidenceScore,
       externalValue,
@@ -638,9 +641,10 @@ export class DashboardMappingApplicationService {
     merchantId: string,
     externalId: string,
     externalValue: string,
+    sourceSystem: SourceSystem,
   ): Promise<PaymentTypeMappingOrmEntity> {
     const existing = await this.paymentRepo.findOne({
-      where: { merchantId, sourceSystem: SourceSystem.QUICKBOOKS, externalId },
+      where: { merchantId, sourceSystem, externalId },
     });
     if (existing) {
       if (existing.active) return existing;
@@ -656,7 +660,7 @@ export class DashboardMappingApplicationService {
         pmtTyCd: null,
         version: 1,
         active: false,
-        sourceSystem: SourceSystem.QUICKBOOKS,
+        sourceSystem,
         status: MappingStatus.UNMAPPED,
         confidenceScore: 0,
         externalValue,
@@ -798,9 +802,10 @@ export class DashboardMappingApplicationService {
     const pullSource = resolvePullSource(source);
 
     // Same story as pullPaymentMethods: no item/product sync exists for
-    // Odoo/Xero/Sage/Dynamics on the main API yet (GET /items only ever
-    // reflects QuickBooks-sourced items), so there's nothing real to pull.
-    if (pullSource !== 'quickbooks') {
+    // Xero/Sage/Dynamics on the main API yet (GET /items only ever reflects
+    // QuickBooks/Odoo-sourced items), so there's nothing real to pull for
+    // those sources.
+    if (pullSource !== 'quickbooks' && pullSource !== 'odoo') {
       const results: Array<{
         externalId: string;
         externalValue: string;
@@ -811,23 +816,41 @@ export class DashboardMappingApplicationService {
         attempted: 0,
         needsReview: 0,
         results,
-        skipped: `Item classification pull is currently only available for QuickBooks connections — no item/product sync exists yet for ${SOURCE_DISPLAY_NAME[pullSource]}.`,
+        skipped: `Item classification pull is currently only available for QuickBooks and Odoo connections — no item/product sync exists yet for ${SOURCE_DISPLAY_NAME[pullSource]}.`,
       };
     }
 
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const connection =
       await this.mainApiConnections.ensureCompany(complianceTenantId);
-    const quickbooksConnectionId =
-      connection.integrations?.quickbooks?.connectionId ?? null;
-    if (!quickbooksConnectionId) {
+    const connectionId = connection.integrations?.[pullSource]?.connectionId ?? null;
+    if (!connectionId) {
       throw new BadRequestException(
-        'No connected QuickBooks connection for this tenant yet — connect QuickBooks before pulling items.',
+        `No connected ${SOURCE_DISPLAY_NAME[pullSource]} connection for this tenant yet — connect ${SOURCE_DISPLAY_NAME[pullSource]} before pulling items.`,
+      );
+    }
+
+    // Best-effort refresh of the main API's own items cache from the source
+    // ERP before reading -- without this, a connection that's never had
+    // sync-from-bookkeeping called on it silently returns nothing here even
+    // when the ERP itself has real product data (see pullTaxRates' identical
+    // pattern, and the tax-rates bug this mirrors: a connection with no
+    // prior sync call returned 0 rows despite real upstream data existing).
+    try {
+      await this.mainApiPull.syncItemsFromBookkeeping(
+        connection.mainApiApiKey,
+        connectionId,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `sync-from-bookkeeping (items) failed for tenant ${complianceTenantId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
 
     const items = await this.fetchAllItems(connection.mainApiApiKey);
-    return this.pullClassifications(merchantId, items);
+    return this.pullClassifications(merchantId, items, SOURCE_FILTER[pullSource]);
   }
 
   /** Loops GET /items across every page — a merchant's full catalog, not just the first page's worth. Capped at 50 pages (5,000 items at the default page size) as a sanity limit against a runaway loop. */
@@ -865,7 +888,11 @@ export class DashboardMappingApplicationService {
    * relation to QuickBooks) would mean a classification assigned here could
    * never be found at registration time for any item without a SKU.
    */
-  private async pullClassifications(merchantId: string, items: MainApiItem[]) {
+  private async pullClassifications(
+    merchantId: string,
+    items: MainApiItem[],
+    defaultSourceSystem: SourceSystem,
+  ) {
     const results: Array<{
       externalId: string;
       externalValue: string;
@@ -913,7 +940,16 @@ export class DashboardMappingApplicationService {
         matchCache,
       );
 
-      const row = await this.upsertClassificationPlaceholder(merchantId, {
+      // fetchAllItems() pulls every connected ERP's items unfiltered (see its
+      // doc comment) -- a company with both QuickBooks and Odoo connected
+      // would otherwise have every item mislabeled with whichever single
+      // ERP triggered this pull. item.bookType is the accurate per-item
+      // source; defaultSourceSystem only covers the (should-be-rare) case
+      // of a legacy row with no bookType recorded.
+      const itemSourceSystem =
+        (item.bookType && SOURCE_FILTER[item.bookType]) || defaultSourceSystem;
+
+      const row = await this.upsertClassificationPlaceholder(merchantId, itemSourceSystem, {
         externalValue: item.name,
         placeholder,
         resolvedInternalTaxCategory,
@@ -989,6 +1025,7 @@ export class DashboardMappingApplicationService {
    */
   private async upsertClassificationPlaceholder(
     merchantId: string,
+    sourceSystem: SourceSystem,
     params: {
       externalValue: string;
       placeholder: { matchType: ClassificationMatchType; matchValue: string };
@@ -1003,7 +1040,7 @@ export class DashboardMappingApplicationService {
     const existing = await this.clsRepo.findOne({
       where: {
         merchantId,
-        sourceSystem: SourceSystem.QUICKBOOKS,
+        sourceSystem,
         matchType: placeholder.matchType,
         matchValue: placeholder.matchValue,
       },
@@ -1030,7 +1067,7 @@ export class DashboardMappingApplicationService {
         priority: 100,
         source: 'merchant_override',
         active: false,
-        sourceSystem: SourceSystem.QUICKBOOKS,
+        sourceSystem,
         status: MappingStatus.NEEDS_REVIEW,
         confidenceScore: null,
         externalValue,

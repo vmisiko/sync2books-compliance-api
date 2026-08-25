@@ -21,7 +21,7 @@ import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/g
 import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guards/active-tenant.guard';
 import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { CreateItemDto } from './dto/create-item.dto';
-import { OverrideItemClassificationDto } from './dto/override-item-classification.dto';
+import { UpdateItemDto } from './dto/update-item.dto';
 import { SyncItemsDto } from './dto/sync-items.dto';
 
 @Controller('dashboard-api/items')
@@ -80,22 +80,29 @@ export class DashboardItemsController {
 
   @Patch(':id/classification')
   @ApiOperation({
-    summary: 'Manually override the OSCU classification for an item',
+    summary:
+      'Update a catalog item\'s fields -- classification/unit codes for any item (e.g. correcting a code KRA rejected as invalid), or the full field set for a manually-created item that is not yet REGISTERED',
   })
   @ApiResponse({
     status: 200,
-    description: 'Item re-registered with the new classification',
+    description: 'Item updated',
   })
-  async overrideClassification(
+  async update(
     @ActiveTenant() tenantId: string,
     @Param('id') id: string,
-    @Body() body: OverrideItemClassificationDto,
+    @Body() body: UpdateItemDto,
   ) {
-    const item = await this.items.overrideClassification(
-      tenantId,
-      id,
-      body.classificationCode,
-    );
-    return { success: true, message: 'Classification updated', data: { item } };
+    const item = await this.items.updateItem(tenantId, id, {
+      name: body.name,
+      sku: body.sku,
+      classificationCode: body.classificationCode,
+      unitCode: body.unitCode,
+      packagingUnitCode: body.packagingUnitCode,
+      unitPrice: body.unitPrice,
+      originCountry: body.originCountry,
+      taxTyCd: body.taxTyCd,
+      productTypeCode: body.productTypeCode,
+    });
+    return { success: true, message: 'Item updated', data: { item } };
   }
 }

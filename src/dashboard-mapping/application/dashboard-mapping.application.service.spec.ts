@@ -43,7 +43,25 @@ function fakeOrg(): Pick<
 
 function fakeConnections(
   quickbooksConnectionId: string | null,
+  odooConnectionId: string | null = null,
 ): Pick<MainApiConnectionApplicationService, 'ensureCompany'> {
+  const integrations: Record<string, unknown> = {};
+  if (quickbooksConnectionId) {
+    integrations.quickbooks = {
+      connectionId: quickbooksConnectionId,
+      status: 'connected',
+      reason: null,
+      updatedAt: new Date(),
+    };
+  }
+  if (odooConnectionId) {
+    integrations.odoo = {
+      connectionId: odooConnectionId,
+      status: 'connected',
+      reason: null,
+      updatedAt: new Date(),
+    };
+  }
   return {
     ensureCompany: () =>
       Promise.resolve({
@@ -52,16 +70,7 @@ function fakeConnections(
         mainApiApplicationId: 'app-1',
         mainApiApiKey: 'key-1',
         mainApiCompanyId: 'company-1',
-        integrations: quickbooksConnectionId
-          ? {
-              quickbooks: {
-                connectionId: quickbooksConnectionId,
-                status: 'connected',
-                reason: null,
-                updatedAt: new Date(),
-              },
-            }
-          : {},
+        integrations,
         webhookEndpointId: null,
         webhookSecret: null,
         lastWebhookEventId: null,
@@ -78,7 +87,7 @@ function fakeMainApiPull(
   paymentMethods: MainApiPaymentMethodListResponse['paymentMethods'] = [],
 ): Pick<
   MainApiPullClient,
-  'getTaxRates' | 'getTaxCodes' | 'getItems' | 'getPaymentMethods'
+  'getTaxRates' | 'getTaxCodes' | 'getItems' | 'getPaymentMethods' | 'syncItemsFromBookkeeping'
 > {
   return {
     getTaxRates: () =>
@@ -108,6 +117,7 @@ function fakeMainApiPull(
         totalPages: 1,
       }),
     getPaymentMethods: () => Promise.resolve({ paymentMethods }),
+    syncItemsFromBookkeeping: () => Promise.resolve(undefined),
   };
 }
 
@@ -123,7 +133,7 @@ describe('DashboardMappingApplicationService', () => {
     connections: Pick<MainApiConnectionApplicationService, 'ensureCompany'>,
     mainApiPull: Pick<
       MainApiPullClient,
-      'getTaxRates' | 'getTaxCodes' | 'getItems' | 'getPaymentMethods'
+      'getTaxRates' | 'getTaxCodes' | 'getItems' | 'getPaymentMethods' | 'syncItemsFromBookkeeping'
     >,
   ): Promise<DashboardMappingApplicationService> {
     module = await Test.createTestingModule({
@@ -485,7 +495,7 @@ describe('DashboardMappingApplicationService', () => {
       ];
       const mainApiPull: Pick<
         MainApiPullClient,
-        'getTaxRates' | 'getTaxCodes' | 'getItems' | 'getPaymentMethods'
+        'getTaxRates' | 'getTaxCodes' | 'getItems' | 'getPaymentMethods' | 'syncItemsFromBookkeeping'
       > = {
         getTaxRates: () =>
           Promise.resolve({
@@ -524,6 +534,7 @@ describe('DashboardMappingApplicationService', () => {
             totalPages: 1,
           }),
         getPaymentMethods: () => Promise.resolve({ paymentMethods: [] }),
+        syncItemsFromBookkeeping: () => Promise.resolve(undefined),
       };
 
       const service = await buildService(
@@ -690,6 +701,61 @@ describe('DashboardMappingApplicationService', () => {
       await expect(service.pullAll(TENANT_ID)).rejects.toThrow(
         /No connected QuickBooks connection/,
       );
+    });
+
+    it('pulls Odoo-sourced items (source=odoo) and tags the placeholder row ODOO, not QuickBooks', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null, 'odoo-conn-1'),
+        fakeMainApiPull(
+          [],
+          [],
+          [
+            item({
+              id: 'i1',
+              itemCode: 'ODOO_1',
+              bookId: '1',
+              bookType: 'odoo',
+              name: 'Bacon Burger',
+              standardized: { itemType: 'NonInventory', status: 'Active', sourceSystem: SourceSystem.ODOO },
+            }),
+          ],
+        ),
+      );
+
+      const result = await service.pullAll(TENANT_ID, 'odoo');
+
+      expect(result.classifications.attempted).toBe(1);
+      const row = await clsRepo.findOne({
+        where: { merchantId: MERCHANT_ID, matchValue: '1' },
+      });
+      expect(row?.sourceSystem).toBe(SourceSystem.ODOO);
+    });
+
+    it('tags each classification row by its own item.bookType, not by the pull-source connection that triggered the pull', async () => {
+      // fetchAllItems() pulls every connected ERP's items unfiltered -- a
+      // company with both QuickBooks and Odoo connected must not have every
+      // item mislabeled with whichever single ERP's connectionId happened to
+      // resolve this pull.
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections('qb-conn-1', 'odoo-conn-1'),
+        fakeMainApiPull(
+          [],
+          [],
+          [
+            item({ id: 'i1', itemCode: 'QB_1', bookId: 'qb-1', bookType: 'quickbooks', name: 'QB Item' }),
+            item({ id: 'i2', itemCode: 'ODOO_2', bookId: '2', bookType: 'odoo', name: 'Odoo Item' }),
+          ],
+        ),
+      );
+
+      await service.pullAll(TENANT_ID, 'quickbooks');
+
+      const qbRow = await clsRepo.findOne({ where: { matchValue: 'qb-1' } });
+      const odooRow = await clsRepo.findOne({ where: { matchValue: '2' } });
+      expect(qbRow?.sourceSystem).toBe(SourceSystem.QUICKBOOKS);
+      expect(odooRow?.sourceSystem).toBe(SourceSystem.ODOO);
     });
 
     it('list() surfaces resolvedTaxTyCd for a classification row when its tax category has an active mapping, and null when it does not', async () => {
@@ -1396,6 +1462,53 @@ describe('DashboardMappingApplicationService', () => {
       });
       expect(rows).toHaveLength(1);
       expect(rows[0].active).toBe(true);
+    });
+
+    it('pulls an Odoo connection (pos.payment.method) and tags the persisted row ODOO, not QuickBooks', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null, 'odoo-conn-1'),
+        fakeMainApiPull(
+          [],
+          [],
+          [],
+          [{ id: '1', name: 'Cash', type: 'cash', active: true }],
+        ),
+      );
+
+      const result = await service.pullPaymentMethods(TENANT_ID, 'odoo');
+
+      expect(result.attempted).toBe(1);
+      const mapped = result.results[0];
+      expect(mapped.internalPaymentMethod).toBe('CASH');
+
+      const row = await paymentRepo.findOne({ where: { id: mapped.mappingId! } });
+      expect(row?.sourceSystem).toBe(SourceSystem.ODOO);
+    });
+
+    it('throws when the tenant has no connected Odoo connection', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null, null),
+        fakeMainApiPull([]),
+      );
+      await expect(
+        service.pullPaymentMethods(TENANT_ID, 'odoo'),
+      ).rejects.toThrow(/No connected Odoo connection/);
+    });
+
+    it('skips a Dynamics pull with an explanatory message instead of throwing', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null, null),
+        fakeMainApiPull([]),
+      );
+      const result = await service.pullPaymentMethods(
+        TENANT_ID,
+        'microsoft-dynamics-365-business-central',
+      );
+      expect(result.attempted).toBe(0);
+      expect(result.skipped).toMatch(/only available for QuickBooks and Odoo/);
     });
   });
 

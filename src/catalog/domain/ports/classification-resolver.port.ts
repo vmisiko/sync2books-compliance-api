@@ -24,6 +24,15 @@ export interface IClassificationResolver {
     sku?: string;
     externalId?: string;
     /**
+     * The ERP this item was pulled from (e.g. 'QUICKBOOKS', 'ODOO') -- scopes
+     * the externalId/SKU/name classification lookups so two ERPs that happen
+     * to assign the same small numeric id (or the same free-text SKU) to
+     * unrelated products don't silently inherit each other's classification.
+     * Null/omitted (a manually-created item) matches only rows with no
+     * sourceSystem recorded.
+     */
+    sourceSystem?: string | null;
+    /**
      * classificationCode/unitCode/packagingUnitCode are resolved per item
      * (from that item's own classification_mappings row) by the caller and
      * passed in here — there's no category table backing them, so the

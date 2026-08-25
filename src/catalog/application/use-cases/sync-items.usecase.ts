@@ -244,8 +244,16 @@ export async function syncItemsToEtims(
         deviceId: connection.deviceId,
       });
 
-      const resultCd = res.rawResponse?.resultCd ?? null;
-      const resultMsg = res.rawResponse?.resultMsg ?? null;
+      // The HTTP adapter's rawResponse fields go through `safeString()` on its
+      // side, which returns '' (not undefined) when the raw KRA/Apigee body
+      // has no resultCd/resultMsg key at all -- e.g. a gateway-level
+      // rejection that never reached KRA's own envelope. A bare `?? null`
+      // here doesn't catch that ('' is not nullish), so a genuinely blank
+      // resultMsg would silently block the `res.error` fallback below from
+      // ever running -- normalize through the same helper used for itemCd
+      // so "blank" and "absent" are treated identically everywhere.
+      const resultCd = normalizeNonEmptyString(res.rawResponse?.resultCd);
+      const resultMsg = normalizeNonEmptyString(res.rawResponse?.resultMsg);
 
       if (res.success) {
         const updated: CatalogItem = {

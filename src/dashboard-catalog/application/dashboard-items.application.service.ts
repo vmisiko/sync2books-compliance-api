@@ -150,21 +150,6 @@ export class DashboardItemsApplicationService {
       for (const mainApiItem of response.data) {
         try {
           const externalId = mainApiItem.bookId ?? mainApiItem.itemCode;
-          // The Mapping Center's Classification tab is where a human
-          // resolves this item's itemClsCd/qtyUnitCd/pkgUnitCd (each
-          // independently — see ClassificationMappingOrmEntity's doc
-          // comment). Only an active (fully approved) row counts here; a
-          // still-NEEDS_REVIEW row must not silently leak a partial or
-          // auto-matched-but-unconfirmed value into an actual KRA
-          // registration call.
-          const clsRow = await this.clsRepo.findOne({
-            where: {
-              merchantId,
-              matchType: 'EXTERNAL_ID',
-              matchValue: externalId,
-              active: true,
-            },
-          });
           // Main API resolves itemType (ERP-shape normalization) itself, but
           // not tax category — that's KRA-specific classification, still
           // this repo's job. A null `standardized` means this item's source
@@ -176,6 +161,32 @@ export class DashboardItemsApplicationService {
               `Item ${mainApiItem.id} has no standardized itemType — its source ERP is not yet supported by main API's standardization layer`,
             );
           }
+          const sourceSystem =
+            mainApiItem.standardized?.sourceSystem ??
+            mainApiItem.bookType?.toUpperCase() ??
+            null;
+          // The Mapping Center's Classification tab is where a human
+          // resolves this item's itemClsCd/qtyUnitCd/pkgUnitCd (each
+          // independently — see ClassificationMappingOrmEntity's doc
+          // comment). Only an active (fully approved) row counts here; a
+          // still-NEEDS_REVIEW row must not silently leak a partial or
+          // auto-matched-but-unconfirmed value into an actual KRA
+          // registration call. Scoped by sourceSystem too -- otherwise two
+          // ERPs sharing the same small numeric externalId for this merchant
+          // would silently resolve to each other's classification (this bit
+          // an Odoo pull that collided with pre-existing QuickBooks rows
+          // sharing the same bookId — fixed here, not just in the resolver
+          // registerItem() falls through to, since this lookup bypasses that
+          // resolver entirely).
+          const clsRow = await this.clsRepo.findOne({
+            where: {
+              merchantId,
+              matchType: 'EXTERNAL_ID',
+              matchValue: externalId,
+              sourceSystem,
+              active: true,
+            },
+          });
           const taxCategory =
             this.suggestions.suggestTaxCodeMapping(mainApiItem.defaultTaxCodeRef?.name ?? '')
               ?.internalTaxCategory ?? TaxCategory.OTHER;
@@ -191,10 +202,7 @@ export class DashboardItemsApplicationService {
               qtyUnitCdOverride: clsRow?.qtyUnitCd ?? undefined,
               packagingUnitCdOverride: clsRow?.pkgUnitCd ?? undefined,
             }),
-            sourceSystem:
-              mainApiItem.standardized?.sourceSystem ??
-              mainApiItem.bookType?.toUpperCase() ??
-              null,
+            sourceSystem,
           };
           const result = await this.catalog.registerItem(input);
           results.push({
@@ -298,25 +306,113 @@ export class DashboardItemsApplicationService {
     });
   }
 
-  async overrideClassification(
+  /**
+   * Updates a catalog item's fields -- e.g. correcting a `packagingUnitCode`
+   * KRA rejected as invalid (see the error text on the item: "...can only be
+   * among the following list: [...]"), or any other field the Add Item form
+   * collects. Every field is optional; at least one must be supplied.
+   *
+   * Branches on whether the item came from an ERP pull (`externalId` set) or
+   * was created manually:
+   * - ERP-sourced: re-runs through `registerItem`'s upsert (same path a pull
+   *   would take), so a future pull still finds and updates the same row.
+   *   Limited to classification/unit codes -- name/type/tax for an
+   *   ERP-sourced item should be fixed at the source, since the next pull
+   *   would just overwrite anything else edited here. Must pass
+   *   `sourceSystem` through -- `registerItem`'s existing-item lookup is
+   *   scoped by it (two ERPs can share the same externalId for this
+   *   merchant), so omitting it would silently create a duplicate row
+   *   instead of updating the intended one.
+   * - Manual entry (no externalId): the full field set is editable, but only
+   *   before the item is REGISTERED -- see updateManualItem's doc comment.
+   *   `registerItem`'s upsert has nothing to match a manual item against
+   *   anyway (no externalId), so it's edited by id instead.
+   */
+  async updateItem(
     complianceTenantId: string,
     itemId: string,
-    classificationCode: string,
+    overrides: {
+      name?: string;
+      sku?: string | null;
+      classificationCode?: string;
+      unitCode?: string;
+      packagingUnitCode?: string;
+      unitPrice?: number | null;
+      originCountry?: string | null;
+      taxTyCd?: string;
+      productTypeCode?: string;
+    },
   ) {
+    if (
+      overrides.name === undefined &&
+      overrides.sku === undefined &&
+      overrides.classificationCode === undefined &&
+      overrides.unitCode === undefined &&
+      overrides.packagingUnitCode === undefined &&
+      overrides.unitPrice === undefined &&
+      overrides.originCountry === undefined &&
+      overrides.taxTyCd === undefined &&
+      overrides.productTypeCode === undefined
+    ) {
+      throw new BadRequestException('Provide at least one field to update');
+    }
+    if (
+      overrides.productTypeCode !== undefined &&
+      !['1', '2', '3'].includes(overrides.productTypeCode)
+    ) {
+      throw new BadRequestException(
+        "productTypeCode must be '1' (Raw Material), '2' (Finished Product) or '3' (Service)",
+      );
+    }
+
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const existing = await this.catalog.getItemById(itemId);
     if (!existing || existing.merchantId !== merchantId) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
 
+    if (!existing.externalId) {
+      const itemType =
+        overrides.productTypeCode !== undefined
+          ? overrides.productTypeCode === '3'
+            ? ItemType.SERVICE
+            : ItemType.GOODS
+          : undefined;
+      const taxCategory =
+        overrides.taxTyCd !== undefined
+          ? TAX_CATEGORY_BY_CODE[overrides.taxTyCd] ?? TaxCategory.OTHER
+          : undefined;
+
+      return this.catalog.updateManualItem({
+        itemId,
+        merchantId,
+        name: overrides.name,
+        sku: overrides.sku,
+        classificationCode: overrides.classificationCode,
+        unitCode: overrides.unitCode,
+        packagingUnitCode: overrides.packagingUnitCode,
+        unitPrice: overrides.unitPrice,
+        originCountry: overrides.originCountry,
+        itemType,
+        taxCategory,
+        taxTyCd: overrides.taxTyCd,
+        productTypeCode: overrides.productTypeCode,
+      });
+    }
+
     const result = await this.catalog.registerItem({
       merchantId: existing.merchantId,
       externalId: existing.externalId,
+      sourceSystem: existing.sourceSystem,
       name: existing.name,
       sku: existing.sku,
       itemType: existing.itemType,
       taxCategory: existing.taxCategory,
-      classificationCode,
+      classificationCode: overrides.classificationCode ?? existing.classificationCode,
+      unitCode: overrides.unitCode ?? existing.unitCode,
+      packagingUnitCode: overrides.packagingUnitCode ?? existing.packagingUnitCode,
+      unitPrice: existing.unitPrice,
+      originCountry: existing.originCountry,
     });
     return result.item;
   }

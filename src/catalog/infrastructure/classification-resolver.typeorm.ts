@@ -7,6 +7,7 @@ import type {
 } from '../domain/ports/classification-resolver.port';
 import { TaxMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
 import { ClassificationMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
+import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
 
 @Injectable()
 export class ClassificationResolverTypeOrm implements IClassificationResolver {
@@ -33,6 +34,7 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
     itemName?: string;
     sku?: string;
     externalId?: string;
+    sourceSystem?: string | null;
     classificationCode?: string;
     unitCode?: string;
     packagingUnitCode?: string;
@@ -62,7 +64,7 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
 
     const classificationCode =
       params.classificationCode ??
-      (await this.resolveItemClassification(merchantId, params));
+      (await this.resolveItemClassification(merchantId, params, params.sourceSystem ?? null));
 
     const source: ClassificationResolution['source'] =
       params.classificationCode ||
@@ -131,8 +133,19 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
       sku?: string;
       externalId?: string;
     },
+    sourceSystem: string | null,
   ): Promise<string> {
     const type = params.itemType ?? null;
+    // Scoped by sourceSystem -- two ERPs routinely assign the same small
+    // numeric externalId (or even the same SKU) to unrelated products for
+    // the same merchant. Without this, an Odoo item could silently inherit
+    // a QuickBooks item's classification (or vice versa) purely by id
+    // coincidence. `sourceSystem: null` (a manually-created item, or an ERP
+    // main-api doesn't standardize yet) only matches rows with no
+    // sourceSystem recorded, not every other ERP's rows either.
+    const sourceSystemFilter = sourceSystem
+      ? (sourceSystem as SourceSystem)
+      : IsNull();
 
     if (params.externalId) {
       const m = await this.clsRepo.findOne({
@@ -141,6 +154,7 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
           matchType: 'EXTERNAL_ID',
           matchValue: params.externalId,
           itemType: type,
+          sourceSystem: sourceSystemFilter,
           active: true,
         },
         order: { priority: 'ASC', updatedAt: 'DESC' },
@@ -158,6 +172,7 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
           matchType: 'SKU',
           matchValue: params.sku,
           itemType: type,
+          sourceSystem: sourceSystemFilter,
           active: true,
         },
         order: { priority: 'ASC', updatedAt: 'DESC' },
@@ -172,6 +187,7 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
           matchType: 'NAME_CONTAINS',
           matchValue: ILike(`%${params.itemName}%`),
           itemType: type,
+          sourceSystem: sourceSystemFilter,
           active: true,
         },
         order: { priority: 'ASC', updatedAt: 'DESC' },

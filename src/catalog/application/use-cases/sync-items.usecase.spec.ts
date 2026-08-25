@@ -189,6 +189,53 @@ describe('syncItemsToEtims', () => {
     expect(savedItem.registrationStatus).toBe('FAILED');
   });
 
+  it('falls back to res.error when rawResponse carries blank resultCd/resultMsg (e.g. a gateway-level rejection with no KRA envelope)', async () => {
+    const item = makeItem();
+    const itemRepo = {
+      findByMerchant: jest.fn().mockResolvedValue([item]),
+      save: jest.fn().mockImplementation((i) => Promise.resolve(i)),
+    };
+    const connectionRepo = {
+      findByMerchantAndBranch: jest.fn().mockResolvedValue({
+        kraPin: 'P000000000A',
+        kraBhfId: '00',
+        cmcKey: 'cmc-key',
+        deviceId: 'device-1',
+        environment: 'SANDBOX',
+      }),
+    };
+    const etimsAdapter = {
+      // Mirrors etims-adapter.http.ts's `!ok` branch: rawResponse is always
+      // constructed (via safeString()), so resultCd/resultMsg come back as
+      // '' rather than undefined when the raw body has no KRA envelope --
+      // e.g. an Apigee/HTTP-level rejection that never reached KRA itself.
+      saveItem: jest.fn().mockResolvedValue({
+        success: false,
+        error: 'Gateway timeout (504)',
+        rawResponse: { resultCd: '', resultMsg: '' },
+      }),
+    };
+    const syncStateRepo = makeSyncStateRepo();
+
+    await syncItemsToEtims(
+      { merchantId: 'merchant-1', branchId: 'branch-1' },
+      {
+        itemRepo: itemRepo as any,
+        connectionRepo: connectionRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+      },
+    );
+
+    const savedItem = itemRepo.save.mock.calls[0][0];
+    // A blank resultCd/resultMsg must not persist as '' -- that renders as
+    // "no error" in the item detail drawer (lastSyncResultMsg is falsy),
+    // silently hiding the one piece of information a merchant/support
+    // agent needs. It must fall back to res.error instead.
+    expect(savedItem.lastSyncResultCd).toBeNull();
+    expect(savedItem.lastSyncResultMsg).toBe('Gateway timeout (504)');
+  });
+
   it('keeps the itemCd and does not release the sequence on a retryable (network) failure', async () => {
     const item = makeItem();
     const itemRepo = {

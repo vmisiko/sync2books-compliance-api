@@ -76,6 +76,12 @@ export function mapMainApiItemToRegisterItemInput(params: {
     classificationCode: params.classificationCodeOverride,
     unitCode: params.qtyUnitCdOverride,
     packagingUnitCode: params.packagingUnitCdOverride,
-    unitPrice: item.unitPrice ?? null,
+    // Main API's Item.unitPrice is a MySQL `decimal` column -- TypeORM/mysql2
+    // serialize decimal columns as strings over the wire to avoid float
+    // precision loss, despite MainApiItem's own TS type claiming `number`.
+    // Coerced here (not left for the caller to notice) so a downstream
+    // string-vs-number comparison (e.g. registerItem's unchanged-item check)
+    // doesn't see every re-pull as "changed" purely from the type mismatch.
+    unitPrice: item.unitPrice != null ? Number(item.unitPrice) : null,
   };
 }

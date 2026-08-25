@@ -198,6 +198,7 @@ export class DashboardInventoryApplicationService {
         const catalogItem = await this.catalog.findByExternalId(
           merchantId,
           externalId,
+          sourceSystem,
         );
         if (!catalogItem || !catalogItem.isStockItem) continue;
 

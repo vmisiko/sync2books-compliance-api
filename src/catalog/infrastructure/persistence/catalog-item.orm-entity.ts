@@ -62,7 +62,12 @@ export class CatalogItemOrmEntity {
   @Column({ type: 'varchar', nullable: true })
   lastSyncResultCd!: string | null;
 
-  @Column({ type: 'varchar', nullable: true })
+  // 'text', not 'varchar' -- a real KRA/Apigee rejection or a raw network
+  // exception message can easily exceed 255 chars (confirmed live: a genuine
+  // failure here once triggered a MySQL "Data too long for column" error on
+  // this very column, which then became the *next* attempt's persisted
+  // "error", masking the actual original rejection reason entirely).
+  @Column({ type: 'text', nullable: true })
   lastSyncResultMsg!: string | null;
 
   @Column({ type: 'datetime', nullable: true })
