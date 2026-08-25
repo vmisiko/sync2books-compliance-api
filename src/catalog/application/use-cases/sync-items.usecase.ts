@@ -107,6 +107,43 @@ async function allocateItemCdSequence(
   return next;
 }
 
+/**
+ * Mirror of releaseInvoiceSequence (submit-document.usecase.ts): a permanent
+ * (non-retryable) saveItem rejection means KRA never accepted this itemCd, so
+ * give the sequence value back rather than leaving the counter permanently
+ * ahead of what KRA has actually seen. Only rolls back if no one else has
+ * advanced past this value in the meantime.
+ *
+ * Retryable failures (network errors, OSCU 9xx codes) deliberately do NOT call
+ * this -- allocateItemCdSequence's `if (!itemCd)` guard means a retry reuses
+ * the same itemCd, which is what KRA expects next regardless. Releasing here
+ * only applies once we're confident this exact itemCd will never be
+ * resubmitted -- see the etimsItemCode reset next to this function's call site.
+ */
+async function releaseItemCdSequence(
+  syncStateRepo: Repository<OscuSyncStateOrmEntity>,
+  kraPin: string,
+  environment: string,
+  seq: number,
+): Promise<void> {
+  const syncKey = `item_cd_seq:${kraPin}:${environment}`;
+  const existing = await syncStateRepo.findOne({ where: { syncKey } });
+  const current = existing?.lastReqDt ? parseInt(existing.lastReqDt, 10) : 0;
+  if (current === seq) {
+    await syncStateRepo.upsert({ syncKey, lastReqDt: String(seq - 1) }, [
+      'syncKey',
+    ]);
+  }
+}
+
+/** itemCd's trailing 7 chars are always the sequence, by construction (see
+ * generateEtimsItemCd) -- pull it back out to release it. */
+function parseItemCdSeq(itemCd: string): number | null {
+  const tail = itemCd.slice(-7);
+  const seq = parseInt(tail, 10);
+  return Number.isNaN(seq) ? null : seq;
+}
+
 function normalizeNonEmptyString(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const s = value.trim();
@@ -233,13 +270,39 @@ export async function syncItemsToEtims(
         continue;
       }
 
+      const retryable = (res.error ?? '').includes('retryable');
+      if (!retryable) {
+        const seq = parseItemCdSeq(itemCd);
+        if (seq != null) {
+          await releaseItemCdSequence(
+            deps.syncStateRepo,
+            connection.kraPin,
+            connection.environment,
+            seq,
+          );
+        }
+      }
+
       const updated: CatalogItem = {
         ...item,
-        etimsItemCode: itemCd,
+        // Retryable failures keep their itemCd so a retry reuses it (see
+        // releaseItemCdSequence's comment). A permanent rejection releases the
+        // sequence value above, so the item must be cleared back to null too --
+        // otherwise a later retry would resubmit a number that may since have
+        // been handed to a different item.
+        etimsItemCode: retryable ? itemCd : null,
         registrationStatus: 'FAILED',
         lastSyncAttemptAt: now,
         lastSyncResultCd: resultCd,
-        lastSyncResultMsg: resultMsg,
+        // A failure that never got a KRA envelope back (network error, DNS
+        // failure, timeout -- res.rawResponse is undefined) has no
+        // resultCd/resultMsg to persist, but res.error still carries the
+        // real reason (e.g. "retryable: fetch failed"). Without this
+        // fallback, the item detail drawer's "Error from KRA / backend"
+        // section (which only renders when lastSyncResultMsg is set) stayed
+        // silent for exactly the failures a merchant/support agent most
+        // needs to see -- the ones that never reached KRA at all.
+        lastSyncResultMsg: resultMsg ?? res.error ?? null,
         updatedAt: now,
       };
       await deps.itemRepo.save(updated);

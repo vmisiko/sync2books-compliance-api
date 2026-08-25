@@ -35,6 +35,24 @@ function makeItem(overrides: Partial<CatalogItem> = {}): CatalogItem {
   };
 }
 
+/** Stateful in-memory stand-in for the oscu_sync_state repo, so allocate/release
+ * calls actually observe each other's effect on the counter within a test. */
+function makeSyncStateRepo() {
+  const store = new Map<string, string>();
+  return {
+    findOne: jest.fn().mockImplementation(({ where: { syncKey } }) =>
+      Promise.resolve(
+        store.has(syncKey) ? { syncKey, lastReqDt: store.get(syncKey) } : null,
+      ),
+    ),
+    upsert: jest.fn().mockImplementation(({ syncKey, lastReqDt }) => {
+      store.set(syncKey, lastReqDt);
+      return Promise.resolve(undefined);
+    }),
+    _store: store,
+  };
+}
+
 describe('syncItemsToEtims', () => {
   it("sends the item's own unitPrice/originCountry as dftPrc/orgnNatCd instead of hardcoded 0/KE", async () => {
     const item = makeItem({ unitPrice: 1999.5, originCountry: 'CN' });
@@ -125,5 +143,100 @@ describe('syncItemsToEtims', () => {
 
     expect(capturedRequest.dftPrc).toBe(0);
     expect(capturedRequest.orgnNatCd).toBe('KE');
+  });
+
+  it('releases the itemCd sequence and clears etimsItemCode on a permanent (non-retryable) rejection', async () => {
+    const item = makeItem();
+    const itemRepo = {
+      findByMerchant: jest.fn().mockResolvedValue([item]),
+      save: jest.fn().mockImplementation((i) => Promise.resolve(i)),
+    };
+    const connectionRepo = {
+      findByMerchantAndBranch: jest.fn().mockResolvedValue({
+        kraPin: 'P000000000A',
+        kraBhfId: '00',
+        cmcKey: 'cmc-key',
+        deviceId: 'device-1',
+        environment: 'SANDBOX',
+      }),
+    };
+    const etimsAdapter = {
+      saveItem: jest.fn().mockResolvedValue({
+        success: false,
+        error: 'OSCU 800 Invalid itemClsCd',
+        rawResponse: { resultCd: '800', resultMsg: 'Invalid itemClsCd' },
+      }),
+    };
+    const syncStateRepo = makeSyncStateRepo();
+
+    const result = await syncItemsToEtims(
+      { merchantId: 'merchant-1', branchId: 'branch-1' },
+      {
+        itemRepo: itemRepo as any,
+        connectionRepo: connectionRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+      },
+    );
+
+    expect(result.failed).toBe(1);
+    // Sequence was allocated as 1, then released back to 0 by the rejection.
+    expect(syncStateRepo._store.get('item_cd_seq:P000000000A:SANDBOX')).toBe(
+      '0',
+    );
+    const savedItem = itemRepo.save.mock.calls[0][0];
+    expect(savedItem.etimsItemCode).toBeNull();
+    expect(savedItem.registrationStatus).toBe('FAILED');
+  });
+
+  it('keeps the itemCd and does not release the sequence on a retryable (network) failure', async () => {
+    const item = makeItem();
+    const itemRepo = {
+      findByMerchant: jest.fn().mockResolvedValue([item]),
+      save: jest.fn().mockImplementation((i) => Promise.resolve(i)),
+    };
+    const connectionRepo = {
+      findByMerchantAndBranch: jest.fn().mockResolvedValue({
+        kraPin: 'P000000000A',
+        kraBhfId: '00',
+        cmcKey: 'cmc-key',
+        deviceId: 'device-1',
+        environment: 'SANDBOX',
+      }),
+    };
+    const etimsAdapter = {
+      saveItem: jest.fn().mockResolvedValue({
+        success: false,
+        error: 'retryable: fetch failed',
+      }),
+    };
+    const syncStateRepo = makeSyncStateRepo();
+
+    const result = await syncItemsToEtims(
+      { merchantId: 'merchant-1', branchId: 'branch-1' },
+      {
+        itemRepo: itemRepo as any,
+        connectionRepo: connectionRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+      },
+    );
+
+    expect(result.failed).toBe(1);
+    // Sequence stays at 1 -- a retry of this same item must reuse it.
+    expect(syncStateRepo._store.get('item_cd_seq:P000000000A:SANDBOX')).toBe(
+      '1',
+    );
+    const savedItem = itemRepo.save.mock.calls[0][0];
+    expect(savedItem.etimsItemCode).toBe('KE2NTNO0000001');
+    expect(savedItem.registrationStatus).toBe('FAILED');
+    // res.rawResponse is undefined for a network-level failure -- there's no
+    // KRA resultCd/resultMsg to persist, but the real reason (res.error)
+    // must still be saved, or the item detail drawer's "Error from KRA /
+    // backend" section (gated on lastSyncResultMsg being set) stays silent
+    // forever for exactly the failures a merchant/support agent most needs
+    // to see.
+    expect(savedItem.lastSyncResultCd).toBeNull();
+    expect(savedItem.lastSyncResultMsg).toBe('retryable: fetch failed');
   });
 });

@@ -97,6 +97,32 @@ export class InventoryService {
     return next;
   }
 
+  /**
+   * Unlike itemCd/invcNo, a sarNo is never persisted or reused on retry --
+   * syncStockMovementToEtims allocates a fresh one on every call, and a
+   * failed movement is only logged, not retried with the same value. So
+   * there's no "keep it for a retry" case to protect: release on every
+   * insertStockIO failure, retryable or not, or the counter permanently
+   * drifts ahead of what KRA actually accepted. Only rolls back if no one
+   * else has advanced past this value in the meantime.
+   */
+  private async releaseSarNo(
+    kraPin: string,
+    environment: string,
+    sarNo: number,
+  ): Promise<void> {
+    if (!this.syncStateRepo) return;
+    const syncKey = `stock_sar_no:${kraPin}:${environment}`;
+    const existing = await this.syncStateRepo.findOne({ where: { syncKey } });
+    const current = existing?.lastReqDt ? parseInt(existing.lastReqDt, 10) : 0;
+    if (current === sarNo) {
+      await this.syncStateRepo.upsert(
+        { syncKey, lastReqDt: String(sarNo - 1) },
+        ['syncKey'],
+      );
+    }
+  }
+
   private mapSarTyCd(movement: StockMovement): string {
     // OSCU code classification 12: Stock In/Out (OSCU v2.0 spec §4.15)
     // Incoming: 01(import) 02(purchase) 03(return) 04(stock movement) 05(adjustment) 06(processing)
@@ -244,6 +270,11 @@ export class InventoryService {
           `eTIMS insertStockIO rejected: itemCd=${itemCd} sarNo=${sarNo} ` +
             `movement=${movement.id} error=${result.error}`,
         );
+        await this.releaseSarNo(
+          connection.kraPin,
+          connection.environment,
+          sarNo,
+        );
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -251,6 +282,7 @@ export class InventoryService {
         `eTIMS insertStockIO failed: itemCd=${itemCd} sarNo=${sarNo} ` +
           `movement=${movement.id} error=${msg}`,
       );
+      await this.releaseSarNo(connection.kraPin, connection.environment, sarNo);
     }
   }
 
