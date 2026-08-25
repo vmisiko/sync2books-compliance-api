@@ -39,12 +39,19 @@ import { Logger } from '@nestjs/common';
  * /etims-api/sales#sign-credit-note, /etims-api/item#create-an-item-product).
  */
 const CONFIRMED_PATHS = {
+  // Trailing slashes are required, not stylistic — confirmed live 2026-08-23:
+  // the backend is Django/DRF with APPEND_SLASH, so a request without one gets
+  // a 301 to the slash-appended URL. `fetch` follows redirects by default, but
+  // a POST redirected through a 301 risks the body being dropped by the
+  // redirect (pre-HTTP/1.1 301 semantics) — confirmed via curl that hitting
+  // these paths without a slash returns a fast 301 rather than reaching the
+  // real handler, so this isn't optional.
   fetchOrganisationBranches:
-    '/api/branches/branches/fetch_etims_organisation_branches',
-  syncBranchToEtims: '/api/branches/branches/sync_to_etims',
-  createProduct: '/api/products/products',
-  signSalesInvoice: '/api/etims/sign_sales_invoice',
-  signSalesCreditNote: '/api/etims/sign_sales_credit_note',
+    '/api/branches/branches/fetch_etims_organisation_branches/',
+  syncBranchToEtims: '/api/branches/branches/sync_to_etims/',
+  createProduct: '/api/products/products/',
+  signSalesInvoice: '/api/etims/sign_sales_invoice/',
+  signSalesCreditNote: '/api/etims/sign_sales_credit_note/',
 } as const;
 
 export type EtimsAdapterSlade360Config = {
