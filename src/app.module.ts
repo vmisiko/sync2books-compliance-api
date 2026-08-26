@@ -14,6 +14,7 @@ import { DashboardInvoicesModule } from './dashboard-invoices/dashboard-invoices
 import { DashboardMappingModule } from './dashboard-mapping/dashboard-mapping.module';
 import { DashboardOrganizationModule } from './dashboard-organization/dashboard-organization.module';
 import { DashboardPurchasesModule } from './dashboard-purchases/dashboard-purchases.module';
+import { DashboardSuppliersModule } from './dashboard-suppliers/dashboard-suppliers.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { OscuMappingModule } from './regulatory/oscu/oscu-mapping.module';
 import { OscuOperationsModule } from './regulatory/oscu/presentation/oscu-operations.module';
@@ -43,6 +44,7 @@ import { MainApiConnectionOrmEntity } from './integration/main-api-pull/infrastr
 import { MainApiPullModule } from './integration/main-api-pull/main-api-pull.module';
 import { PlatformCorrelationModule } from './integration/platform-correlation.module';
 import { PurchaseInvoiceOrmEntity } from './dashboard-purchases/infrastructure/persistence/purchase-invoice.orm-entity';
+import { SupplierOrmEntity } from './dashboard-suppliers/infrastructure/persistence/supplier.orm-entity';
 
 @Module({
   imports: [
@@ -81,6 +83,7 @@ import { PurchaseInvoiceOrmEntity } from './dashboard-purchases/infrastructure/p
         PaymentTypeMappingOrmEntity,
         PurchaseInvoiceOrmEntity,
         StockMovementOrmEntity,
+        SupplierOrmEntity,
         TaxMappingOrmEntity,
       ],
       synchronize: true,
@@ -101,6 +104,7 @@ import { PurchaseInvoiceOrmEntity } from './dashboard-purchases/infrastructure/p
     DashboardMappingModule,
     DashboardOrganizationModule,
     DashboardPurchasesModule,
+    DashboardSuppliersModule,
     InventoryModule,
     MainApiPullModule,
     SalesModule,

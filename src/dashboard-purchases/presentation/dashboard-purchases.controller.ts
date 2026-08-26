@@ -18,7 +18,12 @@ import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/g
 import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guards/active-tenant.guard';
 import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { DashboardPurchasesApplicationService } from '../application/dashboard-purchases.application.service';
-import { PullPurchasesDto, PurchaseIdsDto } from './dto/purchase.dto';
+import {
+  CreateSupplierFromPurchaseDto,
+  LinkSupplierDto,
+  PullPurchasesDto,
+  PurchaseIdsDto,
+} from './dto/purchase.dto';
 
 @Controller('dashboard-api/purchases')
 @ApiTags('Dashboard purchases (Mode B)')
@@ -77,6 +82,52 @@ export class DashboardPurchasesController {
   async reject(@ActiveTenant() tenantId: string, @Body() body: PurchaseIdsDto) {
     const data = await this.purchases.reject(tenantId, body.ids);
     return { success: true, message: 'Invoices rejected', data };
+  }
+
+  @Post(':id/link-supplier')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Link a purchase invoice to an existing Supplier record',
+  })
+  @ApiResponse({ status: 200, description: 'Updated purchase invoice' })
+  async linkSupplier(
+    @ActiveTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() body: LinkSupplierDto,
+  ) {
+    const data = await this.purchases.linkSupplier(
+      tenantId,
+      id,
+      body.supplierId,
+    );
+    return { success: true, message: 'Supplier linked', data };
+  }
+
+  @Post(':id/create-supplier')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Create a Supplier from this purchase invoice's own name/PIN (sourceSystem: ETIMS) and link it -- also backfills every other still-unmatched purchase for this merchant sharing the same supplier PIN",
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Created/matched supplier, updated purchase invoice, and backfill count',
+  })
+  async createSupplier(
+    @ActiveTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() body: CreateSupplierFromPurchaseDto,
+  ) {
+    const data = await this.purchases.createSupplierFromPurchase(
+      tenantId,
+      id,
+      body,
+    );
+    const message = data.backfilledCount
+      ? `Supplier created — linked to ${data.backfilledCount + 1} purchases`
+      : 'Supplier created';
+    return { success: true, message, data };
   }
 
   @Post('sync-to-erp')

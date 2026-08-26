@@ -239,15 +239,19 @@ export interface MainApiTaxCodeListResponse {
 }
 
 /**
- * Minimal shapes for /suppliers and /customers — not wired into any pull
- * flow yet (see MainApiPullClient.getSuppliers/getCustomers doc comments).
- * Confirmed against nest-sync-2-books-api's own list-response DTOs:
- * src/supplier/application/dtos/supplier-list-response.dto.ts and
- * src/customer/application/dtos/customer-list-response.dto.ts.
+ * Shapes for /suppliers and /customers. MainApiSupplier is consumed by
+ * DashboardSuppliersApplicationService.pullSuppliers (see
+ * MainApiPullClient.getSuppliers's doc comment); MainApiCustomer's pull
+ * flow is the customer-side twin. Confirmed against nest-sync-2-books-api's
+ * own list-response DTOs: src/supplier/application/dtos/supplier-list-response.dto.ts
+ * and src/customer/application/dtos/customer-list-response.dto.ts.
  */
 export interface MainApiSupplier {
   id: string;
   supplierName?: string | null;
+  contactName?: string | null;
+  emailAddress?: string | null;
+  phone?: string | null;
   taxNumber?: string | null;
   bookType?: string | null;
   /** Pre-resolved provenance/address data from main API's standardization layer — null if this row's source ERP isn't supported by it yet. Optional (unlike MainApiItem's) since nothing in this repo constructs/consumes it yet — see getSuppliers' doc comment — kept `| null`-typed rather than fully required so existing fixtures/call sites aren't forced to supply it. */
@@ -399,10 +403,9 @@ export class MainApiPullClient {
   }
 
   /**
-   * GET /suppliers?connectionId=... — not consumed anywhere yet. Kept here
-   * so a future pass can resolve sales-line supplier references to a real
-   * name/TIN instead of the raw QuickBooks ref; not needed for tax/unit/
-   * classification mapping (Track B's actual scope).
+   * GET /suppliers?connectionId=... — used by
+   * DashboardSuppliersApplicationService.pullSuppliers to populate the
+   * dashboard's local supplier list from a connected ERP.
    */
   async getSuppliers(
     apiKey: string,
@@ -509,6 +512,17 @@ export class MainApiPullClient {
     return this.post(
       apiKey,
       `/customers/connection/${connectionId}/sync-from-bookkeeping`,
+    );
+  }
+
+  /** Sibling to syncCustomersFromBookkeeping -- see supplier.controller.ts's identical route on the main API. */
+  async syncSuppliersFromBookkeeping(
+    apiKey: string,
+    connectionId: string,
+  ): Promise<unknown> {
+    return this.post(
+      apiKey,
+      `/suppliers/connection/${connectionId}/sync-from-bookkeeping`,
     );
   }
 

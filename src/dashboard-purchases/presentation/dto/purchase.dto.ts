@@ -19,3 +19,21 @@ export class PurchaseIdsDto {
   @ApiProperty({ type: [String] })
   ids!: string[];
 }
+
+export class LinkSupplierDto {
+  @ApiProperty({
+    description: 'dashboard_suppliers.id to link this purchase invoice to',
+  })
+  supplierId!: string;
+}
+
+export class CreateSupplierFromPurchaseDto {
+  @ApiPropertyOptional({
+    description:
+      'Optional contact details to fill in on the new Supplier -- eTIMS purchase data only ever carries name/PIN, so these are never pre-filled from the purchase itself. Ignored if a Supplier with this PIN already exists (this call links to it instead of creating a duplicate, and never overwrites its existing contact details).',
+  })
+  phoneNumber?: string;
+
+  @ApiPropertyOptional({ description: 'See phoneNumber.' })
+  email?: string;
+}

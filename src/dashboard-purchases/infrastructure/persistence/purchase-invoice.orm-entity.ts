@@ -68,6 +68,18 @@ export class PurchaseInvoiceOrmEntity {
   @Column('varchar')
   supplierPin!: string;
 
+  /**
+   * FK (app-level, no DB constraint) to dashboard_suppliers.id, once this
+   * purchase's spplrTin has been matched -- either automatically on pull
+   * (exact-TIN match against an existing Supplier) or manually via
+   * link-supplier/create-supplier. Null means "unmatched": no Supplier
+   * record exists yet for this counterparty, so this purchase can't be
+   * synced back to an ERP as a Bill until one does.
+   */
+  @Column('varchar', { nullable: true })
+  @Index()
+  supplierId!: string | null;
+
   /** Display code for the eTIMS Receipt No column — currently the supplier's invoice number. */
   @Column('varchar')
   receiptNo!: string;

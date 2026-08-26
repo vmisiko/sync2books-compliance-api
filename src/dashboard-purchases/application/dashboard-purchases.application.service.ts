@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, type Repository } from 'typeorm';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
+import { DashboardSuppliersApplicationService } from '../../dashboard-suppliers/application/dashboard-suppliers.application.service';
 import { OscuOperationsService } from '../../regulatory/oscu/presentation/oscu-operations.service';
 import {
   PurchaseInvoiceOrmEntity,
@@ -28,6 +29,8 @@ export type PurchaseInvoiceDto = {
   total: number;
   confirmationStatus: PurchaseInvoiceOrmEntity['confirmationStatus'];
   erpSyncStatus: PurchaseInvoiceOrmEntity['erpSyncStatus'];
+  /** dashboard_suppliers.id, once matched (auto on pull, or via link-supplier/create-supplier). Null means unmatched. */
+  supplierId: string | null;
   lineItems: PurchaseLineItemJson[];
   etimsMetadata: {
     fetchedAt: string;
@@ -73,6 +76,7 @@ export class DashboardPurchasesApplicationService {
     private readonly repo: Repository<PurchaseInvoiceOrmEntity>,
     private readonly organization: ComplianceOrganizationApplicationService,
     private readonly oscuOperations: OscuOperationsService,
+    private readonly suppliers: DashboardSuppliersApplicationService,
   ) {}
 
   async pull(
@@ -172,6 +176,84 @@ export class DashboardPurchasesApplicationService {
     return this.list(complianceTenantId);
   }
 
+  /** Manually links a purchase invoice to an existing Supplier — e.g. correcting a TIN mismatch the auto-match on pull couldn't resolve. */
+  async linkSupplier(
+    complianceTenantId: string,
+    id: string,
+    supplierId: string,
+  ): Promise<PurchaseInvoiceDto> {
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+    const row = await this.repo.findOne({ where: { id, merchantId } });
+    if (!row) throw new NotFoundException(`Purchase invoice ${id} not found`);
+
+    // Throws NotFoundException itself if this supplier doesn't belong to this merchant.
+    await this.suppliers.getById(merchantId, supplierId);
+
+    row.supplierId = supplierId;
+    await this.repo.save(row);
+    return this.toDto(row);
+  }
+
+  /**
+   * Resolves an "Unmatched" purchase by creating a new Supplier from its own
+   * KRA-sourced name/PIN (sourceSystem: 'ETIMS' — it didn't come from an
+   * ERP, so it isn't tagged as one; it has no externalId/bookId, so it's a
+   * reconciliation placeholder, not something that can push a Bill to an
+   * ERP until someone connects/creates the real vendor there too). Re-checks
+   * findByTin first so two people resolving the same unmatched supplier
+   * around the same time -- or a supplier that arrived via a pull in the
+   * meantime -- never produces a duplicate. Then backfills every other
+   * still-unmatched purchase for this merchant with the same spplrTin, since
+   * they're all the same real-world counterparty.
+   */
+  async createSupplierFromPurchase(
+    complianceTenantId: string,
+    id: string,
+    overrides: { phoneNumber?: string; email?: string } = {},
+  ): Promise<{
+    purchase: PurchaseInvoiceDto;
+    supplierId: string;
+    backfilledCount: number;
+  }> {
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+    const row = await this.repo.findOne({ where: { id, merchantId } });
+    if (!row) throw new NotFoundException(`Purchase invoice ${id} not found`);
+    if (!row.supplierPin) {
+      throw new BadRequestException(
+        'This purchase invoice has no supplier PIN — nothing to create a supplier from.',
+      );
+    }
+
+    // overrides (phoneNumber/email) only apply to a genuinely new Supplier --
+    // never silently overwrite an existing match's contact details just
+    // because this dialog happened to collect different values.
+    const supplier =
+      (await this.suppliers.findByTin(merchantId, row.supplierPin)) ??
+      (await this.suppliers.create({
+        merchantId,
+        name: row.supplierName,
+        tin: row.supplierPin,
+        phoneNumber: overrides.phoneNumber,
+        email: overrides.email,
+        sourceSystem: 'ETIMS',
+      }));
+
+    row.supplierId = supplier.id;
+    await this.repo.save(row);
+
+    const others = await this.repo.find({
+      where: { merchantId, spplrTin: row.supplierPin, supplierId: IsNull() },
+    });
+    for (const other of others) other.supplierId = supplier.id;
+    if (others.length) await this.repo.save(others);
+
+    return {
+      purchase: this.toDto(row),
+      supplierId: supplier.id,
+      backfilledCount: others.length,
+    };
+  }
+
   /**
    * `sendPurchaseTransactionInfo` is a real, working OSCU write
    * (`OscuOperationsService.sendPurchaseTransaction`) — but it confirms the
@@ -236,6 +318,16 @@ export class DashboardPurchasesApplicationService {
         })
       : null;
 
+    // Auto-match by KRA PIN, but never override a supplierId that's already
+    // set -- whether it was matched on an earlier pull or set manually via
+    // link-supplier/create-supplier. A later pull only fills in a match for
+    // a row that's still unmatched; it never re-decides one that already has
+    // an answer.
+    const matchedSupplier = spplrTin
+      ? await this.suppliers.findByTin(merchantId, spplrTin)
+      : null;
+    const supplierId = existing?.supplierId ?? matchedSupplier?.id ?? null;
+
     const fields = {
       merchantId,
       branchId: branch.id,
@@ -245,6 +337,7 @@ export class DashboardPurchasesApplicationService {
       spplrInvcNo,
       supplierName: toStr(record.spplrNm) ?? 'Unknown supplier',
       supplierPin: spplrTin ?? '',
+      supplierId,
       receiptNo: spplrInvcNo ?? existing?.receiptNo ?? 'UNKNOWN',
       invoiceDate: parseKraDate(record.salesDt ?? record.cfmDt ?? record.pchsDt),
       subtotal,
@@ -283,6 +376,7 @@ export class DashboardPurchasesApplicationService {
       total: row.total,
       confirmationStatus: row.confirmationStatus,
       erpSyncStatus: row.erpSyncStatus,
+      supplierId: row.supplierId,
       lineItems: row.lineItems,
       etimsMetadata: {
         fetchedAt: row.pulledAt.toISOString(),
