@@ -38,16 +38,22 @@ export class DashboardInvoicesController {
       "Refresh invoices from the main API and return the current list, previewed only (nothing is submitted to eTIMS). Defaults to whichever ERP is actually connected -- pass ?source= explicitly (quickbooks | odoo | microsoft-dynamics-365-business-central) when more than one is connected.",
   })
   @ApiResponse({ status: 200, description: 'Pull result' })
+  @ApiQuery({ name: 'startDate', required: false, type: String, description: 'ISO date — filter invoices with issueDate >= startDate' })
+  @ApiQuery({ name: 'endDate', required: false, type: String, description: 'ISO date — filter invoices with issueDate <= endDate' })
   async pull(
     @ActiveTenant() tenantId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('source') source?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
     const result = await this.invoices.pullInvoices(tenantId, {
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
       source,
+      startDate,
+      endDate,
     });
     return { success: true, message: 'Invoices pulled', data: result };
   }
@@ -59,14 +65,20 @@ export class DashboardInvoicesController {
   @ApiResponse({ status: 200, description: 'Invoice list' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'startDate', required: false, type: String, description: 'ISO date — filter invoices with issueDate >= startDate' })
+  @ApiQuery({ name: 'endDate', required: false, type: String, description: 'ISO date — filter invoices with issueDate <= endDate' })
   async list(
     @ActiveTenant() tenantId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
     const result = await this.invoices.listInvoices(tenantId, {
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
+      startDate,
+      endDate,
     });
     return { success: true, message: 'OK', data: result };
   }
@@ -109,6 +121,23 @@ export class DashboardInvoicesController {
       req,
     );
     return { success: true, message: 'Sale created', data };
+  }
+
+  @Post(':id/upload-receipt')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Manually push the eTIMS receipt for this invoice back to Main API, regardless of the ' +
+      "tenant's auto-upload setting (PATCH /dashboard-api/erp/main-api-connection/receipt-settings)",
+  })
+  @ApiResponse({ status: 200, description: 'Upload triggered' })
+  @ApiResponse({
+    status: 400,
+    description: 'No sale has been created from this invoice yet',
+  })
+  async uploadReceipt(@ActiveTenant() tenantId: string, @Param('id') id: string) {
+    const data = await this.invoices.uploadReceiptToSource(tenantId, id);
+    return { success: true, message: 'Upload triggered', data };
   }
 
   @Get(':id/receipt-attachment-status')

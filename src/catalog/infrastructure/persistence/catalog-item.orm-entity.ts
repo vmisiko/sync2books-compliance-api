@@ -44,6 +44,15 @@ export class CatalogItemOrmEntity {
   @Column({ type: 'varchar', default: '2' })
   productTypeCode!: string;
 
+  /**
+   * Which classification-resolver strategy matched classificationCode (see
+   * ClassificationMethod) -- e.g. 'EXTERNAL_ID', 'SKU', 'NAME_CONTAINS',
+   * 'DEFAULT', 'EXPLICIT'. Nullable: rows written before this field existed
+   * have no recorded method.
+   */
+  @Column({ type: 'varchar', nullable: true })
+  classificationMethod!: string | null;
+
   @Column({ type: 'float', nullable: true })
   unitPrice!: number | null;
 

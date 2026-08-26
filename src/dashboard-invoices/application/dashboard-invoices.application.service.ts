@@ -110,7 +110,13 @@ export class DashboardInvoicesApplicationService {
 
   async pullInvoices(
     complianceTenantId: string,
-    params: { page?: number; limit?: number; source?: string } = {},
+    params: {
+      page?: number;
+      limit?: number;
+      source?: string;
+      startDate?: string;
+      endDate?: string;
+    } = {},
   ) {
     const connection =
       await this.mainApiConnections.getForTenant(complianceTenantId);
@@ -140,7 +146,12 @@ export class DashboardInvoicesApplicationService {
 
   async listInvoices(
     complianceTenantId: string,
-    params: { page?: number; limit?: number } = {},
+    params: {
+      page?: number;
+      limit?: number;
+      startDate?: string;
+      endDate?: string;
+    } = {},
   ) {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const connection =
@@ -371,16 +382,25 @@ export class DashboardInvoicesApplicationService {
    * sync-item reference. Best-effort: a failure here must never fail the
    * caller's overall flow (sale creation or backfill). Shared by the
    * fresh-document path and the idempotency-match self-heal path in
-   * `createSaleFromInvoice`.
+   * `createSaleFromInvoice`, and by the manual `uploadReceiptToSource` route
+   * (via `force: true`, which bypasses the tenant's `autoUploadReceiptToSource`
+   * toggle so a user can always trigger it on demand).
    */
   private async notifyMainApiOfReceipt(
     complianceTenantId: string,
     documentId: string,
     sourceInvoiceId: string,
+    options: { force?: boolean } = {},
   ): Promise<void> {
     try {
       const connection =
         await this.mainApiConnections.getForTenant(complianceTenantId);
+      if (!options.force && connection.autoUploadReceiptToSource === false) {
+        this.logger.log(
+          `Auto receipt upload is disabled for tenant ${complianceTenantId} — skipping automatic invoice-receipt notification for document ${documentId}`,
+        );
+        return;
+      }
       if (!connection.mainApiCompanyId) {
         this.logger.warn(
           `Tenant ${complianceTenantId} has no mainApiCompanyId yet — skipping invoice-receipt notification for document ${documentId}`,
@@ -405,6 +425,39 @@ export class DashboardInvoicesApplicationService {
         }`,
       );
     }
+  }
+
+  /**
+   * Manually triggers the invoice-receipt push-back to Main API for the sale
+   * created from a pulled invoice, regardless of the tenant's
+   * `autoUploadReceiptToSource` toggle (see `MainApiConnectionApplicationService
+   * .updateReceiptSettings`). Exists so a tenant that has turned auto-upload
+   * off can still push a specific receipt on demand. Reuses
+   * `getReceiptAttachmentStatus` for the response shape.
+   */
+  async uploadReceiptToSource(
+    complianceTenantId: string,
+    mainApiInvoiceId: string,
+  ) {
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+    const document = await this.sales.getDocumentBySourceInvoiceId(
+      merchantId,
+      mainApiInvoiceId,
+    );
+    if (!document) {
+      throw new BadRequestException(
+        'No sale has been created from this invoice yet — nothing to upload',
+      );
+    }
+
+    await this.notifyMainApiOfReceipt(
+      complianceTenantId,
+      document.id,
+      mainApiInvoiceId,
+      { force: true },
+    );
+
+    return this.getReceiptAttachmentStatus(complianceTenantId, mainApiInvoiceId);
   }
 
   /**

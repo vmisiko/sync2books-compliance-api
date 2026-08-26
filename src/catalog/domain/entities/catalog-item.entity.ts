@@ -24,6 +24,22 @@ export interface CatalogItem {
   taxTyCd: string;
   /** OSCU product type code (itemTyCd) */
   productTypeCode: string;
+  /**
+   * Which classification-resolver strategy actually matched
+   * classificationCode -- see ClassificationMethod. Null for rows written
+   * before this field existed. Recomputed on every register/update call,
+   * same as isStockItem.
+   */
+  classificationMethod: string | null;
+  /**
+   * Derived from classificationMethod: true when the match was a weak guess
+   * (NAME_CONTAINS fuzzy match, or the merchant's DEFAULT placeholder) or the
+   * item predates this field (null) -- surfaced by GET /dashboard-api/items
+   * so the dashboard can flag which pulled items actually need a human to
+   * review/correct their classification. False for a confident match
+   * (EXTERNAL_ID/SKU) or an EXPLICIT caller-supplied code.
+   */
+  needsClassificationReview: boolean;
   /** OSCU default unit price (dftPrc). Null when unknown (e.g. dropped/unset ERP source). */
   unitPrice: number | null;
   /** OSCU country of origin (orgnNatCd). Defaults to 'KE' when unset. */
@@ -60,4 +76,30 @@ export interface CatalogItem {
   lastSyncedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * classificationMethod values that reflect a weak/unconfirmed match --
+ * NAME_CONTAINS is a fuzzy ILike guess, DEFAULT is the merchant's generic
+ * placeholder row. Null (no recorded method -- either a row written before
+ * classificationMethod existed, or resolution failed to record one) is
+ * treated the same way, since there's no confidence to trust either.
+ * EXTERNAL_ID/SKU are exact-identifier matches, and EXPLICIT means the code
+ * was supplied directly by the caller (a manual item's own form field, or an
+ * already-approved mapping) -- none of those three need a review flag.
+ *
+ * Single source of truth for this derivation -- used both when constructing
+ * a brand-new CatalogItem (register-item.usecase.ts) and when mapping a
+ * persisted row back to the domain shape (catalog-item-typeorm.repository.ts),
+ * so the flag can never drift between the two paths.
+ */
+const WEAK_CLASSIFICATION_METHODS = new Set(['NAME_CONTAINS', 'DEFAULT']);
+
+export function computeNeedsClassificationReview(
+  classificationMethod: string | null,
+): boolean {
+  return (
+    classificationMethod === null ||
+    WEAK_CLASSIFICATION_METHODS.has(classificationMethod)
+  );
 }

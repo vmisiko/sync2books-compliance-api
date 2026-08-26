@@ -14,6 +14,8 @@ function makeItem(overrides: Partial<CatalogItem> = {}): CatalogItem {
     itemType: ItemType.GOODS,
     taxCategory: TaxCategory.VAT_STANDARD,
     classificationCode: '14111400',
+    classificationMethod: 'EXTERNAL_ID',
+    needsClassificationReview: false,
     unitCode: 'NO',
     packagingUnitCode: 'NT',
     taxTyCd: 'B',

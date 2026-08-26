@@ -1,5 +1,8 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import type { CatalogItem } from '../../domain/entities/catalog-item.entity';
+import {
+  computeNeedsClassificationReview,
+  type CatalogItem,
+} from '../../domain/entities/catalog-item.entity';
 import type { ICatalogItemRepository } from '../../domain/ports/item-repository.port';
 import type { IClassificationResolver } from '../../domain/ports/classification-resolver.port';
 import { ItemType } from '../../../shared/domain/enums/item-type.enum';
@@ -117,6 +120,8 @@ export async function updateManualItem(
     taxCategory,
     isStockItem,
     classificationCode: resolution.classificationCode,
+    classificationMethod: resolution.method,
+    needsClassificationReview: computeNeedsClassificationReview(resolution.method),
     unitCode: resolution.unitCode,
     packagingUnitCode: resolution.packagingUnitCode,
     taxTyCd: resolution.taxTyCd,

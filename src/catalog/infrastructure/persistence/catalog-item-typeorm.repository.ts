@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
-import type { CatalogItem } from '../../domain/entities/catalog-item.entity';
+import { ILike, IsNull, Repository } from 'typeorm';
+import {
+  computeNeedsClassificationReview,
+  type CatalogItem,
+} from '../../domain/entities/catalog-item.entity';
 import type { ICatalogItemRepository } from '../../domain/ports/item-repository.port';
 import type { IComplianceItemRepository } from '../../../shared/ports/repository.port';
 import { CatalogItemOrmEntity } from './catalog-item.orm-entity';
@@ -20,6 +23,10 @@ function ormToDomain(row: CatalogItemOrmEntity): CatalogItem {
     packagingUnitCode: row.packagingUnitCode,
     taxTyCd: row.taxTyCd,
     productTypeCode: row.productTypeCode,
+    classificationMethod: row.classificationMethod,
+    needsClassificationReview: computeNeedsClassificationReview(
+      row.classificationMethod,
+    ),
     unitPrice: row.unitPrice,
     originCountry: row.originCountry,
     sourceSystem: row.sourceSystem,
@@ -50,6 +57,7 @@ function domainToOrm(item: CatalogItem): CatalogItemOrmEntity {
   e.packagingUnitCode = item.packagingUnitCode;
   e.taxTyCd = item.taxTyCd;
   e.productTypeCode = item.productTypeCode;
+  e.classificationMethod = item.classificationMethod;
   e.unitPrice = item.unitPrice;
   e.originCountry = item.originCountry;
   e.sourceSystem = item.sourceSystem;
@@ -113,6 +121,18 @@ export class CatalogItemTypeOrmRepository
         sourceSystem !== undefined
           ? { merchantId, externalId, sourceSystem: sourceSystem ?? IsNull() }
           : { merchantId, externalId },
+    });
+    return row ? ormToDomain(row) : null;
+  }
+
+  async findByMerchantAndName(
+    merchantId: string,
+    name: string,
+  ): Promise<CatalogItem | null> {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    const row = await this.repo.findOne({
+      where: { merchantId, name: ILike(trimmed) },
     });
     return row ? ormToDomain(row) : null;
   }

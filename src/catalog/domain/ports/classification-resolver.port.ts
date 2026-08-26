@@ -1,4 +1,31 @@
 /**
+ * Which strategy actually produced `classificationCode`, in the order
+ * ClassificationResolverTypeOrm.resolveItemClassification tries them:
+ *   - EXPLICIT: the caller already supplied classificationCode directly
+ *     (e.g. a manually-created item's own form field, or an
+ *     already-approved classification_mappings row resolved by the caller
+ *     before calling in -- see DashboardItemsApplicationService.pullItems)
+ *     -- the resolver's own lookup chain never ran.
+ *   - EXTERNAL_ID: matched an active classification_mappings row keyed on
+ *     this item's externalId -- the strongest signal (same ERP record).
+ *   - SKU: matched on this item's sku -- an exact identifier, but less
+ *     reliable than externalId (SKUs can be reused/reassigned).
+ *   - NAME_CONTAINS: matched via a fuzzy ILike("%name%") lookup -- a
+ *     guess, not an exact match; the weakest confirmed-match strategy.
+ *   - DEFAULT: no item-specific mapping matched anything above; fell back
+ *     to this merchant's single `source: 'default'` placeholder row.
+ * EXTERNAL_ID/SKU/EXPLICIT are confident matches; NAME_CONTAINS/DEFAULT are
+ * weak guesses that should surface for manual review (see
+ * CatalogItem.needsClassificationReview).
+ */
+export type ClassificationMethod =
+  | 'EXPLICIT'
+  | 'EXTERNAL_ID'
+  | 'SKU'
+  | 'NAME_CONTAINS'
+  | 'DEFAULT';
+
+/**
  * Resolves internal attributes to regulator codes.
  * Uses mapping tables - never hardcode OSCU codes.
  */
@@ -14,6 +41,8 @@ export interface ClassificationResolution {
   /** OSCU product type code (itemTyCd) */
   productTypeCode: string;
   source: 'merchant_override' | 'rule_based' | 'default';
+  /** Which strategy actually matched classificationCode -- see ClassificationMethod. */
+  method: ClassificationMethod;
 }
 
 export interface IClassificationResolver {

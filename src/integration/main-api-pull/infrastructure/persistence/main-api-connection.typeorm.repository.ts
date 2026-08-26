@@ -28,6 +28,10 @@ function toDomain(e: MainApiConnectionOrmEntity): MainApiConnection {
     webhookEndpointId: e.webhookEndpointId,
     webhookSecret: e.webhookSecret,
     lastWebhookEventId: e.lastWebhookEventId,
+    // Older rows created before this column existed read back as undefined
+    // until TypeORM's synchronize backfills the default -- treat that the
+    // same as the documented default (true) rather than as false.
+    autoUploadReceiptToSource: e.autoUploadReceiptToSource ?? true,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
   };
@@ -74,6 +78,7 @@ export class MainApiConnectionTypeOrmRepository implements IMainApiConnectionRep
       webhookEndpointId: connection.webhookEndpointId,
       webhookSecret: connection.webhookSecret,
       lastWebhookEventId: connection.lastWebhookEventId,
+      autoUploadReceiptToSource: connection.autoUploadReceiptToSource,
       createdAt: connection.createdAt,
       updatedAt: connection.updatedAt,
     });

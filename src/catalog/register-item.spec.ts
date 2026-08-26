@@ -336,4 +336,132 @@ describe('registerItem — catalog registration semantics', () => {
     expect(rePulledChanged.item.lastSyncedAt).toBeNull();
     expect(rePulledChanged.item.version).toBe(registered.version + 1);
   });
+
+  /**
+   * classificationMethod/needsClassificationReview (see
+   * classification-resolver.port.ts's ClassificationMethod and
+   * CatalogItem.needsClassificationReview): registerItem must persist
+   * whichever strategy classificationResolver.resolveClassification actually
+   * used, and needsClassificationReview must reflect it correctly -- false
+   * for a confident match (EXPLICIT/EXTERNAL_ID), true for a weak guess
+   * (NAME_CONTAINS/DEFAULT).
+   */
+  describe('classificationMethod / needsClassificationReview', () => {
+    it('an explicit classificationCode is persisted as EXPLICIT and does not need review', async () => {
+      const res = await service.registerItem({
+        merchantId: 'm9',
+        externalId: 'ext-9a',
+        name: 'Explicit Item',
+        itemType: ItemType.GOODS,
+        taxCategory: TaxCategory.VAT_STANDARD,
+        classificationCode: '14111400',
+        unitCode: 'NO',
+        packagingUnitCode: 'NT',
+      });
+
+      expect(res.item.classificationMethod).toBe('EXPLICIT');
+      expect(res.item.needsClassificationReview).toBe(false);
+    });
+
+    it('an auto-resolved EXTERNAL_ID match is persisted as EXTERNAL_ID and does not need review', async () => {
+      await clsRepo.save(
+        clsRepo.create({
+          id: 'clsmap-m9-extid',
+          merchantId: 'm9',
+          matchType: 'EXTERNAL_ID',
+          matchValue: 'ext-9b',
+          itemType: ItemType.GOODS,
+          itemClsCd: '14111400',
+          priority: 100,
+          source: 'merchant_override',
+          active: true,
+          sourceSystem: null,
+          status: MappingStatus.MAPPED,
+        }),
+      );
+
+      const res = await service.registerItem({
+        merchantId: 'm9',
+        externalId: 'ext-9b',
+        name: 'Auto Matched Item',
+        itemType: ItemType.GOODS,
+        taxCategory: TaxCategory.VAT_STANDARD,
+        // no classificationCode -- must come from the mapping above
+        unitCode: 'NO',
+        packagingUnitCode: 'NT',
+      });
+
+      expect(res.item.classificationCode).toBe('14111400');
+      expect(res.item.classificationMethod).toBe('EXTERNAL_ID');
+      expect(res.item.needsClassificationReview).toBe(false);
+    });
+
+    it('a NAME_CONTAINS fuzzy match is persisted as NAME_CONTAINS and DOES need review', async () => {
+      // Mirrors how MappingSuggestionService actually creates a NAME_CONTAINS
+      // row (matchValue: input.itemName) -- the resolver's own ILike query is
+      // `matchValue ILIKE '%<itemName>%'`, so matchValue must contain the
+      // item's name as a substring (not the other way around).
+      await clsRepo.save(
+        clsRepo.create({
+          id: 'clsmap-m9-name',
+          merchantId: 'm9',
+          matchType: 'NAME_CONTAINS',
+          matchValue: 'Bacon Burger',
+          itemType: ItemType.GOODS,
+          itemClsCd: '50202306',
+          priority: 100,
+          source: 'rule_based',
+          active: true,
+          sourceSystem: null,
+          status: MappingStatus.MAPPED,
+        }),
+      );
+
+      const res = await service.registerItem({
+        merchantId: 'm9',
+        externalId: 'ext-9c',
+        name: 'Bacon Burger',
+        itemType: ItemType.GOODS,
+        taxCategory: TaxCategory.VAT_STANDARD,
+        unitCode: 'NO',
+        packagingUnitCode: 'NT',
+      });
+
+      expect(res.item.classificationCode).toBe('50202306');
+      expect(res.item.classificationMethod).toBe('NAME_CONTAINS');
+      expect(res.item.needsClassificationReview).toBe(true);
+    });
+
+    it('falling back to the merchant DEFAULT placeholder is persisted as DEFAULT and DOES need review', async () => {
+      await clsRepo.save(
+        clsRepo.create({
+          id: 'clsmap-m9-default',
+          merchantId: 'm9',
+          matchType: 'NAME_CONTAINS',
+          matchValue: '__default__',
+          itemType: null,
+          itemClsCd: '00000000',
+          priority: 999,
+          source: 'default',
+          active: true,
+          sourceSystem: null,
+          status: MappingStatus.MAPPED,
+        }),
+      );
+
+      const res = await service.registerItem({
+        merchantId: 'm9',
+        externalId: 'ext-9d',
+        name: 'Completely Unmapped Item',
+        itemType: ItemType.GOODS,
+        taxCategory: TaxCategory.VAT_STANDARD,
+        unitCode: 'NO',
+        packagingUnitCode: 'NT',
+      });
+
+      expect(res.item.classificationCode).toBe('00000000');
+      expect(res.item.classificationMethod).toBe('DEFAULT');
+      expect(res.item.needsClassificationReview).toBe(true);
+    });
+  });
 });

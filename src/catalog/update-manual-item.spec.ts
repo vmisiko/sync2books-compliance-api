@@ -58,6 +58,11 @@ describe('CatalogService.updateManualItem', () => {
   it('corrects a bad packagingUnitCode in place, without creating a second row', async () => {
     const { item: created } = await registerManualItem();
     expect(created.externalId).toBeNull();
+    // A manually-created item always supplies its own classificationCode
+    // (the Add Item form requires it), so the resolver never has to search
+    // for one -- see classificationCode/EXPLICIT tests below.
+    expect(created.classificationMethod).toBe('EXPLICIT');
+    expect(created.needsClassificationReview).toBe(false);
 
     const updated = await service.updateManualItem({
       itemId: created.id,
@@ -142,5 +147,42 @@ describe('CatalogService.updateManualItem', () => {
         packagingUnitCode: 'BQ',
       }),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  /**
+   * A manually-created item always resolves through the EXPLICIT strategy --
+   * both createItem's initial classificationCode and updateManualItem's
+   * carried-forward `input.classificationCode ?? existing.classificationCode`
+   * are always concrete strings, so resolveClassification's lookup chain
+   * never runs for this usecase. Confirms classificationMethod/
+   * needsClassificationReview stay correct across an edit, including one
+   * that doesn't touch classificationCode at all.
+   */
+  it('editing a manual item without touching classificationCode keeps classificationMethod EXPLICIT', async () => {
+    const { item: created } = await registerManualItem();
+
+    const updated = await service.updateManualItem({
+      itemId: created.id,
+      merchantId: 'm1',
+      name: 'Macbook Pro 16"',
+    });
+
+    expect(updated.classificationCode).toBe('1010151800');
+    expect(updated.classificationMethod).toBe('EXPLICIT');
+    expect(updated.needsClassificationReview).toBe(false);
+  });
+
+  it('editing a manual item with a new classificationCode override still records EXPLICIT', async () => {
+    const { item: created } = await registerManualItem();
+
+    const updated = await service.updateManualItem({
+      itemId: created.id,
+      merchantId: 'm1',
+      classificationCode: '20141600',
+    });
+
+    expect(updated.classificationCode).toBe('20141600');
+    expect(updated.classificationMethod).toBe('EXPLICIT');
+    expect(updated.needsClassificationReview).toBe(false);
   });
 });

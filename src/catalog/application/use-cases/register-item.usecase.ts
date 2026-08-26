@@ -1,5 +1,8 @@
 import { randomUUID } from 'crypto';
-import { CatalogItem } from '../../domain/entities/catalog-item.entity';
+import {
+  computeNeedsClassificationReview,
+  CatalogItem,
+} from '../../domain/entities/catalog-item.entity';
 import { ItemType } from '../../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../../shared/domain/enums/tax-category.enum';
 import type { ICatalogItemRepository } from '../../domain/ports/item-repository.port';
@@ -133,6 +136,8 @@ export async function registerItem(
       itemType: input.itemType,
       taxCategory: input.taxCategory,
       classificationCode,
+      classificationMethod: resolution.method,
+      needsClassificationReview: computeNeedsClassificationReview(resolution.method),
       unitCode,
       packagingUnitCode,
       taxTyCd,
@@ -175,6 +180,8 @@ export async function registerItem(
     itemType: input.itemType,
     taxCategory: input.taxCategory,
     classificationCode,
+    classificationMethod: resolution.method,
+    needsClassificationReview: computeNeedsClassificationReview(resolution.method),
     unitCode,
     packagingUnitCode,
     taxTyCd,

@@ -45,6 +45,8 @@ export type MainApiConnectionStatus = {
   maskedApiKey: string | null;
   mainApiCompanyId: string | null;
   integrations: IntegrationStatus[];
+  /** See MainApiConnection.autoUploadReceiptToSource. Defaults to `true` when unconfigured. */
+  autoUploadReceiptToSource: boolean;
 };
 
 /** Everything the Sync2BooksLink widget needs, as documented — see link-integration.mdx. */
@@ -97,8 +99,28 @@ export class MainApiConnectionApplicationService {
       webhookEndpointId: existing?.webhookEndpointId ?? null,
       webhookSecret: existing?.webhookSecret ?? null,
       lastWebhookEventId: existing?.lastWebhookEventId ?? null,
+      autoUploadReceiptToSource: existing?.autoUploadReceiptToSource ?? true,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
+    });
+  }
+
+  /**
+   * Toggles the per-tenant `autoUploadReceiptToSource` setting that gates
+   * whether `DashboardInvoicesApplicationService.notifyMainApiOfReceipt` fires
+   * automatically after a successful eTIMS submission from a pulled invoice.
+   * When turned off, the receipt can still be pushed back on demand via
+   * `POST /dashboard-api/invoices/:id/upload-receipt`.
+   */
+  async updateReceiptSettings(
+    complianceTenantId: string,
+    input: { autoUploadReceiptToSource: boolean },
+  ): Promise<MainApiConnection> {
+    const existing = await this.getForTenant(complianceTenantId);
+    return this.repo.save({
+      ...existing,
+      autoUploadReceiptToSource: input.autoUploadReceiptToSource,
+      updatedAt: new Date(),
     });
   }
 
@@ -453,6 +475,7 @@ export class MainApiConnectionApplicationService {
         maskedApiKey: null,
         mainApiCompanyId: null,
         integrations: emptyIntegrations(),
+        autoUploadReceiptToSource: true,
       };
     }
 
@@ -478,6 +501,7 @@ export class MainApiConnectionApplicationService {
       maskedApiKey: maskApiKey(connection.mainApiApiKey),
       mainApiCompanyId: connection.mainApiCompanyId,
       integrations,
+      autoUploadReceiptToSource: connection.autoUploadReceiptToSource,
     };
   }
 }

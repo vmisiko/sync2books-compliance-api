@@ -16,6 +16,7 @@ export class ClassificationResolverStub implements IClassificationResolver {
       taxTyCd: 'B',
       productTypeCode: '2',
       source: 'default',
+      method: 'DEFAULT',
     });
   }
 }

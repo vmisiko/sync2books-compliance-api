@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -11,6 +11,7 @@ import { ActiveTenantGuard } from '../../../dashboard-identity/infrastructure/gu
 import { ActiveTenant } from '../../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import {
   RecordIntegrationConnectionDto,
+  UpdateReceiptSettingsDto,
   UpsertMainApiConnectionDto,
 } from './dto/upsert-main-api-connection.dto';
 
@@ -71,6 +72,24 @@ export class MainApiConnectionController {
     );
     const status = await this.connections.getStatus(tenantId);
     return { success: true, message: 'Connection recorded', data: status };
+  }
+
+  @Patch('receipt-settings')
+  @ApiOperation({
+    summary:
+      "Toggle whether a successful eTIMS submission from a pulled invoice automatically pushes " +
+      'the receipt back to Main API (see POST /dashboard-api/invoices/:id/upload-receipt for the manual trigger)',
+  })
+  @ApiResponse({ status: 200, description: 'Receipt settings updated' })
+  async updateReceiptSettings(
+    @ActiveTenant() tenantId: string,
+    @Body() body: UpdateReceiptSettingsDto,
+  ) {
+    await this.connections.updateReceiptSettings(tenantId, {
+      autoUploadReceiptToSource: body.autoUploadReceiptToSource,
+    });
+    const status = await this.connections.getStatus(tenantId);
+    return { success: true, message: 'Receipt settings updated', data: status };
   }
 
   @Get('link-credentials')

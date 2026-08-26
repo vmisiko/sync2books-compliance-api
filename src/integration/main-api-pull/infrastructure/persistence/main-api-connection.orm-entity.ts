@@ -50,6 +50,14 @@ export class MainApiConnectionOrmEntity {
   @Column('varchar', { nullable: true })
   lastWebhookEventId!: string | null;
 
+  /**
+   * Per-tenant toggle for the automatic invoice-receipt push-back to Main API
+   * (see MainApiConnection.autoUploadReceiptToSource doc comment). Defaults
+   * to `true` so existing tenants keep today's unconditional behavior.
+   */
+  @Column('boolean', { default: true })
+  autoUploadReceiptToSource!: boolean;
+
   @CreateDateColumn()
   createdAt!: Date;
 

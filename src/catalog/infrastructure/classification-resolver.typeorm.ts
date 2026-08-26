@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, IsNull, Repository } from 'typeorm';
 import type {
+  ClassificationMethod,
   ClassificationResolution,
   IClassificationResolver,
 } from '../domain/ports/classification-resolver.port';
@@ -62,9 +63,9 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
       );
     }
 
-    const classificationCode =
-      params.classificationCode ??
-      (await this.resolveItemClassification(merchantId, params, params.sourceSystem ?? null));
+    const { classificationCode, method } = params.classificationCode
+      ? { classificationCode: params.classificationCode, method: 'EXPLICIT' as ClassificationMethod }
+      : await this.resolveItemClassification(merchantId, params, params.sourceSystem ?? null);
 
     const source: ClassificationResolution['source'] =
       params.classificationCode ||
@@ -82,6 +83,7 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
       taxTyCd,
       productTypeCode,
       source,
+      method,
     };
   }
 
@@ -134,7 +136,7 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
       externalId?: string;
     },
     sourceSystem: string | null,
-  ): Promise<string> {
+  ): Promise<{ classificationCode: string; method: ClassificationMethod }> {
     const type = params.itemType ?? null;
     // Scoped by sourceSystem -- two ERPs routinely assign the same small
     // numeric externalId (or even the same SKU) to unrelated products for
@@ -162,7 +164,9 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
       // itemClsCd can be null on Mapping Center's NEEDS_REVIEW placeholder
       // rows; those are always created with active: false so this shouldn't
       // trigger, but guard anyway rather than resolve a sale to a null code.
-      if (m && m.itemClsCd) return m.itemClsCd;
+      if (m && m.itemClsCd) {
+        return { classificationCode: m.itemClsCd, method: 'EXTERNAL_ID' };
+      }
     }
 
     if (params.sku) {
@@ -177,7 +181,9 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
         },
         order: { priority: 'ASC', updatedAt: 'DESC' },
       });
-      if (m && m.itemClsCd) return m.itemClsCd;
+      if (m && m.itemClsCd) {
+        return { classificationCode: m.itemClsCd, method: 'SKU' };
+      }
     }
 
     if (params.itemName) {
@@ -192,14 +198,18 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
         },
         order: { priority: 'ASC', updatedAt: 'DESC' },
       });
-      if (m && m.itemClsCd) return m.itemClsCd;
+      if (m && m.itemClsCd) {
+        return { classificationCode: m.itemClsCd, method: 'NAME_CONTAINS' };
+      }
     }
 
     const fallback = await this.clsRepo.findOne({
       where: { merchantId, source: 'default', active: true },
       order: { priority: 'ASC', updatedAt: 'DESC' },
     });
-    if (fallback && fallback.itemClsCd) return fallback.itemClsCd;
+    if (fallback && fallback.itemClsCd) {
+      return { classificationCode: fallback.itemClsCd, method: 'DEFAULT' };
+    }
 
     throw new Error(
       `Missing classification mapping for item (merchantId=${merchantId}). Provide classificationCode or configure classification_mappings.`,

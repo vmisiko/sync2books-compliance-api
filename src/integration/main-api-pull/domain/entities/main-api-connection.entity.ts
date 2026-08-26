@@ -41,6 +41,15 @@ export interface MainApiConnection {
   webhookSecret: string | null;
   /** Last processed X-Webhook-Event-ID, for idempotency against delivery retries. */
   lastWebhookEventId: string | null;
+  /**
+   * Whether `notifyMainApiOfReceipt` (in DashboardInvoicesApplicationService)
+   * should fire automatically on every successful eTIMS submission from a
+   * pulled invoice. Defaults to `true` to preserve the pre-existing
+   * unconditional behavior. When `false`, the receipt is only pushed back to
+   * Main API via the manual `POST /dashboard-api/invoices/:id/upload-receipt`
+   * route.
+   */
+  autoUploadReceiptToSource: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
