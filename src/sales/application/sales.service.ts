@@ -14,6 +14,11 @@ import { createDocument as createDocumentUseCase } from './use-cases/create-docu
 import { prepareDocument as prepareDocumentUseCase } from './use-cases/prepare-document.usecase';
 import { submitDocument as submitDocumentUseCase } from './use-cases/submit-document.usecase';
 import { validateDocument as validateDocumentUseCase } from './use-cases/validate-document.usecase';
+import {
+  retrySalesToEtims,
+  type RetrySalesInput,
+  type RetrySalesResult,
+} from './use-cases/retry-sales.usecase';
 import type { IEtimsAdapter } from '../../regulatory/oscu/ports/etims-adapter.port';
 import { canTransition } from '../domain/state-machine/compliance-state-machine';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
@@ -161,6 +166,22 @@ export class SalesService {
       this.etimsAdapter,
       this.syncStateRepo,
     );
+  }
+
+  /**
+   * Bulk/single retry for sales stuck in a Pending/Failed status -- backs the
+   * dashboard's "Retry Sync" row action and multi-select bulk-action bar.
+   * See `retry-sales.usecase.ts` for the exact retryable-status set and the
+   * REJECTED/FAILED -> RETRYING hand-off.
+   */
+  async retrySales(input: RetrySalesInput): Promise<RetrySalesResult> {
+    return retrySalesToEtims(input, {
+      documentRepo: this.documentRepo,
+      connectionRepo: this.connectionRepo,
+      eventRepo: this.eventRepo,
+      etimsAdapter: this.etimsAdapter,
+      syncStateRepo: this.syncStateRepo,
+    });
   }
 
   /**

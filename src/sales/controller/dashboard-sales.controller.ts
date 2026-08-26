@@ -3,6 +3,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   NotFoundException,
   Param,
   Post,
@@ -28,6 +30,7 @@ import {
   SalesReportListResponseDto,
 } from './dto/sales-report.dto';
 import { CreateExpressCreditNoteDto } from './dto/create-express-credit-note.dto';
+import { RetrySalesDto } from './dto/retry-sales.dto';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
 import { MailerService } from '../../mailer/mailer.service';
@@ -259,6 +262,21 @@ export class DashboardSalesController {
 
     const data = await this.salesService.getNormalizedSaleReport(documentId);
     return { data };
+  }
+
+  @Post('sync')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Retry submission to KRA eTIMS for selected (or all Pending/Failed) sales/credit notes',
+  })
+  @ApiResponse({ status: 200, description: 'Retry result' })
+  async sync(@Body() body: RetrySalesDto) {
+    const result = await this.salesService.retrySales({
+      merchantId: body.merchantId,
+      documentIds: body.documentIds?.length ? body.documentIds : undefined,
+    });
+    return { success: true, message: 'Sales retried', data: result };
   }
 
   // @Get(':id')

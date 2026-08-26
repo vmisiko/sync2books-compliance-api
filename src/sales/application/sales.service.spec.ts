@@ -93,6 +93,10 @@ describe('SalesService.getNormalizedSaleReport tax type resolution', () => {
       findByMerchantAndBranch: jest.fn().mockResolvedValue(null),
     };
 
+    const organizationService = {
+      getTenantBySync2booksCompanyId: jest.fn().mockResolvedValue(null),
+    };
+
     return new SalesService(
       documentRepo,
       eventRepo,
@@ -101,6 +105,7 @@ describe('SalesService.getNormalizedSaleReport tax type resolution', () => {
       {} as never,
       {} as never,
       {} as never,
+      organizationService as never,
     );
   }
 

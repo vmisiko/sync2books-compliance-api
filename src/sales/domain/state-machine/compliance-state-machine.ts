@@ -21,7 +21,14 @@ export type StateTransition =
   | { from: ComplianceStatus.RETRYING; to: ComplianceStatus.SUBMITTED }
   | { from: ComplianceStatus.DRAFT; to: ComplianceStatus.CANCELLED }
   | { from: ComplianceStatus.REJECTED; to: ComplianceStatus.FAILED }
-  | { from: ComplianceStatus.SUBMITTED; to: ComplianceStatus.FAILED };
+  | { from: ComplianceStatus.SUBMITTED; to: ComplianceStatus.FAILED }
+  // A document can land in FAILED before ever reaching SUBMITTED (e.g. the
+  // validation exception path in SalesService.processDocumentInBackground),
+  // which the dashboard surfaces as the same "Failed" status as REJECTED.
+  // Without this transition FAILED was a dead end and the dashboard's
+  // "Retry" action had no legal path forward for those rows -- mirror the
+  // existing REJECTED -> RETRYING escape hatch.
+  | { from: ComplianceStatus.FAILED; to: ComplianceStatus.RETRYING };
 
 const VALID_TRANSITIONS: Map<ComplianceStatus, ComplianceStatus[]> = new Map([
   [
@@ -45,7 +52,7 @@ const VALID_TRANSITIONS: Map<ComplianceStatus, ComplianceStatus[]> = new Map([
     [ComplianceStatus.RETRYING, ComplianceStatus.FAILED],
   ],
   [ComplianceStatus.RETRYING, [ComplianceStatus.SUBMITTED]],
-  [ComplianceStatus.FAILED, []],
+  [ComplianceStatus.FAILED, [ComplianceStatus.RETRYING]],
   [ComplianceStatus.CANCELLED, []],
 ]);
 
