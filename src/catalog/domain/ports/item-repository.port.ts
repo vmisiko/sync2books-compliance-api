@@ -18,4 +18,19 @@ export interface ICatalogItemRepository {
     externalId: string,
     sourceSystem?: string | null,
   ): Promise<CatalogItem | null>;
+  /**
+   * Exact, case-insensitive name match within a merchant's catalog. Used to
+   * correlate a KRA-supplied purchase line's `itemNm` back to an item this
+   * merchant has already registered under their own `itemCd` -- KRA's
+   * `sendPurchaseTransactionInfo` requires the purchased item to exist in
+   * the buyer's own item registry (see oscu-payload-gotchas.md), and there
+   * is no other identifier connecting a supplier's line item to our catalog.
+   * Deliberately exact rather than fuzzy: a wrong guess here would submit
+   * incorrect data to KRA, which is worse than failing loudly and asking
+   * the merchant to register the item first.
+   */
+  findByMerchantAndName(
+    merchantId: string,
+    name: string,
+  ): Promise<CatalogItem | null>;
 }

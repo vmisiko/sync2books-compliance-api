@@ -1,5 +1,8 @@
 import { ItemType } from '../../../shared/domain/enums/item-type.enum';
-import type { ComplianceItem } from '../../../shared/domain/entities/compliance-item.entity';
+import {
+  deriveItemType,
+  type ComplianceItem,
+} from '../../../shared/domain/entities/compliance-item.entity';
 import { ComplianceLine } from '../entities/compliance-line.entity';
 import type {
   ComplianceError,
@@ -39,7 +42,17 @@ export function runClassificationRules(
       continue;
     }
 
-    if (item.itemType === ItemType.GOODS) {
+    const itemType = deriveItemType(item.productTypeCode);
+    if (itemType === null) {
+      errors.push({
+        code: 'CLASSIFICATION_PRODUCT_TYPE_MISSING',
+        message: `Item ${line.itemId} has no product type set (Raw Material / Finished Product / Service) -- set it before this item can be sold`,
+        field: `${lineRef}.itemId`,
+      });
+      continue;
+    }
+
+    if (itemType === ItemType.GOODS) {
       if (!VALID_CLASSIFICATION_PATTERN.test(line.classificationCodeSnapshot)) {
         errors.push({
           code: 'CLASSIFICATION_GOODS_INVALID',
@@ -49,7 +62,7 @@ export function runClassificationRules(
       }
     }
 
-    if (item.itemType === ItemType.SERVICE) {
+    if (itemType === ItemType.SERVICE) {
       if (
         !line.classificationCodeSnapshot.startsWith(
           SERVICE_CLASSIFICATION_PREFIX,

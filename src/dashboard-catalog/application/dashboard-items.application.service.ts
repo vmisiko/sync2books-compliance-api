@@ -4,9 +4,8 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { CatalogService } from '../../catalog/api/catalog.service';
+import type { CatalogItem } from '../../catalog/domain/entities/catalog-item.entity';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import {
   MainApiConnectionApplicationService,
@@ -15,25 +14,10 @@ import {
 } from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { mapMainApiItemToRegisterItemInput } from '../../catalog/infrastructure/main-api/standardized-item.mapper';
-import { ClassificationMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
 import { MappingSuggestionService } from '../../regulatory/oscu/application/mapping-suggestion.service';
-import { ItemType } from '../../shared/domain/enums/item-type.enum';
+import { TAX_CATEGORY_BY_TAX_TY_CD } from '../../regulatory/oscu/mapping/oscu-tax-rates';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
 import type { CreateItemDto } from '../presentation/dto/create-item.dto';
-
-/**
- * Mirrors TAX_CATEGORY_CODE in mapping-suggestion.service.ts (kept local
- * since that map isn't exported), inverted: a manually-created item gives us
- * its taxTyCd directly, and this internal bucket is derived from it rather
- * than the other way around. Not sent to KRA — taxTyCd is what matters there.
- */
-const TAX_CATEGORY_BY_CODE: Record<string, TaxCategory> = {
-  A: TaxCategory.EXEMPT,
-  B: TaxCategory.VAT_STANDARD,
-  C: TaxCategory.VAT_ZERO,
-  D: TaxCategory.OTHER,
-  E: TaxCategory.VAT_8,
-};
 
 const SOURCE_DISPLAY_NAME: Record<SupportedIntegrationKey, string> = {
   quickbooks: 'QuickBooks',
@@ -96,8 +80,6 @@ export class DashboardItemsApplicationService {
     private readonly mainApiConnections: MainApiConnectionApplicationService,
     private readonly mainApiPull: MainApiPullClient,
     private readonly suggestions: MappingSuggestionService,
-    @InjectRepository(ClassificationMappingOrmEntity)
-    private readonly clsRepo: Repository<ClassificationMappingOrmEntity>,
   ) {}
 
   async pullItems(
@@ -165,28 +147,16 @@ export class DashboardItemsApplicationService {
             mainApiItem.standardized?.sourceSystem ??
             mainApiItem.bookType?.toUpperCase() ??
             null;
-          // The Mapping Center's Classification tab is where a human
-          // resolves this item's itemClsCd/qtyUnitCd/pkgUnitCd (each
-          // independently — see ClassificationMappingOrmEntity's doc
-          // comment). Only an active (fully approved) row counts here; a
-          // still-NEEDS_REVIEW row must not silently leak a partial or
-          // auto-matched-but-unconfirmed value into an actual KRA
-          // registration call. Scoped by sourceSystem too -- otherwise two
-          // ERPs sharing the same small numeric externalId for this merchant
-          // would silently resolve to each other's classification (this bit
-          // an Odoo pull that collided with pre-existing QuickBooks rows
-          // sharing the same bookId — fixed here, not just in the resolver
-          // registerItem() falls through to, since this lookup bypasses that
-          // resolver entirely).
-          const clsRow = await this.clsRepo.findOne({
-            where: {
-              merchantId,
-              matchType: 'EXTERNAL_ID',
-              matchValue: externalId,
-              sourceSystem,
-              active: true,
-            },
-          });
+          // Item Sync's Add/Edit/Bulk Edit is the one place classification/
+          // packaging/product type get set for an item, directly and
+          // immediately -- a pull never supplies them (no ERP tells us
+          // classificationCode/pkgUnitCd, and register-item.usecase.ts's
+          // existing-preferring fallback means omitting them here is safe:
+          // a brand new item lands PENDING with needsClassificationMapping
+          // true; an existing item's already-set values are left untouched
+          // rather than erased. This replaces a removed
+          // classification_mappings-backed lookup that used to run here --
+          // see ClassificationMethod's doc comment for why it was removed.
           const taxCategory =
             this.suggestions.suggestTaxCodeMapping(mainApiItem.defaultTaxCodeRef?.name ?? '')
               ?.internalTaxCategory ?? TaxCategory.OTHER;
@@ -198,9 +168,6 @@ export class DashboardItemsApplicationService {
                 itemType: mainApiItem.standardized.itemType,
               },
               taxCategory,
-              classificationCodeOverride: clsRow?.itemClsCd ?? undefined,
-              qtyUnitCdOverride: clsRow?.qtyUnitCd ?? undefined,
-              packagingUnitCdOverride: clsRow?.pkgUnitCd ?? undefined,
             }),
             sourceSystem,
           };
@@ -263,15 +230,12 @@ export class DashboardItemsApplicationService {
       throw new BadRequestException('taxTyCd is required');
     }
 
-    const isService = dto.productTypeCode === '3';
-    const itemType = isService ? ItemType.SERVICE : ItemType.GOODS;
-    const taxCategory = TAX_CATEGORY_BY_CODE[dto.taxTyCd] ?? TaxCategory.OTHER;
+    const taxCategory = TAX_CATEGORY_BY_TAX_TY_CD[dto.taxTyCd] ?? TaxCategory.OTHER;
 
     const result = await this.catalog.registerItem({
       merchantId,
       name: dto.name,
       sku: dto.sku ?? null,
-      itemType,
       taxCategory,
       classificationCode: dto.classificationCode,
       unitCode: dto.unitCode,
@@ -316,9 +280,12 @@ export class DashboardItemsApplicationService {
    * was created manually:
    * - ERP-sourced: re-runs through `registerItem`'s upsert (same path a pull
    *   would take), so a future pull still finds and updates the same row.
-   *   Limited to classification/unit codes -- name/type/tax for an
-   *   ERP-sourced item should be fixed at the source, since the next pull
-   *   would just overwrite anything else edited here. Must pass
+   *   name/tax stay fixed at the source (the next pull would just overwrite
+   *   anything else edited here) -- but productTypeCode IS editable here,
+   *   deliberately: an ERP pull can never tell KRA's Raw Material from
+   *   Finished Product, so every ERP-sourced good lands with productTypeCode
+   *   null (needsProductType true) until a human picks one, exactly like a
+   *   manual item with nothing selected -- this is that pick. Must pass
    *   `sourceSystem` through -- `registerItem`'s existing-item lookup is
    *   scoped by it (two ERPs can share the same externalId for this
    *   merchant), so omitting it would silently create a duplicate row
@@ -372,15 +339,9 @@ export class DashboardItemsApplicationService {
     }
 
     if (!existing.externalId) {
-      const itemType =
-        overrides.productTypeCode !== undefined
-          ? overrides.productTypeCode === '3'
-            ? ItemType.SERVICE
-            : ItemType.GOODS
-          : undefined;
       const taxCategory =
         overrides.taxTyCd !== undefined
-          ? TAX_CATEGORY_BY_CODE[overrides.taxTyCd] ?? TaxCategory.OTHER
+          ? TAX_CATEGORY_BY_TAX_TY_CD[overrides.taxTyCd] ?? TaxCategory.OTHER
           : undefined;
 
       return this.catalog.updateManualItem({
@@ -393,7 +354,6 @@ export class DashboardItemsApplicationService {
         packagingUnitCode: overrides.packagingUnitCode,
         unitPrice: overrides.unitPrice,
         originCountry: overrides.originCountry,
-        itemType,
         taxCategory,
         taxTyCd: overrides.taxTyCd,
         productTypeCode: overrides.productTypeCode,
@@ -406,15 +366,55 @@ export class DashboardItemsApplicationService {
       sourceSystem: existing.sourceSystem,
       name: existing.name,
       sku: existing.sku,
-      itemType: existing.itemType,
       taxCategory: existing.taxCategory,
       classificationCode: overrides.classificationCode ?? existing.classificationCode,
       unitCode: overrides.unitCode ?? existing.unitCode,
       packagingUnitCode: overrides.packagingUnitCode ?? existing.packagingUnitCode,
+      productTypeCode: overrides.productTypeCode ?? existing.productTypeCode ?? undefined,
       unitPrice: existing.unitPrice,
       originCountry: existing.originCountry,
     });
     return result.item;
+  }
+
+  /**
+   * Applies classificationCode/packagingUnitCode/productTypeCode to many
+   * catalog items at once — backs Item Sync's multi-select bulk action.
+   * This is the single place a bulk classification/packaging fix happens:
+   * classification is no longer a Mapping Center rule at all (see
+   * classification-resolver.port.ts's doc comment) — each call here goes
+   * straight through updateItem, so the already-registered catalog item is
+   * fixed immediately, no re-pull needed. Per-item errors (not found, wrong
+   * tenant, invalid productTypeCode) are collected into `skipped` rather
+   * than failing the whole batch.
+   */
+  async bulkUpdateItems(
+    complianceTenantId: string,
+    itemIds: string[],
+    overrides: {
+      classificationCode?: string;
+      packagingUnitCode?: string;
+      productTypeCode?: string;
+    },
+  ): Promise<{ updated: CatalogItem[]; skipped: string[] }> {
+    if (
+      overrides.classificationCode === undefined &&
+      overrides.packagingUnitCode === undefined &&
+      overrides.productTypeCode === undefined
+    ) {
+      throw new BadRequestException('Provide at least one field to update');
+    }
+
+    const updated: CatalogItem[] = [];
+    const skipped: string[] = [];
+    for (const itemId of itemIds) {
+      try {
+        updated.push(await this.updateItem(complianceTenantId, itemId, overrides));
+      } catch {
+        skipped.push(itemId);
+      }
+    }
+    return { updated, skipped };
   }
 
   private async resolveMerchantId(complianceTenantId: string): Promise<string> {

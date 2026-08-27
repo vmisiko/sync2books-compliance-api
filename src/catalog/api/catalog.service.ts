@@ -27,7 +27,6 @@ import {
 } from '../application/use-cases/sync-code-list.usecase';
 import type { ICatalogItemRepository } from '../domain/ports/item-repository.port';
 import type { IClassificationResolver } from '../domain/ports/classification-resolver.port';
-import { ItemType } from '../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
 import {
   CATALOG_ITEM_REPO,
@@ -77,7 +76,6 @@ export class CatalogService {
     externalId?: string | null;
     name: string;
     sku?: string | null;
-    itemType: ItemType;
     taxCategory: TaxCategory;
     classificationCode?: string;
     unitCode?: string;
@@ -85,6 +83,7 @@ export class CatalogService {
     packagingUnitCode?: string;
     taxTyCd?: string;
     productTypeCode?: string;
+    classificationTypeHint?: string;
     unitPrice?: number | null;
     originCountry?: string | null;
     sourceSystem?: string | null;

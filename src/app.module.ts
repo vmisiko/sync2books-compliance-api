@@ -24,7 +24,6 @@ import { CatalogItemOrmEntity } from './catalog/infrastructure/persistence/catal
 import { ComplianceBranchOrmEntity } from './compliance-organization/infrastructure/persistence/compliance-branch.orm-entity';
 import { ComplianceEtimsConnectionOrmEntity } from './compliance-organization/infrastructure/persistence/compliance-etims-connection.orm-entity';
 import { ComplianceTenantOrmEntity } from './compliance-organization/infrastructure/persistence/compliance-tenant.orm-entity';
-import { ClassificationMappingOrmEntity } from './regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
 import { OscuCodeClassOrmEntity } from './regulatory/oscu/infrastructure/persistence/oscu-code-class.orm-entity';
 import { OscuCodeOrmEntity } from './regulatory/oscu/infrastructure/persistence/oscu-code.orm-entity';
 import { OscuItemClassificationOrmEntity } from './regulatory/oscu/infrastructure/persistence/oscu-item-classification.orm-entity';
@@ -32,6 +31,7 @@ import { OscuOperationLogOrmEntity } from './regulatory/oscu/infrastructure/pers
 import { OscuSyncStateOrmEntity } from './regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
 import { PaymentTypeMappingOrmEntity } from './regulatory/oscu/infrastructure/persistence/payment-type-mapping.orm-entity';
 import { TaxMappingOrmEntity } from './regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
+import { UnitMappingOrmEntity } from './regulatory/oscu/infrastructure/persistence/unit-mapping.orm-entity';
 import { ComplianceDocumentOrmEntity } from './sales/infrastructure/persistence/compliance-document.orm-entity';
 import { ComplianceEventOrmEntity } from './sales/infrastructure/persistence/compliance-event.orm-entity';
 import { ComplianceLineOrmEntity } from './sales/infrastructure/persistence/compliance-line.orm-entity';
@@ -63,7 +63,6 @@ import { SupplierOrmEntity } from './dashboard-suppliers/infrastructure/persiste
       database: process.env.DB_DATABASE || 'compliance',
       entities: [
         CatalogItemOrmEntity,
-        ClassificationMappingOrmEntity,
         ComplianceBranchOrmEntity,
         ComplianceDocumentOrmEntity,
         ComplianceEtimsConnectionOrmEntity,
@@ -85,6 +84,7 @@ import { SupplierOrmEntity } from './dashboard-suppliers/infrastructure/persiste
         StockMovementOrmEntity,
         SupplierOrmEntity,
         TaxMappingOrmEntity,
+        UnitMappingOrmEntity,
       ],
       synchronize: true,
       logging: true,

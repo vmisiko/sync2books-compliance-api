@@ -143,70 +143,42 @@ describe('MappingSuggestionService', () => {
     });
   });
 
-  describe('suggestUnitMapping', () => {
-    it('matches an exact alias with high confidence', () => {
-      const result = service.suggestUnitMapping('kg');
-      expect(result).toEqual({
-        internalUnit: 'KG',
-        qtyUnitCd: 'KG',
-        pkgUnitCd: 'NT',
-        confidenceScore: 95,
-      });
+  describe('suggestQuantityUnitAlias', () => {
+    it('matches an exact alias', () => {
+      const result = service.suggestQuantityUnitAlias('kg');
+      expect(result).toEqual({ internalUnit: 'KILOGRAM', searchTerm: 'kilo' });
     });
 
-    it('matches a looser contains-style label at lower confidence', () => {
-      const result = service.suggestUnitMapping('Kilograms (kg)');
-      expect(result?.internalUnit).toBe('KG');
-      expect(result?.confidenceScore).toBe(75);
+    it('matches a looser contains-style label', () => {
+      const result = service.suggestQuantityUnitAlias('Kilograms (kg)');
+      expect(result?.internalUnit).toBe('KILOGRAM');
     });
 
     it('is case-insensitive and trims whitespace for exact alias matches', () => {
-      const result = service.suggestUnitMapping('  EACH  ');
-      expect(result?.internalUnit).toBe('EA');
-      expect(result?.confidenceScore).toBe(95);
+      const result = service.suggestQuantityUnitAlias('  EACH  ');
+      expect(result?.internalUnit).toBe('PIECES');
+    });
+
+    it('resolves "each"/"pcs"/"piece" to PIECES (U), not NUMBER (NO) — these are distinct KRA codes per the OSCU spec', () => {
+      expect(service.suggestQuantityUnitAlias('each')?.internalUnit).toBe(
+        'PIECES',
+      );
+      expect(service.suggestQuantityUnitAlias('pcs')?.internalUnit).toBe(
+        'PIECES',
+      );
+      expect(service.suggestQuantityUnitAlias('number')?.internalUnit).toBe(
+        'NUMBER',
+      );
     });
 
     it('returns null for an unrecognized unit label', () => {
-      expect(service.suggestUnitMapping('gigawatt')).toBeNull();
+      expect(service.suggestQuantityUnitAlias('gigawatt')).toBeNull();
     });
 
     it('returns null for empty/null/undefined input', () => {
-      expect(service.suggestUnitMapping('')).toBeNull();
-      expect(service.suggestUnitMapping(null)).toBeNull();
-      expect(service.suggestUnitMapping(undefined)).toBeNull();
-    });
-  });
-
-  describe('suggestClassificationPlaceholder', () => {
-    it('prefers EXTERNAL_ID over SKU and item name', () => {
-      const result = service.suggestClassificationPlaceholder({
-        externalId: 'ext-1',
-        sku: 'sku-1',
-        itemName: 'Widget',
-      });
-      expect(result).toEqual({ matchType: 'EXTERNAL_ID', matchValue: 'ext-1' });
-    });
-
-    it('falls back to SKU when no externalId is present', () => {
-      const result = service.suggestClassificationPlaceholder({
-        sku: 'sku-1',
-        itemName: 'Widget',
-      });
-      expect(result).toEqual({ matchType: 'SKU', matchValue: 'sku-1' });
-    });
-
-    it('falls back to NAME_CONTAINS when neither externalId nor sku is present', () => {
-      const result = service.suggestClassificationPlaceholder({
-        itemName: 'Widget',
-      });
-      expect(result).toEqual({
-        matchType: 'NAME_CONTAINS',
-        matchValue: 'Widget',
-      });
-    });
-
-    it('returns null when nothing usable is provided', () => {
-      expect(service.suggestClassificationPlaceholder({})).toBeNull();
+      expect(service.suggestQuantityUnitAlias('')).toBeNull();
+      expect(service.suggestQuantityUnitAlias(null)).toBeNull();
+      expect(service.suggestQuantityUnitAlias(undefined)).toBeNull();
     });
   });
 

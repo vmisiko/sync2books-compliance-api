@@ -1,12 +1,12 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ClassificationMappingOrmEntity } from './infrastructure/persistence/classification-mapping.orm-entity';
 import { OscuItemClassificationOrmEntity } from './infrastructure/persistence/oscu-item-classification.orm-entity';
 import { OscuSyncStateOrmEntity } from './infrastructure/persistence/oscu-sync-state.orm-entity';
 import { OscuMappingSeed } from './infrastructure/persistence/oscu-mapping.seed';
 import { PaymentTypeMappingOrmEntity } from './infrastructure/persistence/payment-type-mapping.orm-entity';
 import { PaymentTypeResolverTypeOrm } from './infrastructure/persistence/payment-type-resolver.typeorm';
 import { TaxMappingOrmEntity } from './infrastructure/persistence/tax-mapping.orm-entity';
+import { UnitMappingOrmEntity } from './infrastructure/persistence/unit-mapping.orm-entity';
 import { MappingSuggestionService } from './application/mapping-suggestion.service';
 import { PAYMENT_TYPE_RESOLVER } from '../../shared/tokens';
 
@@ -17,7 +17,7 @@ import { PAYMENT_TYPE_RESOLVER } from '../../shared/tokens';
       OscuSyncStateOrmEntity,
       TaxMappingOrmEntity,
       PaymentTypeMappingOrmEntity,
-      ClassificationMappingOrmEntity,
+      UnitMappingOrmEntity,
     ]),
   ],
   providers: [

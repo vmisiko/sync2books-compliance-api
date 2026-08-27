@@ -61,8 +61,17 @@ export async function prepareDocument(
 
     const taxTyCdSnapshot: string = l.taxTyCdSnapshot ?? item.taxTyCd;
 
+    // item.productTypeCode is guaranteed non-null here in practice -- it's
+    // required by saveItem, so an item can't have an etimsItemCode (already
+    // checked above) without one -- but assert explicitly rather than
+    // silently coercing null to a string if that invariant is ever violated.
+    if (l.productTypeCodeSnapshot == null && item.productTypeCode == null) {
+      throw new Error(
+        `Item ${l.itemId} has no product type set (Raw Material / Finished Product / Service) -- cannot prepare this document`,
+      );
+    }
     const productTypeCodeSnapshot: string =
-      l.productTypeCodeSnapshot ?? item.productTypeCode;
+      l.productTypeCodeSnapshot ?? (item.productTypeCode as string);
 
     return {
       ...l,

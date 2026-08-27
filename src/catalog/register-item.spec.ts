@@ -1,14 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { TypeOrmModule, getRepositoryToken } from '@nestjs/typeorm';
-import type { Repository } from 'typeorm';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogModule } from './catalog.module';
 import { CatalogService } from './api/catalog.service';
 import type { RegisterItemInput } from './application/use-cases/register-item.usecase';
-import { ItemType } from '../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../shared/domain/enums/tax-category.enum';
-import { ClassificationMappingOrmEntity } from '../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
 import { SourceSystem } from '../shared/domain/enums/source-system.enum';
-import { MappingStatus } from '../shared/domain/enums/mapping-status.enum';
 import { CATALOG_ITEM_REPO } from '../shared/tokens';
 import type { ICatalogItemRepository } from './domain/ports/item-repository.port';
 
@@ -24,7 +20,6 @@ import type { ICatalogItemRepository } from './domain/ports/item-repository.port
  */
 describe('registerItem — catalog registration semantics', () => {
   let service: CatalogService;
-  let clsRepo: Repository<ClassificationMappingOrmEntity>;
   let itemRepo: ICatalogItemRepository;
 
   beforeEach(async () => {
@@ -43,7 +38,6 @@ describe('registerItem — catalog registration semantics', () => {
 
     await module.init();
     service = module.get<CatalogService>(CatalogService);
-    clsRepo = module.get(getRepositoryToken(ClassificationMappingOrmEntity));
     itemRepo = module.get<ICatalogItemRepository>(CATALOG_ITEM_REPO);
   });
 
@@ -52,7 +46,6 @@ describe('registerItem — catalog registration semantics', () => {
       merchantId: 'm1',
       externalId: 'ext-1',
       name: 'Inventory Widget',
-      itemType: ItemType.GOODS,
       taxCategory: TaxCategory.VAT_STANDARD,
       classificationCode: '14111400',
       unitCode: 'NO',
@@ -72,7 +65,7 @@ describe('registerItem — catalog registration semantics', () => {
       merchantId: 'm1',
       externalId: 'ext-2',
       name: 'Consulting Hours',
-      itemType: ItemType.SERVICE,
+      productTypeCode: '3',
       taxCategory: TaxCategory.EXEMPT,
       classificationCode: '14111400',
       unitCode: 'NO',
@@ -90,7 +83,6 @@ describe('registerItem — catalog registration semantics', () => {
       merchantId: 'm1',
       externalId: 'ext-3',
       name: 'Office Supplies',
-      itemType: ItemType.GOODS,
       taxCategory: TaxCategory.OTHER,
       classificationCode: '14111400',
       // Quantity/packaging unit has no category fallback -- always per
@@ -108,38 +100,53 @@ describe('registerItem — catalog registration semantics', () => {
     expect(res.item.packagingUnitCode).toBe('NT');
   });
 
-  it('4) Missing classification mapping → errors with Needs mapping message', async () => {
+  /**
+   * Regression: an item pulled with no approved classification_mappings row
+   * (and unitCode/packagingUnitCode never resolved either) used to make
+   * resolveClassification throw, which registerItem's caller
+   * (DashboardItemsApplicationService.pullItems) only ever logged into a
+   * results array nobody read -- the item silently never got a CatalogItem
+   * row at all. It must now still register, as an incomplete, visible,
+   * fixable PENDING row.
+   */
+  it('4) Missing classification mapping → still creates, as an incomplete PENDING item needing a mapping', async () => {
     const input: RegisterItemInput = {
       merchantId: 'm2',
       externalId: 'ext-4',
       name: 'Unknown Classification Item',
-      itemType: ItemType.GOODS,
       taxCategory: TaxCategory.VAT_STANDARD,
-      // no classificationCode, but unit is supplied so the classification
-      // check is what actually fails here.
+      // no classificationCode, but unit is supplied -- classification is
+      // what's actually left unresolved here.
       unitCode: 'NO',
       packagingUnitCode: 'NT',
     };
 
-    await expect(service.registerItem(input)).rejects.toThrow(
-      /Missing classification mapping/i,
-    );
+    const res = await service.registerItem(input);
+    expect(res.created).toBe(true);
+    expect(res.item.classificationCode).toBe('');
+    expect(res.item.classificationMethod).toBe('UNRESOLVED');
+    expect(res.item.needsClassificationMapping).toBe(true);
+    expect(res.item.needsClassificationReview).toBe(true);
+    expect(res.item.registrationStatus).toBe('PENDING');
   });
 
-  it('4b) Missing qtyUnitCd/packagingUnitCd override → errors per field, with no category to fall back to', async () => {
+  it('4b) Missing qtyUnitCd/packagingUnitCd override → still creates, as an incomplete PENDING item needing a mapping', async () => {
     const input: RegisterItemInput = {
       merchantId: 'm2',
       externalId: 'ext-4b',
       name: 'No Unit Item',
-      itemType: ItemType.GOODS,
       taxCategory: TaxCategory.VAT_STANDARD,
       classificationCode: '14111400',
       // no unitCode/packagingUnitCode
     };
 
-    await expect(service.registerItem(input)).rejects.toThrow(
-      /Missing qtyUnitCd/i,
-    );
+    const res = await service.registerItem(input);
+    expect(res.created).toBe(true);
+    expect(res.item.classificationCode).toBe('14111400');
+    expect(res.item.unitCode).toBe('');
+    expect(res.item.packagingUnitCode).toBe('');
+    expect(res.item.needsClassificationMapping).toBe(true);
+    expect(res.item.registrationStatus).toBe('PENDING');
   });
 
   it('5) Re-importing the same external item updates rather than duplicates (version increments)', async () => {
@@ -147,7 +154,6 @@ describe('registerItem — catalog registration semantics', () => {
       merchantId: 'm3',
       externalId: 'ext-5',
       name: 'Dup Item',
-      itemType: ItemType.GOODS,
       taxCategory: TaxCategory.VAT_STANDARD,
       classificationCode: '14111400',
       unitCode: 'NO',
@@ -188,7 +194,6 @@ describe('registerItem — catalog registration semantics', () => {
       externalId: '2',
       sourceSystem: SourceSystem.QUICKBOOKS,
       name: 'Hp Monitor',
-      itemType: ItemType.SERVICE,
       taxCategory: TaxCategory.VAT_STANDARD,
       classificationCode: '14111400',
       unitCode: 'NO',
@@ -199,7 +204,6 @@ describe('registerItem — catalog registration semantics', () => {
       externalId: '2',
       sourceSystem: SourceSystem.ODOO,
       name: 'Bacon Burger',
-      itemType: ItemType.GOODS,
       taxCategory: TaxCategory.VAT_STANDARD,
       classificationCode: '20141600',
       unitCode: 'NO',
@@ -231,59 +235,6 @@ describe('registerItem — catalog registration semantics', () => {
   });
 
   /**
-   * Same collision class, one layer down: classification_mappings rows are
-   * also keyed by (merchantId, matchType, matchValue) with no sourceSystem
-   * scoping before this fix, so auto-resolution (no classificationCode
-   * override supplied) would pick up whichever ERP's row existed first for
-   * a colliding externalId.
-   */
-  it('7) classification auto-resolution is scoped by sourceSystem, not just externalId', async () => {
-    await clsRepo.save(
-      clsRepo.create({
-        id: 'clsmap-qb',
-        merchantId: 'm7',
-        matchType: 'EXTERNAL_ID',
-        matchValue: '9',
-        itemType: ItemType.GOODS,
-        itemClsCd: '14111400',
-        priority: 100,
-        source: 'merchant_override',
-        active: true,
-        sourceSystem: SourceSystem.QUICKBOOKS,
-        status: MappingStatus.MAPPED,
-      }),
-    );
-    await clsRepo.save(
-      clsRepo.create({
-        id: 'clsmap-odoo',
-        merchantId: 'm7',
-        matchType: 'EXTERNAL_ID',
-        matchValue: '9',
-        itemType: ItemType.GOODS,
-        itemClsCd: '20141600',
-        priority: 100,
-        source: 'merchant_override',
-        active: true,
-        sourceSystem: SourceSystem.ODOO,
-        status: MappingStatus.MAPPED,
-      }),
-    );
-
-    const odooResult = await service.registerItem({
-      merchantId: 'm7',
-      externalId: '9',
-      sourceSystem: SourceSystem.ODOO,
-      name: 'Odoo Item 9',
-      itemType: ItemType.GOODS,
-      taxCategory: TaxCategory.VAT_STANDARD,
-      unitCode: 'NO',
-      packagingUnitCode: 'NT',
-    });
-
-    expect(odooResult.item.classificationCode).toBe('20141600');
-  });
-
-  /**
    * Regression: a re-pull (main API's own item cache refreshing, or a human
    * clicking "Pull from ERP" again) reprocesses every item every time, not
    * just changed ones. Before this fix, re-registering an item with
@@ -300,7 +251,6 @@ describe('registerItem — catalog registration semantics', () => {
       externalId: 'ext-8',
       sourceSystem: SourceSystem.QUICKBOOKS,
       name: 'Stable Item',
-      itemType: ItemType.GOODS,
       taxCategory: TaxCategory.VAT_STANDARD,
       classificationCode: '14111400',
       unitCode: 'NO',
@@ -343,8 +293,10 @@ describe('registerItem — catalog registration semantics', () => {
    * CatalogItem.needsClassificationReview): registerItem must persist
    * whichever strategy classificationResolver.resolveClassification actually
    * used, and needsClassificationReview must reflect it correctly -- false
-   * for a confident match (EXPLICIT/EXTERNAL_ID), true for a weak guess
-   * (NAME_CONTAINS/DEFAULT).
+   * for a confident EXPLICIT value, true for UNRESOLVED. The old
+   * EXTERNAL_ID/SKU/NAME_CONTAINS/DEFAULT auto-resolution strategies were
+   * removed with classification_mappings on 2026-08-27 (see
+   * classification-resolver.port.ts's ClassificationMethod doc comment).
    */
   describe('classificationMethod / needsClassificationReview', () => {
     it('an explicit classificationCode is persisted as EXPLICIT and does not need review', async () => {
@@ -352,7 +304,6 @@ describe('registerItem — catalog registration semantics', () => {
         merchantId: 'm9',
         externalId: 'ext-9a',
         name: 'Explicit Item',
-        itemType: ItemType.GOODS,
         taxCategory: TaxCategory.VAT_STANDARD,
         classificationCode: '14111400',
         unitCode: 'NO',
@@ -363,104 +314,18 @@ describe('registerItem — catalog registration semantics', () => {
       expect(res.item.needsClassificationReview).toBe(false);
     });
 
-    it('an auto-resolved EXTERNAL_ID match is persisted as EXTERNAL_ID and does not need review', async () => {
-      await clsRepo.save(
-        clsRepo.create({
-          id: 'clsmap-m9-extid',
-          merchantId: 'm9',
-          matchType: 'EXTERNAL_ID',
-          matchValue: 'ext-9b',
-          itemType: ItemType.GOODS,
-          itemClsCd: '14111400',
-          priority: 100,
-          source: 'merchant_override',
-          active: true,
-          sourceSystem: null,
-          status: MappingStatus.MAPPED,
-        }),
-      );
-
+    it('an omitted classificationCode is persisted as UNRESOLVED and DOES need review', async () => {
       const res = await service.registerItem({
         merchantId: 'm9',
         externalId: 'ext-9b',
-        name: 'Auto Matched Item',
-        itemType: ItemType.GOODS,
-        taxCategory: TaxCategory.VAT_STANDARD,
-        // no classificationCode -- must come from the mapping above
-        unitCode: 'NO',
-        packagingUnitCode: 'NT',
-      });
-
-      expect(res.item.classificationCode).toBe('14111400');
-      expect(res.item.classificationMethod).toBe('EXTERNAL_ID');
-      expect(res.item.needsClassificationReview).toBe(false);
-    });
-
-    it('a NAME_CONTAINS fuzzy match is persisted as NAME_CONTAINS and DOES need review', async () => {
-      // Mirrors how MappingSuggestionService actually creates a NAME_CONTAINS
-      // row (matchValue: input.itemName) -- the resolver's own ILike query is
-      // `matchValue ILIKE '%<itemName>%'`, so matchValue must contain the
-      // item's name as a substring (not the other way around).
-      await clsRepo.save(
-        clsRepo.create({
-          id: 'clsmap-m9-name',
-          merchantId: 'm9',
-          matchType: 'NAME_CONTAINS',
-          matchValue: 'Bacon Burger',
-          itemType: ItemType.GOODS,
-          itemClsCd: '50202306',
-          priority: 100,
-          source: 'rule_based',
-          active: true,
-          sourceSystem: null,
-          status: MappingStatus.MAPPED,
-        }),
-      );
-
-      const res = await service.registerItem({
-        merchantId: 'm9',
-        externalId: 'ext-9c',
-        name: 'Bacon Burger',
-        itemType: ItemType.GOODS,
+        name: 'Unmapped Item',
         taxCategory: TaxCategory.VAT_STANDARD,
         unitCode: 'NO',
         packagingUnitCode: 'NT',
       });
 
-      expect(res.item.classificationCode).toBe('50202306');
-      expect(res.item.classificationMethod).toBe('NAME_CONTAINS');
-      expect(res.item.needsClassificationReview).toBe(true);
-    });
-
-    it('falling back to the merchant DEFAULT placeholder is persisted as DEFAULT and DOES need review', async () => {
-      await clsRepo.save(
-        clsRepo.create({
-          id: 'clsmap-m9-default',
-          merchantId: 'm9',
-          matchType: 'NAME_CONTAINS',
-          matchValue: '__default__',
-          itemType: null,
-          itemClsCd: '00000000',
-          priority: 999,
-          source: 'default',
-          active: true,
-          sourceSystem: null,
-          status: MappingStatus.MAPPED,
-        }),
-      );
-
-      const res = await service.registerItem({
-        merchantId: 'm9',
-        externalId: 'ext-9d',
-        name: 'Completely Unmapped Item',
-        itemType: ItemType.GOODS,
-        taxCategory: TaxCategory.VAT_STANDARD,
-        unitCode: 'NO',
-        packagingUnitCode: 'NT',
-      });
-
-      expect(res.item.classificationCode).toBe('00000000');
-      expect(res.item.classificationMethod).toBe('DEFAULT');
+      expect(res.item.classificationCode).toBe('');
+      expect(res.item.classificationMethod).toBe('UNRESOLVED');
       expect(res.item.needsClassificationReview).toBe(true);
     });
   });

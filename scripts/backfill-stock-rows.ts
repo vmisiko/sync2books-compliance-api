@@ -1,10 +1,9 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import type { Repository } from 'typeorm';
+import { In, type Repository } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { CatalogItemOrmEntity } from '../src/catalog/infrastructure/persistence/catalog-item.orm-entity';
-import { ItemType } from '../src/shared/domain/enums/item-type.enum';
 import { ComplianceOrganizationApplicationService } from '../src/compliance-organization/application/compliance-organization.application.service';
 import { STOCK_REPO } from '../src/shared/tokens';
 import type { IStockRepository } from '../src/inventory/domain/ports/stock-repository.port';
@@ -12,12 +11,13 @@ import type { IStockRepository } from '../src/inventory/domain/ports/stock-repos
 /**
  * One-off backfill, two passes:
  *
- * 1. Correct `isStockItem` on existing GOODS rows. Before CatalogService.
- *    registerItem() unified the rule to "isStockItem = itemType === GOODS",
- *    Mode A registrations (RegisterCatalogItemDto has no isStockItem field
- *    at all) and strict QuickBooks-Inventory-only pulls left many real
- *    GOODS items stuck at isStockItem=false. Recompute them here to match
- *    the same rule registerItem() now applies on every future write.
+ * 1. Correct `isStockItem` on existing Raw Material / Finished Product rows
+ *    (productTypeCode '1'/'2'). Before CatalogService.registerItem() unified
+ *    the rule to "isStockItem = computeIsStockItem(productTypeCode)", Mode A
+ *    registrations (RegisterCatalogItemDto has no isStockItem field at all)
+ *    and strict QuickBooks-Inventory-only pulls left many real goods items
+ *    stuck at isStockItem=false. Recompute them here to match the same rule
+ *    registerItem() now applies on every future write.
  * 2. Seed a 0-qty stock row (default branch) for every item that's now
  *    isStockItem=true, via the same IStockRepository.applyDelta(id,
  *    branchId, 0) the live auto-seed in CatalogService.registerItem() uses.
@@ -38,17 +38,17 @@ async function main(): Promise<void> {
   const stockRepo = app.get<IStockRepository>(STOCK_REPO);
 
   const misflagged = await itemRepo.find({
-    where: { itemType: ItemType.GOODS, isStockItem: false },
+    where: { productTypeCode: In(['1', '2']), isStockItem: false },
   });
   if (misflagged.length > 0) {
     console.log(
-      `Correcting isStockItem on ${misflagged.length} GOODS item(s) that predate the unified rule:`,
+      `Correcting isStockItem on ${misflagged.length} goods item(s) that predate the unified rule:`,
     );
     for (const item of misflagged) {
       console.log(`  FIX FLAG ${item.id} (${item.name})`);
     }
     await itemRepo.update(
-      { itemType: ItemType.GOODS, isStockItem: false },
+      { productTypeCode: In(['1', '2']), isStockItem: false },
       { isStockItem: true },
     );
     console.log('');

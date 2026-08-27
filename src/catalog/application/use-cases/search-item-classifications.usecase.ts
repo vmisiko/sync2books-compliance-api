@@ -20,9 +20,15 @@ export async function searchItemClassifications(
   const limit = Math.min(input.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
   const query = input.query?.trim();
 
+  // Sorted by name, not code: an unsearched open (no query) shows this list
+  // as-is, and KRA's itemClsCd is assigned in taxonomy-import order, not a
+  // meaningful browse order — code-ascending put "Live Plant and Animal
+  // Material..." first for every merchant regardless of what they sell.
+  // Name-ascending at least gives a recognizable, alphabetically scannable
+  // list to scroll through when a user doesn't know what to search for.
   const qb = classificationRepo
     .createQueryBuilder('c')
-    .orderBy('c.itemClsCd', 'ASC')
+    .orderBy('c.itemClsNm', 'ASC')
     .take(limit);
 
   if (!input.includeInactive) {

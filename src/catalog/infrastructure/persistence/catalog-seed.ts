@@ -20,7 +20,6 @@ export class CatalogSeed {
       externalId: 'ext-item-1',
       name: 'Test Item',
       sku: 'SKU-001',
-      itemType: 'GOODS',
       taxCategory: 'VAT_STANDARD',
       classificationCode: '1234567890',
       unitCode: 'EA',

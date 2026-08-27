@@ -26,7 +26,6 @@ import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators
 import type { DashboardRequestUser } from '../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
 import { CreateMappingDto } from './dto/create-mapping.dto';
 import { UpdateMappingDto } from './dto/update-mapping.dto';
-import { BulkClassifyMappingDto } from './dto/bulk-classify-mapping.dto';
 
 @Controller('dashboard-api/mappings')
 @ApiTags('Dashboard mapping center (Mode B)')
@@ -39,14 +38,15 @@ export class DashboardMappingsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Pull tax rates, tax codes, item classifications, and payment methods from the main API ' +
+      'Pull tax rates, tax codes, items, and payment methods from the main API ' +
       'for the given ERP source and run confidence-scored auto-suggestion in one pass: ' +
       'creates/refreshes NEEDS_REVIEW tax_mappings and payment_type_mappings rows, resolves a ' +
-      'taxCodeId where possible, and creates a classification_mappings placeholder row per ' +
-      'item with itemClsCd left for manual review and qtyUnitCd/pkgUnitCd auto-matched ' +
-      'directly against the real KRA code list. Item-classification and payment-method pulls ' +
-      'are currently QuickBooks-only (no equivalent main-API endpoint exists yet for other ' +
-      'sources) and come back with a `skipped` note rather than failing the whole pull.',
+      'taxCodeId where possible, and tallies how many pulled items are already "ready" (tax ' +
+      'AND quantity unit both resolve) vs. not — classification code, packaging unit, and ' +
+      'product type are always per-item, hand-filled directly in Item Sync. Item-readiness and ' +
+      'payment-method pulls are currently QuickBooks/Odoo-only (no equivalent main-API endpoint ' +
+      'exists yet for other sources) and come back with a `skipped` note rather than failing ' +
+      'the whole pull.',
   })
   @ApiQuery({
     name: 'source',
@@ -71,7 +71,7 @@ export class DashboardMappingsController {
   @Get()
   @ApiOperation({
     summary:
-      'List tax/classification/payment mappings for this tenant (plus read-only global tax and payment defaults)',
+      'List tax/payment/quantity_unit mappings for this tenant (plus read-only global tax and payment defaults)',
   })
   @ApiQuery({
     name: 'source',
@@ -81,7 +81,7 @@ export class DashboardMappingsController {
   @ApiQuery({
     name: 'type',
     required: false,
-    description: 'tax | classification | payment',
+    description: 'tax | payment | quantity_unit',
   })
   @ApiQuery({
     name: 'status',
@@ -117,7 +117,7 @@ export class DashboardMappingsController {
   @Get('item-classifications')
   @ApiOperation({
     summary:
-      "Search KRA item classification codes (itemClsCd) for the Assign Classification modal's typeahead — proxies CatalogService, since dashboard users have no other authenticated route to that reference data",
+      "Search KRA item classification codes (itemClsCd) for Item Sync's Edit Item classification typeahead — proxies CatalogService, since dashboard users have no other authenticated route to that reference data",
   })
   @ApiQuery({ name: 'query', required: false })
   @ApiQuery({ name: 'itemClsLvl', required: false })
@@ -140,7 +140,7 @@ export class DashboardMappingsController {
   @ApiOperation({
     summary:
       "Search KRA reference codes within a code group (cdCls) — e.g. '10' Unit of Quantity, " +
-      "'17' Packaging Unit — for the Assign Classification drawer's quantity/packaging unit " +
+      "'17' Packaging Unit — for Item Sync's Edit Item quantity/packaging unit " +
       'typeaheads. Proxies CatalogService the same way item-classifications does.',
   })
   @ApiQuery({ name: 'cdCls', required: false })
@@ -197,27 +197,6 @@ export class DashboardMappingsController {
     const user = req.user as DashboardRequestUser;
     const result = await this.mappings.approve(tenantId, id, user.email);
     return { success: true, message: 'Mapping approved', data: result };
-  }
-
-  @Patch('bulk-classify')
-  @ApiOperation({
-    summary:
-      'Apply one itemClsCd/itemType to many classification_mappings rows at once — backs the Mapping Center multi-select bulk assign action',
-  })
-  @ApiResponse({ status: 200, description: 'Bulk classify result' })
-  async bulkClassify(
-    @ActiveTenant() tenantId: string,
-    @Req() req: Request,
-    @Body() body: BulkClassifyMappingDto,
-  ) {
-    const user = req.user as DashboardRequestUser;
-    const result = await this.mappings.bulkClassify(
-      tenantId,
-      body.ids,
-      { itemClsCd: body.itemClsCd, itemType: body.itemType },
-      user.email,
-    );
-    return { success: true, message: 'Mappings updated', data: result };
   }
 
   @Patch(':id')

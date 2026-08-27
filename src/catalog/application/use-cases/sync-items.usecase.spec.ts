@@ -1,6 +1,5 @@
 import { syncItemsToEtims } from './sync-items.usecase';
 import type { CatalogItem } from '../../domain/entities/catalog-item.entity';
-import { ItemType } from '../../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../../shared/domain/enums/tax-category.enum';
 
 function makeItem(overrides: Partial<CatalogItem> = {}): CatalogItem {
@@ -11,15 +10,16 @@ function makeItem(overrides: Partial<CatalogItem> = {}): CatalogItem {
     externalId: 'ext-1',
     name: 'Widget',
     sku: 'SKU-1',
-    itemType: ItemType.GOODS,
     taxCategory: TaxCategory.VAT_STANDARD,
     classificationCode: '14111400',
     classificationMethod: 'EXTERNAL_ID',
     needsClassificationReview: false,
     unitCode: 'NO',
     packagingUnitCode: 'NT',
+    needsClassificationMapping: false,
     taxTyCd: 'B',
     productTypeCode: '2',
+    needsProductType: false,
     unitPrice: null,
     originCountry: null,
     sourceSystem: null,
@@ -287,5 +287,53 @@ describe('syncItemsToEtims', () => {
     // to see.
     expect(savedItem.lastSyncResultCd).toBeNull();
     expect(savedItem.lastSyncResultMsg).toBe('retryable: fetch failed');
+  });
+
+  /**
+   * Regression: an item pulled with no approved classification_mappings row
+   * now still registers locally (registerItem no longer throws -- see
+   * register-item.spec.ts's "4)"/"4b)" tests), so it can reach this
+   * function with '' classificationCode/unitCode/packagingUnitCode.
+   * saveItem requires all three -- this must skip the item with a clear
+   * reason instead of submitting blank codes to KRA or crashing the batch.
+   */
+  it('skips an item missing classification/unit codes instead of submitting blank codes to KRA', async () => {
+    const item = makeItem({
+      classificationCode: '',
+      unitCode: '',
+      packagingUnitCode: '',
+      needsClassificationMapping: true,
+    });
+    const itemRepo = {
+      findByMerchant: jest.fn().mockResolvedValue([item]),
+      save: jest.fn().mockImplementation((i) => Promise.resolve(i)),
+    };
+    const connectionRepo = {
+      findByMerchantAndBranch: jest.fn().mockResolvedValue({
+        kraPin: 'P000000000A',
+        kraBhfId: '00',
+        cmcKey: 'cmc-key',
+        deviceId: 'device-1',
+        environment: 'SANDBOX',
+      }),
+    };
+    const etimsAdapter = { saveItem: jest.fn() };
+    const syncStateRepo = makeSyncStateRepo();
+
+    const result = await syncItemsToEtims(
+      { merchantId: 'merchant-1', branchId: 'branch-1' },
+      {
+        itemRepo: itemRepo as any,
+        connectionRepo: connectionRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+      },
+    );
+
+    expect(result.failed).toBe(1);
+    expect(result.synced).toBe(0);
+    expect(etimsAdapter.saveItem).not.toHaveBeenCalled();
+    expect(itemRepo.save).not.toHaveBeenCalled();
+    expect(result.results[0].error).toMatch(/classification and\/or unit codes/i);
   });
 });

@@ -1,11 +1,13 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import {
+  computeIsStockItem,
+  computeNeedsClassificationMapping,
   computeNeedsClassificationReview,
+  computeNeedsProductType,
   type CatalogItem,
 } from '../../domain/entities/catalog-item.entity';
 import type { ICatalogItemRepository } from '../../domain/ports/item-repository.port';
 import type { IClassificationResolver } from '../../domain/ports/classification-resolver.port';
-import { ItemType } from '../../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../../shared/domain/enums/tax-category.enum';
 
 export interface UpdateManualItemInput {
@@ -18,8 +20,6 @@ export interface UpdateManualItemInput {
   packagingUnitCode?: string;
   unitPrice?: number | null;
   originCountry?: string | null;
-  /** Derived by the caller from productTypeCode ('3' -> SERVICE, else GOODS) -- see createItem's identical derivation. */
-  itemType?: ItemType;
   /** Derived by the caller from taxTyCd via the same TAX_CATEGORY_BY_CODE map createItem uses. */
   taxCategory?: TaxCategory;
   /** Explicit OSCU tax type code (taxTyCd) -- takes precedence over deriving one from taxCategory. */
@@ -58,7 +58,7 @@ export async function updateManualItem(
   }
   if (existing.externalId) {
     throw new BadRequestException(
-      'This item was pulled from a connected ERP -- edit it there, or override its classification via Mapping Center, rather than directly.',
+      'This item was pulled from a connected ERP -- use Item Sync\'s Edit Item for its classification/packaging/product type, or edit its name/tax in the ERP itself.',
     );
   }
   if (existing.registrationStatus === 'REGISTERED') {
@@ -74,7 +74,6 @@ export async function updateManualItem(
     input.sku === undefined &&
     input.unitPrice === undefined &&
     input.originCountry === undefined &&
-    input.itemType === undefined &&
     input.taxCategory === undefined &&
     input.taxTyCd === undefined &&
     input.productTypeCode === undefined
@@ -90,24 +89,33 @@ export async function updateManualItem(
     input.originCountry !== undefined
       ? input.originCountry
       : existing.originCountry;
-  const itemType = input.itemType ?? existing.itemType;
   const taxCategory = input.taxCategory ?? existing.taxCategory;
-  // Stock-tracking eligibility follows itemType, same rule as registerItem.
-  const isStockItem = itemType === ItemType.GOODS;
 
   const resolution = await classificationResolver.resolveClassification({
     merchantId: input.merchantId,
-    itemType,
-    itemName: name,
-    sku: sku ?? undefined,
-    sourceSystem: existing.sourceSystem,
     classificationCode: input.classificationCode ?? existing.classificationCode,
     unitCode: input.unitCode ?? existing.unitCode,
     packagingUnitCode: input.packagingUnitCode ?? existing.packagingUnitCode,
     taxTyCd: input.taxTyCd ?? existing.taxTyCd,
-    productTypeCode: input.productTypeCode ?? existing.productTypeCode,
+    productTypeCode:
+      input.productTypeCode ?? existing.productTypeCode ?? undefined,
     internalTaxCategory: taxCategory,
   });
+
+  // Stock-tracking eligibility and the "needs a product type" gate both
+  // follow the resolved productTypeCode, same rule as registerItem.
+  const isStockItem = computeIsStockItem(resolution.productTypeCode);
+  const needsProductType = computeNeedsProductType(resolution.productTypeCode);
+  // Same '' sentinel as registerItem -- resolveClassification never throws
+  // for these three, see its doc comment.
+  const classificationCode = resolution.classificationCode ?? '';
+  const unitCode = resolution.unitCode ?? '';
+  const packagingUnitCode = resolution.packagingUnitCode ?? '';
+  const needsClassificationMapping = computeNeedsClassificationMapping(
+    classificationCode,
+    unitCode,
+    packagingUnitCode,
+  );
 
   const now = new Date();
   const updated: CatalogItem = {
@@ -116,16 +124,17 @@ export async function updateManualItem(
     sku,
     unitPrice,
     originCountry,
-    itemType,
     taxCategory,
     isStockItem,
-    classificationCode: resolution.classificationCode,
+    classificationCode,
     classificationMethod: resolution.method,
     needsClassificationReview: computeNeedsClassificationReview(resolution.method),
-    unitCode: resolution.unitCode,
-    packagingUnitCode: resolution.packagingUnitCode,
+    unitCode,
+    packagingUnitCode,
+    needsClassificationMapping,
     taxTyCd: resolution.taxTyCd,
     productTypeCode: resolution.productTypeCode,
+    needsProductType,
     // Any change requires a resync to eTIMS (same itemCd can be reused) --
     // mirrors registerItem's "something changed" resync trigger.
     registrationStatus: 'PENDING',

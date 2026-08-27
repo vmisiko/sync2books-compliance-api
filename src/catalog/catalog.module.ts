@@ -11,7 +11,6 @@ import {
   CLASSIFICATION_RESOLVER,
   ITEM_REPO,
 } from '../shared/tokens';
-import { ClassificationMappingOrmEntity } from '../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
 import { OscuMappingModule } from '../regulatory/oscu/oscu-mapping.module';
 import { OscuReferenceModule } from '../regulatory/oscu/oscu-reference.module';
 import { TaxMappingOrmEntity } from '../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
@@ -33,11 +32,7 @@ import { InventoryModule } from '../inventory/inventory.module';
     // itself imports CatalogModule (for ITEM_REPO/ETIMS_ADAPTER), so this side is
     // wrapped in forwardRef() to break the cycle; InventoryModule does the same.
     forwardRef(() => InventoryModule),
-    TypeOrmModule.forFeature([
-      CatalogItemOrmEntity,
-      TaxMappingOrmEntity,
-      ClassificationMappingOrmEntity,
-    ]),
+    TypeOrmModule.forFeature([CatalogItemOrmEntity, TaxMappingOrmEntity]),
   ],
   controllers: [CatalogController],
   providers: [

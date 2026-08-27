@@ -23,6 +23,7 @@ import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { SyncItemsDto } from './dto/sync-items.dto';
+import { BulkUpdateItemsDto } from './dto/bulk-update-items.dto';
 
 @Controller('dashboard-api/items')
 @ApiTags('Dashboard items (Mode B)')
@@ -104,5 +105,23 @@ export class DashboardItemsController {
       productTypeCode: body.productTypeCode,
     });
     return { success: true, message: 'Item updated', data: { item } };
+  }
+
+  @Patch('bulk-classification')
+  @ApiOperation({
+    summary:
+      'Apply classificationCode/packagingUnitCode/productTypeCode to many catalog items at once — backs Item Sync\'s multi-select bulk action. Writes the catalog item directly and immediately, no re-pull needed.',
+  })
+  @ApiResponse({ status: 200, description: 'Bulk update result' })
+  async bulkUpdate(
+    @ActiveTenant() tenantId: string,
+    @Body() body: BulkUpdateItemsDto,
+  ) {
+    const result = await this.items.bulkUpdateItems(tenantId, body.itemIds, {
+      classificationCode: body.classificationCode,
+      packagingUnitCode: body.packagingUnitCode,
+      productTypeCode: body.productTypeCode,
+    });
+    return { success: true, message: 'Items updated', data: result };
   }
 }

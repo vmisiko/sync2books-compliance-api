@@ -187,6 +187,54 @@ export async function syncItemsToEtims(
 
   const results: SyncItemResult[] = [];
   for (const item of toSync) {
+    // itemTyCd is required by saveItem and embedded in itemCd itself, but
+    // this system never guesses it (see CatalogItem.productTypeCode's doc
+    // comment) -- an item still pending that choice can't be synced at all.
+    // Surfaced as an explicit skipped/failed result rather than silently
+    // dropped, so it's visible in the sync outcome instead of just vanishing.
+    // Bound to a local so it narrows to `string` for generateEtimsItemCd
+    // below -- narrowing `item.productTypeCode` alone wouldn't narrow
+    // `item`'s own type when the whole object is passed elsewhere.
+    const productTypeCode = item.productTypeCode;
+    if (productTypeCode == null) {
+      results.push({
+        itemId: item.id,
+        itemCd: item.etimsItemCode ?? '',
+        success: false,
+        resultCd: null,
+        resultMsg: null,
+        error:
+          'This item has no product type set (Raw Material / Finished Product / Service) -- set it before syncing to KRA.',
+      });
+      continue;
+    }
+
+    // Classification/quantity-unit/packaging-unit resolution can come back
+    // unresolved ('' -- see CatalogItem.classificationCode's doc comment)
+    // for an item pulled from an ERP with none of the three set yet (no ERP
+    // supplies any of them -- see Item Sync's Add/Edit/Bulk Edit for the
+    // only way they get set). Such an item still registers locally
+    // (needsClassificationMapping
+    // true) so it's visible and fixable in Item Sync, but saveItem requires
+    // all three -- skip it here with a clear per-item reason rather than
+    // submitting blank/malformed codes to KRA.
+    if (
+      item.classificationCode === '' ||
+      item.unitCode === '' ||
+      item.packagingUnitCode === ''
+    ) {
+      results.push({
+        itemId: item.id,
+        itemCd: item.etimsItemCode ?? '',
+        success: false,
+        resultCd: null,
+        resultMsg: null,
+        error:
+          'This item is missing its classification and/or unit codes -- resolve them via Mapping Center or edit the item before syncing to KRA.',
+      });
+      continue;
+    }
+
     // Everything in this iteration -- itemCd generation included -- must stay
     // inside the try. A single malformed item (e.g. a unitCode that isn't
     // exactly 2 chars) used to throw here uncaught, which aborted the whole
@@ -200,7 +248,7 @@ export async function syncItemsToEtims(
           connection.kraPin,
           connection.environment,
         );
-        itemCd = generateEtimsItemCd(item, seq);
+        itemCd = generateEtimsItemCd({ ...item, productTypeCode }, seq);
       }
       const now = new Date();
 
@@ -210,7 +258,7 @@ export async function syncItemsToEtims(
         cmcKey: connection.cmcKey,
         itemClsCd: item.classificationCode,
         itemCd,
-        itemTyCd: item.productTypeCode,
+        itemTyCd: productTypeCode,
         itemNm: item.name,
         itemStdNm: null,
         orgnNatCd: item.originCountry ?? 'KE',

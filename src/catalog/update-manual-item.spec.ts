@@ -4,7 +4,6 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { CatalogModule } from './catalog.module';
 import { CatalogService } from './api/catalog.service';
 import type { RegisterItemInput } from './application/use-cases/register-item.usecase';
-import { ItemType } from '../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../shared/domain/enums/tax-category.enum';
 import { SourceSystem } from '../shared/domain/enums/source-system.enum';
 import { CATALOG_ITEM_REPO } from '../shared/tokens';
@@ -45,7 +44,6 @@ describe('CatalogService.updateManualItem', () => {
     const input: RegisterItemInput = {
       merchantId: 'm1',
       name: 'Macbook Pro',
-      itemType: ItemType.GOODS,
       taxCategory: TaxCategory.VAT_STANDARD,
       classificationCode: '1010151800',
       unitCode: 'KG',

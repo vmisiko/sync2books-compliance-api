@@ -24,7 +24,10 @@ import { canTransition } from '../domain/state-machine/compliance-state-machine'
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import type { ComplianceDocument } from '../domain/entities/compliance-document.entity';
 import type { ComplianceEvent } from '../domain/entities/compliance-event.entity';
-import type { ComplianceItem } from '../../shared/domain/entities/compliance-item.entity';
+import {
+  deriveItemType,
+  type ComplianceItem,
+} from '../../shared/domain/entities/compliance-item.entity';
 import { ItemType } from '../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
 import type { ComplianceConnection } from '../../shared/domain/entities/compliance-connection.entity';
@@ -236,7 +239,9 @@ export class SalesService {
 
     for (const line of document.lines) {
       const item = itemsById.get(line.itemId);
-      const isStockable = item ? item.itemType === ItemType.GOODS : false;
+      const isStockable = item
+        ? deriveItemType(item.productTypeCode) === ItemType.GOODS
+        : false;
       if (!isStockable) continue;
 
       await this.inventoryService.recordMovement({
@@ -374,7 +379,9 @@ export class SalesService {
           discountRate: 0,
           discountAmount: 0,
           etimsItemCode: null,
-          isStockable: item ? item.itemType === ItemType.GOODS : null,
+          isStockable: item
+            ? deriveItemType(item.productTypeCode) === ItemType.GOODS
+            : null,
           itemId: l.itemId,
           itemName: item?.name ?? null,
           itemDescription: l.description || null,
@@ -874,7 +881,9 @@ function buildNormalizedSaleReport(input: {
         discountRate: 0,
         discountAmount: 0,
         etimsItemCode: null,
-        isStockable: item ? item.itemType === ItemType.GOODS : null,
+        isStockable: item
+          ? deriveItemType(item.productTypeCode) === ItemType.GOODS
+          : null,
         itemId: l.itemId,
         itemName: item?.name ?? null,
         itemDescription: l.description || null,

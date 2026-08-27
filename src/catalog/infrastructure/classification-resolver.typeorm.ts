@@ -1,41 +1,31 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, IsNull, Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import type {
-  ClassificationMethod,
   ClassificationResolution,
   IClassificationResolver,
 } from '../domain/ports/classification-resolver.port';
 import { TaxMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
-import { ClassificationMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
-import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
 
 @Injectable()
 export class ClassificationResolverTypeOrm implements IClassificationResolver {
   constructor(
     @InjectRepository(TaxMappingOrmEntity)
     private readonly taxRepo: Repository<TaxMappingOrmEntity>,
-    @InjectRepository(ClassificationMappingOrmEntity)
-    private readonly clsRepo: Repository<ClassificationMappingOrmEntity>,
   ) {}
 
   /**
    * Tax stays category-based (internalTaxCategory -> one shared, approved
-   * tax_mappings row — KRA only has 5 tax types). Quantity/packaging unit
-   * and classification are all resolved per item — the caller must supply
-   * unitCode/packagingUnitCode/classificationCode directly (looked up from
-   * that item's own classification_mappings row by the caller), since
-   * there's no category table to fall back to for them anymore. Missing
-   * any of the three throws a clear per-field error rather than silently
-   * defaulting, mirroring how classification has always behaved.
+   * tax_mappings row — KRA only has 5 tax types) and still throws if
+   * genuinely unresolvable (see resolveTaxTyCd). Classification/quantity/
+   * packaging unit and product type are all supplied directly by the
+   * caller now (Item Sync's Add/Edit/Bulk Edit, or a manual item's own
+   * form) -- see ClassificationMethod's doc comment for why the old
+   * classification_mappings-backed auto-match chain was removed. Missing
+   * any of the four simply resolves to null, never throws.
    */
   async resolveClassification(params: {
     merchantId: string;
-    itemType: string;
-    itemName?: string;
-    sku?: string;
-    externalId?: string;
-    sourceSystem?: string | null;
     classificationCode?: string;
     unitCode?: string;
     packagingUnitCode?: string;
@@ -45,27 +35,22 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
   }): Promise<ClassificationResolution> {
     const merchantId = params.merchantId;
 
-    const productTypeCode =
-      params.productTypeCode ?? inferProductTypeCode(params.itemType);
+    // Never inferred/guessed -- null (unset) is a legitimate, expected value
+    // here (see CatalogItem.productTypeCode's doc comment), not a gap to fill.
+    const productTypeCode = params.productTypeCode ?? null;
 
     const taxTyCd =
       params.taxTyCd ??
       (await this.resolveTaxTyCd(merchantId, params.internalTaxCategory));
 
-    if (!params.unitCode) {
-      throw new Error(
-        `Missing qtyUnitCd for item (merchantId=${merchantId}). Resolve it on the item's classification_mappings row before registering.`,
-      );
-    }
-    if (!params.packagingUnitCode) {
-      throw new Error(
-        `Missing pkgUnitCd for item (merchantId=${merchantId}). Resolve it on the item's classification_mappings row before registering.`,
-      );
-    }
-
-    const { classificationCode, method } = params.classificationCode
-      ? { classificationCode: params.classificationCode, method: 'EXPLICIT' as ClassificationMethod }
-      : await this.resolveItemClassification(merchantId, params, params.sourceSystem ?? null);
+    // No category table or per-item lookup backs any of these three --
+    // either the caller supplied its own value directly, or there's
+    // nothing to resolve. null (not a throw) is the expected result of
+    // "not yet set" -- see this class's top-level doc comment and
+    // CatalogItem.needsClassificationMapping.
+    const unitCode = params.unitCode ?? null;
+    const packagingUnitCode = params.packagingUnitCode ?? null;
+    const classificationCode = params.classificationCode ?? null;
 
     const source: ClassificationResolution['source'] =
       params.classificationCode ||
@@ -78,12 +63,12 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
 
     return {
       classificationCode,
-      unitCode: params.unitCode,
-      packagingUnitCode: params.packagingUnitCode,
+      unitCode,
+      packagingUnitCode,
       taxTyCd,
       productTypeCode,
       source,
-      method,
+      method: classificationCode ? 'EXPLICIT' : 'UNRESOLVED',
     };
   }
 
@@ -126,99 +111,4 @@ export class ClassificationResolverTypeOrm implements IClassificationResolver {
       `Missing tax mapping for internalTaxCategory=${internalTaxCategory} (merchantId=${merchantId})`,
     );
   }
-
-  private async resolveItemClassification(
-    merchantId: string,
-    params: {
-      itemType: string;
-      itemName?: string;
-      sku?: string;
-      externalId?: string;
-    },
-    sourceSystem: string | null,
-  ): Promise<{ classificationCode: string; method: ClassificationMethod }> {
-    const type = params.itemType ?? null;
-    // Scoped by sourceSystem -- two ERPs routinely assign the same small
-    // numeric externalId (or even the same SKU) to unrelated products for
-    // the same merchant. Without this, an Odoo item could silently inherit
-    // a QuickBooks item's classification (or vice versa) purely by id
-    // coincidence. `sourceSystem: null` (a manually-created item, or an ERP
-    // main-api doesn't standardize yet) only matches rows with no
-    // sourceSystem recorded, not every other ERP's rows either.
-    const sourceSystemFilter = sourceSystem
-      ? (sourceSystem as SourceSystem)
-      : IsNull();
-
-    if (params.externalId) {
-      const m = await this.clsRepo.findOne({
-        where: {
-          merchantId,
-          matchType: 'EXTERNAL_ID',
-          matchValue: params.externalId,
-          itemType: type,
-          sourceSystem: sourceSystemFilter,
-          active: true,
-        },
-        order: { priority: 'ASC', updatedAt: 'DESC' },
-      });
-      // itemClsCd can be null on Mapping Center's NEEDS_REVIEW placeholder
-      // rows; those are always created with active: false so this shouldn't
-      // trigger, but guard anyway rather than resolve a sale to a null code.
-      if (m && m.itemClsCd) {
-        return { classificationCode: m.itemClsCd, method: 'EXTERNAL_ID' };
-      }
-    }
-
-    if (params.sku) {
-      const m = await this.clsRepo.findOne({
-        where: {
-          merchantId,
-          matchType: 'SKU',
-          matchValue: params.sku,
-          itemType: type,
-          sourceSystem: sourceSystemFilter,
-          active: true,
-        },
-        order: { priority: 'ASC', updatedAt: 'DESC' },
-      });
-      if (m && m.itemClsCd) {
-        return { classificationCode: m.itemClsCd, method: 'SKU' };
-      }
-    }
-
-    if (params.itemName) {
-      const m = await this.clsRepo.findOne({
-        where: {
-          merchantId,
-          matchType: 'NAME_CONTAINS',
-          matchValue: ILike(`%${params.itemName}%`),
-          itemType: type,
-          sourceSystem: sourceSystemFilter,
-          active: true,
-        },
-        order: { priority: 'ASC', updatedAt: 'DESC' },
-      });
-      if (m && m.itemClsCd) {
-        return { classificationCode: m.itemClsCd, method: 'NAME_CONTAINS' };
-      }
-    }
-
-    const fallback = await this.clsRepo.findOne({
-      where: { merchantId, source: 'default', active: true },
-      order: { priority: 'ASC', updatedAt: 'DESC' },
-    });
-    if (fallback && fallback.itemClsCd) {
-      return { classificationCode: fallback.itemClsCd, method: 'DEFAULT' };
-    }
-
-    throw new Error(
-      `Missing classification mapping for item (merchantId=${merchantId}). Provide classificationCode or configure classification_mappings.`,
-    );
-  }
-}
-
-function inferProductTypeCode(itemType: string): string {
-  // Default heuristic: GOODS -> finished product (2), SERVICE -> service (3)
-  if (itemType === 'SERVICE') return '3';
-  return '2';
 }

@@ -1,5 +1,4 @@
 import { BadRequestException } from '@nestjs/common';
-import { ItemType } from '../../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../../shared/domain/enums/tax-category.enum';
 import type { RegisterItemInput } from '../../application/use-cases/register-item.usecase';
 
@@ -35,13 +34,20 @@ export interface MainApiPulledItem {
 }
 
 /**
- * KRA's own item-type code list has no "non-stock good" concept — Inventory and NonInventory
- * both collapse to GOODS here; only Service maps to SERVICE. Mirrors the exact behavior the
- * original (now-deleted) qb-item.mapper.ts#mapQbItemType had, just reading main API's already
- * Codat-normalized 4-value type instead of QuickBooks' raw one.
+ * Only maps what the ERP's own signal actually, unambiguously tells us.
+ * `Service` is confident -- KRA's itemTyCd '3'. `Inventory`/`NonInventory` is
+ * an accounting distinction (stock-tracked vs not), NOT the same axis as
+ * KRA's Raw Material vs Finished Product split -- no ERP here has any
+ * concept of that distinction, so guessing between '1' and '2' would be
+ * fabricating data KRA requires a human to actually decide. Returns
+ * undefined (product type left unset, needsProductType true) for anything
+ * that isn't unambiguously a service, same as a fresh manual entry with
+ * nothing selected yet.
  */
-function collapseItemType(itemType: MainApiStandardizedItemType): ItemType {
-  return itemType === 'Service' ? ItemType.SERVICE : ItemType.GOODS;
+function deriveProductTypeCode(
+  itemType: MainApiStandardizedItemType,
+): string | undefined {
+  return itemType === 'Service' ? '3' : undefined;
 }
 
 export function mapMainApiItemToRegisterItemInput(params: {
@@ -49,10 +55,6 @@ export function mapMainApiItemToRegisterItemInput(params: {
   item: MainApiPulledItem;
   /** Resolved by the caller via MappingSuggestionService.suggestTaxCodeMapping — see DashboardItemsApplicationService.pullItems. */
   taxCategory: TaxCategory;
-  classificationCodeOverride?: string;
-  /** This item's own KRA quantity/packaging unit codes, looked up by the caller from its classification_mappings row (see DashboardItemsApplicationService.pullItems). */
-  qtyUnitCdOverride?: string;
-  packagingUnitCdOverride?: string;
 }): RegisterItemInput {
   const { merchantId, item } = params;
 
@@ -71,11 +73,15 @@ export function mapMainApiItemToRegisterItemInput(params: {
     externalId,
     name: item.name,
     sku: item.sku ?? null,
-    itemType: collapseItemType(item.itemType),
+    productTypeCode: deriveProductTypeCode(item.itemType),
     taxCategory: params.taxCategory,
-    classificationCode: params.classificationCodeOverride,
-    unitCode: params.qtyUnitCdOverride,
-    packagingUnitCode: params.packagingUnitCdOverride,
+    // classificationCode/unitCode/packagingUnitCode are deliberately omitted
+    // here -- no ERP tells us these, and register-item.usecase.ts's
+    // existing-preferring fallback means omitting them is safe for both a
+    // brand new item (lands PENDING with needsClassificationMapping true,
+    // fixed once in Item Sync) and an existing one (a re-pull never erases
+    // what a human already set there -- see that fallback's doc comment for
+    // the incident this fixed).
     // Main API's Item.unitPrice is a MySQL `decimal` column -- TypeORM/mysql2
     // serialize decimal columns as strings over the wire to avoid float
     // precision loss, despite MainApiItem's own TS type claiming `number`.

@@ -17,8 +17,15 @@ export class RegisterCatalogItemDto {
   @ApiProperty({ type: String, required: false, nullable: true })
   sku?: string | null;
 
-  @ApiProperty({ enum: ItemType })
-  itemType!: ItemType;
+  /**
+   * @deprecated no longer read by registerItem() -- itemType is fully
+   * derived from productTypeCode now, never an independent input (see
+   * CatalogItem.productTypeCode's doc comment). Kept optional, not removed,
+   * so existing Mode A (main API) callers that still send it don't break;
+   * the value is simply ignored.
+   */
+  @ApiProperty({ enum: ItemType, required: false, deprecated: true })
+  itemType?: ItemType;
 
   @ApiProperty({ enum: TaxCategory })
   taxCategory!: TaxCategory;

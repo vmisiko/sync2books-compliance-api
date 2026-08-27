@@ -24,9 +24,6 @@ export class CatalogItemOrmEntity {
   sku!: string | null;
 
   @Column({ type: 'varchar' })
-  itemType!: string;
-
-  @Column({ type: 'varchar' })
   taxCategory!: string;
 
   @Column()
@@ -41,8 +38,13 @@ export class CatalogItemOrmEntity {
   @Column({ type: 'varchar', default: 'B' })
   taxTyCd!: string;
 
-  @Column({ type: 'varchar', default: '2' })
-  productTypeCode!: string;
+  /**
+   * OSCU itemTyCd -- nullable because it is NEVER guessed (see
+   * CatalogItem.productTypeCode's doc comment). No DB default: an
+   * unpopulated row must read back as null, not silently as '2'.
+   */
+  @Column({ type: 'varchar', nullable: true })
+  productTypeCode!: string | null;
 
   /**
    * Which classification-resolver strategy matched classificationCode (see

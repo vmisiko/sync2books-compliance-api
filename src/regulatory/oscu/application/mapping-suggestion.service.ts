@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { TaxCategory } from '../../../shared/domain/enums/tax-category.enum';
-import type { ClassificationMatchType } from '../infrastructure/persistence/classification-mapping.orm-entity';
 
 export interface TaxMappingSuggestion {
   internalTaxCategory: TaxCategory;
@@ -9,16 +8,17 @@ export interface TaxMappingSuggestion {
   confidenceScore: number;
 }
 
-export interface UnitMappingSuggestion {
+export interface QuantityUnitAliasMatch {
   internalUnit: string;
-  qtyUnitCd: string;
-  pkgUnitCd: string;
-  confidenceScore: number;
-}
-
-export interface ClassificationPlaceholder {
-  matchType: ClassificationMatchType;
-  matchValue: string;
+  /**
+   * A search term to feed into the live oscu_codes table (cdCls '10'), NOT
+   * a hardcoded final qtyUnitCd — deliberately: this service has no DB
+   * access (see the class doc comment), and KRA's exact code↔name pairing
+   * should always be resolved against the live-synced table, not a value
+   * frozen into this file, so a code renumbering or resync corrects itself
+   * automatically instead of silently going stale.
+   */
+  searchTerm: string;
 }
 
 export interface PaymentMethodMappingSuggestion {
@@ -36,17 +36,28 @@ const TAX_CATEGORY_CODE: Record<TaxCategory, string> = {
   [TaxCategory.VAT_8]: 'E',
 };
 
-/** Matches oscu-mapping.seed.ts's known internal units (EA/EACH/PCS -> NO, KG -> KG, L/LTR -> LTR). */
-const KNOWN_UNITS: Array<{
+/**
+ * Common ERP quantity-unit phrasings, normalized to an internal bucket key
+ * and a search term to resolve against the live KRA cdCls '10' code list
+ * (see matchKraCode in dashboard-mapping.application.service.ts, which does
+ * the actual DB lookup — this table only narrows down which real code to
+ * search for). Verified against the OSCU spec's own Unit of Quantity table
+ * (.docs/OSCU_Specification_Document_v2.0.txt §4.7) rather than guessed —
+ * a prior version of this table existed only in dead code
+ * (suggestUnitMapping, never called anywhere) and had at least one
+ * confirmed-wrong pairing (EA/EACH/PCS -> NO), which per the real spec is
+ * U ("Pieces/item [Number]"); NO is a distinct code, "Number". Deliberately
+ * does not cover every one of the ~30 codes — omits ones with no plausible
+ * common ERP phrasing (e.g. NX "part per thousand") rather than guessing.
+ */
+const QTY_UNIT_ALIASES: Array<{
   internalUnit: string;
-  qtyUnitCd: string;
-  pkgUnitCd: string;
+  searchTerm: string;
   aliases: string[];
 }> = [
   {
-    internalUnit: 'EA',
-    qtyUnitCd: 'NO',
-    pkgUnitCd: 'NT',
+    internalUnit: 'PIECES',
+    searchTerm: 'pieces',
     aliases: [
       'ea',
       'each',
@@ -61,17 +72,115 @@ const KNOWN_UNITS: Array<{
     ],
   },
   {
-    internalUnit: 'KG',
-    qtyUnitCd: 'KG',
-    pkgUnitCd: 'NT',
-    aliases: ['kg', 'kgs', 'kilogram', 'kilograms', 'kilo', 'kilos'],
+    internalUnit: 'NUMBER',
+    searchTerm: 'number',
+    aliases: ['no', 'no.', 'number'],
   },
   {
-    internalUnit: 'LTR',
-    qtyUnitCd: 'LTR',
-    pkgUnitCd: 'NT',
+    internalUnit: 'KILOGRAM',
+    searchTerm: 'kilo',
+    aliases: [
+      'kg',
+      'kgs',
+      'kilogram',
+      'kilograms',
+      'kilo',
+      'kilos',
+      'kilogramme',
+      'kilogrammes',
+    ],
+  },
+  {
+    internalUnit: 'GRAM',
+    searchTerm: 'gram',
+    aliases: ['g', 'gm', 'gms', 'gram', 'grams'],
+  },
+  {
+    internalUnit: 'MILLIGRAM',
+    searchTerm: 'milligram',
+    aliases: ['mg', 'milligram', 'milligrams'],
+  },
+  {
+    internalUnit: 'LITRE',
+    searchTerm: 'litre',
     aliases: ['l', 'ltr', 'litre', 'liter', 'litres', 'liters'],
   },
+  {
+    internalUnit: 'GALLON',
+    searchTerm: 'gallon',
+    aliases: ['gal', 'gallon', 'gallons'],
+  },
+  {
+    internalUnit: 'DOZEN',
+    searchTerm: 'dozen',
+    aliases: ['dz', 'doz', 'dozen'],
+  },
+  { internalUnit: 'GROSS', searchTerm: 'gross', aliases: ['gross'] },
+  {
+    internalUnit: 'METRE',
+    searchTerm: 'metre',
+    aliases: ['m', 'metre', 'meter', 'metres', 'meters'],
+  },
+  {
+    internalUnit: 'SQUARE_METRE',
+    searchTerm: 'square metre',
+    aliases: [
+      'm2',
+      'sqm',
+      'square metre',
+      'square meter',
+      'square metres',
+      'square meters',
+    ],
+  },
+  {
+    internalUnit: 'CUBIC_METRE',
+    searchTerm: 'cubic metre',
+    aliases: ['m3', 'cbm', 'cubic metre', 'cubic meter'],
+  },
+  {
+    internalUnit: 'KILOMETRE',
+    searchTerm: 'kilometre',
+    aliases: ['km', 'kilometre', 'kilometer', 'kilometres', 'kilometers'],
+  },
+  {
+    internalUnit: 'YARD',
+    searchTerm: 'yard',
+    aliases: ['yd', 'yard', 'yards'],
+  },
+  {
+    internalUnit: 'POUND',
+    searchTerm: 'pound',
+    aliases: ['lb', 'lbs', 'pound', 'pounds'],
+  },
+  {
+    internalUnit: 'TONNE',
+    searchTerm: 'tonne',
+    aliases: ['ton', 'tons', 'tonne', 'tonnes', 'metric ton', 'metric tons'],
+  },
+  {
+    internalUnit: 'KILOWATT',
+    searchTerm: 'kilowatt',
+    aliases: ['kw', 'kilowatt', 'kilowatts'],
+  },
+  {
+    internalUnit: 'MEGAWATT',
+    searchTerm: 'megawatt',
+    aliases: ['mw', 'megawatt', 'megawatts'],
+  },
+  {
+    internalUnit: 'PACKET',
+    searchTerm: 'packet',
+    aliases: ['pack', 'packs', 'packet', 'packets'],
+  },
+  { internalUnit: 'PLATE', searchTerm: 'plate', aliases: ['plate', 'plates'] },
+  { internalUnit: 'PAIR', searchTerm: 'pair', aliases: ['pair', 'pairs'] },
+  { internalUnit: 'REEL', searchTerm: 'reel', aliases: ['reel', 'reels'] },
+  { internalUnit: 'ROLL', searchTerm: 'roll', aliases: ['roll', 'rolls'] },
+  { internalUnit: 'SET', searchTerm: 'set', aliases: ['set', 'sets'] },
+  { internalUnit: 'SHEET', searchTerm: 'sheet', aliases: ['sheet', 'sheets'] },
+  { internalUnit: 'TUBE', searchTerm: 'tube', aliases: ['tube', 'tubes'] },
+  { internalUnit: 'LINK', searchTerm: 'link', aliases: ['link', 'links'] },
 ];
 
 /** Matches oscu-mapping.seed.ts's 8 internal payment methods -> OSCU pmtTyCd (cdCls '07'). */
@@ -99,7 +208,13 @@ const KNOWN_PAYMENT_METHODS: Array<{
   {
     internalPaymentMethod: 'DEBIT_CREDIT',
     pmtTyCd: '05',
-    aliases: ['debit card', 'credit card', 'debit/credit card', 'visa', 'mastercard'],
+    aliases: [
+      'debit card',
+      'credit card',
+      'debit/credit card',
+      'visa',
+      'mastercard',
+    ],
   },
   {
     internalPaymentMethod: 'CARD',
@@ -126,12 +241,11 @@ const KNOWN_PAYMENT_METHODS: Array<{
 /**
  * Confidence-scored auto-suggestion for the Mapping Center dashboard.
  * Deliberately conservative: for tax and unit mapping it only ever emits a
- * suggestion when a heuristic actually fires (90-98% band), and for item
- * classification it doesn't attempt automatic matching against KRA's
- * multi-thousand-row classification tree at all — see
- * suggestClassificationPlaceholder. This is pure scoring logic (no DB
- * access); DashboardMappingApplicationService is responsible for turning a
- * suggestion into a persisted tax_mappings/unit_mappings/classification_mappings row.
+ * suggestion when a heuristic actually fires (90-98% band). Item
+ * classification is out of scope entirely — see classification-resolver.port.ts's
+ * doc comment for why that's now handled directly in Item Sync instead of
+ * here. This is pure scoring logic (no DB access); DashboardMappingApplicationService
+ * is responsible for turning a suggestion into a persisted tax_mappings/unit_mappings row.
  */
 @Injectable()
 export class MappingSuggestionService {
@@ -290,32 +404,32 @@ export class MappingSuggestionService {
     return null;
   }
 
-  /** @param label Raw unit-of-measure label from the source system, e.g. MainApiItem.unitOfMeasure. */
-  suggestUnitMapping(
+  /**
+   * Alias lookup only — resolving the actual qtyUnitCd against the live
+   * KRA code list is DashboardMappingApplicationService's job (this class
+   * has no DB access, see the class doc comment). Exact alias match first,
+   * then a looser contains-match (e.g. "Kilograms (kg)") at lower priority
+   * — callers should prefer an exact hit's searchTerm over a contains hit's.
+   * @param label Raw unit-of-measure label from the source system, e.g. MainApiItem.unitOfMeasure.
+   */
+  suggestQuantityUnitAlias(
     label: string | null | undefined,
-  ): UnitMappingSuggestion | null {
+  ): QuantityUnitAliasMatch | null {
     const n = (label ?? '').trim().toLowerCase();
     if (!n) return null;
 
-    for (const u of KNOWN_UNITS) {
+    for (const u of QTY_UNIT_ALIASES) {
       if (u.aliases.includes(n)) {
-        return {
-          internalUnit: u.internalUnit,
-          qtyUnitCd: u.qtyUnitCd,
-          pkgUnitCd: u.pkgUnitCd,
-          confidenceScore: 95,
-        };
+        return { internalUnit: u.internalUnit, searchTerm: u.searchTerm };
       }
     }
-    // Looser contains-match (e.g. "Kilograms (kg)") — still confident enough to surface, lower score.
-    for (const u of KNOWN_UNITS) {
-      if (u.aliases.some((alias) => n.includes(alias))) {
-        return {
-          internalUnit: u.internalUnit,
-          qtyUnitCd: u.qtyUnitCd,
-          pkgUnitCd: u.pkgUnitCd,
-          confidenceScore: 75,
-        };
+    // Loose contains-match (e.g. "Kilograms (kg)") — restricted to aliases
+    // of 3+ characters. A short alias like the bare letter "g" or "m" is
+    // fine for an exact whole-label match above, but as a substring check
+    // it false-positives constantly (e.g. "gigawatt".includes('g')).
+    for (const u of QTY_UNIT_ALIASES) {
+      if (u.aliases.some((alias) => alias.length >= 3 && n.includes(alias))) {
+        return { internalUnit: u.internalUnit, searchTerm: u.searchTerm };
       }
     }
     return null;
@@ -347,27 +461,6 @@ export class MappingSuggestionService {
         };
       }
     }
-    return null;
-  }
-
-  /**
-   * Deliberately NOT a classifier. KRA's itemClsCd tree has several thousand
-   * rows (see OscuItemClassificationOrmEntity) and guessing at it is out of
-   * scope for this pass — this just picks the best available match key so a
-   * NEEDS_REVIEW row can be created for a human to fill in itemClsCd via
-   * PATCH dashboard-api/mappings/:id. Mirrors the match-type precedence
-   * ClassificationResolverTypeOrm itself uses (EXTERNAL_ID > SKU > NAME_CONTAINS).
-   */
-  suggestClassificationPlaceholder(input: {
-    externalId?: string | null;
-    sku?: string | null;
-    itemName?: string | null;
-  }): ClassificationPlaceholder | null {
-    if (input.externalId)
-      return { matchType: 'EXTERNAL_ID', matchValue: input.externalId };
-    if (input.sku) return { matchType: 'SKU', matchValue: input.sku };
-    if (input.itemName)
-      return { matchType: 'NAME_CONTAINS', matchValue: input.itemName };
     return null;
   }
 }

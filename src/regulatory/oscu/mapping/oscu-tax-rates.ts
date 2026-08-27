@@ -1,3 +1,5 @@
+import { TaxCategory } from '../../../shared/domain/enums/tax-category.enum';
+
 /**
  * OSCU tax rates by taxTyCd, confirmed live against the sandbox 2026-08-11
  * (KRA rejects `taxRtE: 8` with "Rule taxRtE failed: Tax rate mismatch. Expected: 0.00").
@@ -16,6 +18,30 @@ export const OSCU_TAX_RATE_BY_TAX_TY_CD: Record<string, number> = {
 export function oscuTaxRateForCode(code: string | null | undefined): number {
   if (!code) return 0;
   return OSCU_TAX_RATE_BY_TAX_TY_CD[code.toUpperCase()] ?? 0;
+}
+
+/**
+ * Reverse of tax_mappings' usual direction (internalTaxCategory -> taxTyCd,
+ * resolved per-merchant against the DB): this is a fixed, global taxTyCd ->
+ * TaxCategory lookup for contexts with only a raw KRA taxTyCd to work from
+ * and no merchant-specific override to consult (e.g. deriving a sensible
+ * internal category for an item sourced directly from eTIMS data). Mirrors
+ * DashboardItemsApplicationService's original TAX_CATEGORY_BY_CODE -- single
+ * source of truth now, used by both.
+ */
+export const TAX_CATEGORY_BY_TAX_TY_CD: Record<string, TaxCategory> = {
+  A: TaxCategory.EXEMPT,
+  B: TaxCategory.VAT_STANDARD,
+  C: TaxCategory.VAT_ZERO,
+  D: TaxCategory.OTHER,
+  E: TaxCategory.VAT_8,
+};
+
+export function taxCategoryForCode(
+  code: string | null | undefined,
+): TaxCategory {
+  if (!code) return TaxCategory.OTHER;
+  return TAX_CATEGORY_BY_TAX_TY_CD[code.toUpperCase()] ?? TaxCategory.OTHER;
 }
 
 export function round2(n: number): number {

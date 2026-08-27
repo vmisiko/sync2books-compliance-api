@@ -3,7 +3,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogModule } from './catalog.module';
 import { CatalogController } from './api/catalog.controller';
 import { CatalogService } from './api/catalog.service';
-import { ItemType } from '../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../shared/domain/enums/tax-category.enum';
 import { ComplianceOrganizationApplicationService } from '../compliance-organization/application/compliance-organization.application.service';
 import type { IStockRepository } from '../inventory/domain/ports/stock-repository.port';
@@ -43,7 +42,6 @@ describe('CatalogController', () => {
       merchantId: 'merchant-2',
       externalId: 'ext-001',
       name: 'Widget',
-      itemType: ItemType.GOODS,
       taxCategory: TaxCategory.VAT_STANDARD,
       unitCode: 'NO',
       packagingUnitCode: 'NT',
@@ -61,7 +59,6 @@ describe('CatalogController', () => {
     const first = await service.registerItem({
       merchantId: 'merchant-manual',
       name: 'Consulting Hours',
-      itemType: ItemType.SERVICE,
       taxCategory: TaxCategory.VAT_STANDARD,
       unitCode: 'NO',
       packagingUnitCode: 'NT',
@@ -82,7 +79,6 @@ describe('CatalogController', () => {
     const second = await service.registerItem({
       merchantId: 'merchant-manual',
       name: 'Consulting Hours',
-      itemType: ItemType.SERVICE,
       taxCategory: TaxCategory.VAT_STANDARD,
       unitCode: 'NO',
       packagingUnitCode: 'NT',
@@ -166,7 +162,9 @@ describe('CatalogService: isStockItem derivation + zero-stock auto-seed', () => 
       merchantId: 'merchant-goods',
       externalId: 'ext-goods-1',
       name: 'Steel Beam',
-      itemType: ItemType.GOODS,
+      // Finished Product -- isStockItem is derived from productTypeCode, and
+      // this test specifically asserts isStockItem true.
+      productTypeCode: '2',
       taxCategory: TaxCategory.VAT_STANDARD,
       unitCode: 'NO',
       packagingUnitCode: 'NT',
@@ -189,7 +187,6 @@ describe('CatalogService: isStockItem derivation + zero-stock auto-seed', () => 
       merchantId: 'merchant-service',
       externalId: 'ext-service-1',
       name: 'Consulting',
-      itemType: ItemType.SERVICE,
       taxCategory: TaxCategory.VAT_STANDARD,
       unitCode: 'NO',
       packagingUnitCode: 'NT',
@@ -203,7 +200,7 @@ describe('CatalogService: isStockItem derivation + zero-stock auto-seed', () => 
     expect(stock).toBeNull();
   });
 
-  it('re-registering an existing item recomputes isStockItem from its current itemType, with no override surviving', async () => {
+  it('re-registering an existing item recomputes isStockItem from its current productTypeCode, with no override surviving', async () => {
     const { branchId } = await setupTenantAndBranch(
       'merchant-flip',
       'branch-flip',
@@ -213,7 +210,7 @@ describe('CatalogService: isStockItem derivation + zero-stock auto-seed', () => 
       merchantId: 'merchant-flip',
       externalId: 'ext-flip-1',
       name: 'Reclassified Item',
-      itemType: ItemType.GOODS,
+      productTypeCode: '2',
       taxCategory: TaxCategory.VAT_STANDARD,
       unitCode: 'NO',
       packagingUnitCode: 'NT',
@@ -225,13 +222,12 @@ describe('CatalogService: isStockItem derivation + zero-stock auto-seed', () => 
     ).toBe(0);
 
     // Re-register the same external item as a Service -- isStockItem must
-    // flip to false purely from itemType, with no override mechanism to
-    // pin the old value.
+    // flip to false purely from productTypeCode, with no override mechanism
+    // to pin the old value.
     const updated = await service.registerItem({
       merchantId: 'merchant-flip',
       externalId: 'ext-flip-1',
       name: 'Reclassified Item',
-      itemType: ItemType.SERVICE,
       taxCategory: TaxCategory.VAT_STANDARD,
       unitCode: 'NO',
       packagingUnitCode: 'NT',

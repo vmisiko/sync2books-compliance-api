@@ -2,7 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, IsNull, Repository } from 'typeorm';
 import {
+  computeNeedsClassificationMapping,
   computeNeedsClassificationReview,
+  computeNeedsProductType,
   type CatalogItem,
 } from '../../domain/entities/catalog-item.entity';
 import type { ICatalogItemRepository } from '../../domain/ports/item-repository.port';
@@ -16,13 +18,18 @@ function ormToDomain(row: CatalogItemOrmEntity): CatalogItem {
     externalId: row.externalId,
     name: row.name,
     sku: row.sku,
-    itemType: row.itemType as CatalogItem['itemType'],
     taxCategory: row.taxCategory as CatalogItem['taxCategory'],
     classificationCode: row.classificationCode,
     unitCode: row.unitCode,
     packagingUnitCode: row.packagingUnitCode,
+    needsClassificationMapping: computeNeedsClassificationMapping(
+      row.classificationCode,
+      row.unitCode,
+      row.packagingUnitCode,
+    ),
     taxTyCd: row.taxTyCd,
     productTypeCode: row.productTypeCode,
+    needsProductType: computeNeedsProductType(row.productTypeCode),
     classificationMethod: row.classificationMethod,
     needsClassificationReview: computeNeedsClassificationReview(
       row.classificationMethod,
@@ -50,7 +57,6 @@ function domainToOrm(item: CatalogItem): CatalogItemOrmEntity {
   e.externalId = item.externalId;
   e.name = item.name;
   e.sku = item.sku;
-  e.itemType = item.itemType;
   e.taxCategory = item.taxCategory;
   e.classificationCode = item.classificationCode;
   e.unitCode = item.unitCode;

@@ -1,45 +1,49 @@
 /**
- * Which strategy actually produced `classificationCode`, in the order
- * ClassificationResolverTypeOrm.resolveItemClassification tries them:
- *   - EXPLICIT: the caller already supplied classificationCode directly
- *     (e.g. a manually-created item's own form field, or an
- *     already-approved classification_mappings row resolved by the caller
- *     before calling in -- see DashboardItemsApplicationService.pullItems)
- *     -- the resolver's own lookup chain never ran.
- *   - EXTERNAL_ID: matched an active classification_mappings row keyed on
- *     this item's externalId -- the strongest signal (same ERP record).
- *   - SKU: matched on this item's sku -- an exact identifier, but less
- *     reliable than externalId (SKUs can be reused/reassigned).
- *   - NAME_CONTAINS: matched via a fuzzy ILike("%name%") lookup -- a
- *     guess, not an exact match; the weakest confirmed-match strategy.
- *   - DEFAULT: no item-specific mapping matched anything above; fell back
- *     to this merchant's single `source: 'default'` placeholder row.
- * EXTERNAL_ID/SKU/EXPLICIT are confident matches; NAME_CONTAINS/DEFAULT are
- * weak guesses that should surface for manual review (see
- * CatalogItem.needsClassificationReview).
+ * Which strategy actually produced `classificationCode`:
+ *   - EXPLICIT: the caller supplied classificationCode directly (a manually-
+ *     created item's own form field, or Item Sync's Add/Edit/Bulk Edit
+ *     writing straight onto the catalog item -- see
+ *     DashboardItemsApplicationService.updateItem/bulkUpdateItems).
+ *   - UNRESOLVED: nothing was supplied -- classificationCode comes back ''
+ *     (see CatalogItem.classificationCode) rather than throwing, so the
+ *     item still registers as an incomplete, visible, fixable PENDING row
+ *     (needsClassificationMapping true) instead of silently vanishing (see
+ *     register-item.usecase.ts).
+ * Classification is always human-supplied now -- there used to be an
+ * EXTERNAL_ID/SKU/NAME_CONTAINS/DEFAULT auto-match chain here backed by a
+ * `classification_mappings` table (Mapping Center's old "Classification"
+ * tab), removed 2026-08-27: Item Sync's Add/Edit/Bulk Edit already write
+ * classificationCode/unitCode/packagingUnitCode/productTypeCode directly
+ * and immediately onto the catalog item, making that second, delayed
+ * (re-pull-to-refresh), auto-matched-and-often-wrong path redundant --  and
+ * it was the actual mechanism that silently overwrote 5 already-
+ * KRA-REGISTERED items with blanks on a routine re-pull, because the
+ * re-pull found no active mapping row and (after a since-corrected fix)
+ * resolved to null instead of throwing. See
+ * ITEM_MAPPING_CONSOLIDATION_PLAN.md's "classification_mappings removal"
+ * section for the full incident writeup.
  */
-export type ClassificationMethod =
-  | 'EXPLICIT'
-  | 'EXTERNAL_ID'
-  | 'SKU'
-  | 'NAME_CONTAINS'
-  | 'DEFAULT';
+export type ClassificationMethod = 'EXPLICIT' | 'UNRESOLVED';
 
 /**
  * Resolves internal attributes to regulator codes.
  * Uses mapping tables - never hardcode OSCU codes.
  */
 export interface ClassificationResolution {
-  /** OSCU item classification code (itemClsCd) */
-  classificationCode: string;
-  /** OSCU unit of quantity code (qtyUnitCd) */
-  unitCode: string;
-  /** OSCU packaging unit code (pkgUnitCd) */
-  packagingUnitCode: string;
+  /** OSCU item classification code (itemClsCd), or null when the caller didn't supply one (method 'UNRESOLVED'). */
+  classificationCode: string | null;
+  /** OSCU unit of quantity code (qtyUnitCd), or null when the caller didn't supply one. */
+  unitCode: string | null;
+  /** OSCU packaging unit code (pkgUnitCd), or null when the caller didn't supply one. */
+  packagingUnitCode: string | null;
   /** OSCU tax type code (taxTyCd) */
   taxTyCd: string;
-  /** OSCU product type code (itemTyCd) */
-  productTypeCode: string;
+  /**
+   * OSCU product type code (itemTyCd) -- null when the caller didn't supply
+   * one explicitly. Never inferred/guessed here (see
+   * CatalogItem.productTypeCode's doc comment for why).
+   */
+  productTypeCode: string | null;
   source: 'merchant_override' | 'rule_based' | 'default';
   /** Which strategy actually matched classificationCode -- see ClassificationMethod. */
   method: ClassificationMethod;
@@ -48,26 +52,18 @@ export interface ClassificationResolution {
 export interface IClassificationResolver {
   resolveClassification(params: {
     merchantId: string;
-    itemType: string;
-    itemName?: string;
-    sku?: string;
-    externalId?: string;
     /**
-     * The ERP this item was pulled from (e.g. 'QUICKBOOKS', 'ODOO') -- scopes
-     * the externalId/SKU/name classification lookups so two ERPs that happen
-     * to assign the same small numeric id (or the same free-text SKU) to
-     * unrelated products don't silently inherit each other's classification.
-     * Null/omitted (a manually-created item) matches only rows with no
-     * sourceSystem recorded.
-     */
-    sourceSystem?: string | null;
-    /**
-     * classificationCode/unitCode/packagingUnitCode are resolved per item
-     * (from that item's own classification_mappings row) by the caller and
-     * passed in here — there's no category table backing them, so the
-     * resolver throws if unitCode/packagingUnitCode are missing rather than
-     * defaulting. taxTyCd stays optional: if omitted, it's resolved from
-     * internalTaxCategory against the shared tax_mappings category table.
+     * classificationCode/unitCode/packagingUnitCode are always supplied
+     * (or not) directly by the caller now -- no category table or per-item
+     * lookup backs any of the three. All three simply resolve to null when
+     * omitted; none of the three throw -- see ClassificationResolution's
+     * doc comment and CatalogItem.needsClassificationMapping for how the
+     * caller surfaces an unresolved item instead. taxTyCd stays optional
+     * and DOES still throw if unresolved: if omitted, it's resolved from
+     * internalTaxCategory against the shared tax_mappings category table,
+     * which always has a global 'OTHER' default seeded, so an unresolved
+     * taxTyCd reflects a genuinely broken merchant/global tax setup, not an
+     * expected per-item gap.
      */
     classificationCode?: string;
     unitCode?: string;

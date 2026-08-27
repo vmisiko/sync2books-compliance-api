@@ -1,5 +1,4 @@
 import { mapMainApiItemToRegisterItemInput, MainApiPulledItem } from './standardized-item.mapper';
-import { ItemType } from '../../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../../shared/domain/enums/tax-category.enum';
 
 function pulledItem(overrides: Partial<MainApiPulledItem> = {}): MainApiPulledItem {
@@ -42,19 +41,48 @@ describe('mapMainApiItemToRegisterItemInput', () => {
     expect(withUndefined.unitPrice).toBeNull();
   });
 
-  it('collapses Service to SERVICE and everything else to GOODS', () => {
-    const service = mapMainApiItemToRegisterItemInput({
-      merchantId: 'm1',
-      item: pulledItem({ itemType: 'Service' }),
-      taxCategory: TaxCategory.OTHER,
+  /**
+   * productTypeCode is the single source of truth (see
+   * CatalogItem.productTypeCode / deriveItemType), and this mapper only
+   * sets it when the ERP source is unambiguous (Service -> KRA itemTyCd
+   * '3'; everything else is left unset rather than guessed, per
+   * deriveProductTypeCode's doc comment).
+   */
+  describe('productTypeCode derivation from itemType', () => {
+    it('Service sets productTypeCode to KRA itemTyCd 3', () => {
+      const result = mapMainApiItemToRegisterItemInput({
+        merchantId: 'm1',
+        item: pulledItem({ itemType: 'Service' }),
+        taxCategory: TaxCategory.OTHER,
+      });
+      expect(result.productTypeCode).toBe('3');
     });
-    expect(service.itemType).toBe(ItemType.SERVICE);
 
-    const inventory = mapMainApiItemToRegisterItemInput({
-      merchantId: 'm1',
-      item: pulledItem({ itemType: 'Inventory' }),
-      taxCategory: TaxCategory.OTHER,
+    it("Inventory leaves productTypeCode unset -- Raw Material vs Finished Product isn't knowable from this ERP signal", () => {
+      const result = mapMainApiItemToRegisterItemInput({
+        merchantId: 'm1',
+        item: pulledItem({ itemType: 'Inventory' }),
+        taxCategory: TaxCategory.OTHER,
+      });
+      expect(result.productTypeCode).toBeUndefined();
     });
-    expect(inventory.itemType).toBe(ItemType.GOODS);
+
+    it('NonInventory behaves the same as Inventory on this axis -- productTypeCode unset', () => {
+      const result = mapMainApiItemToRegisterItemInput({
+        merchantId: 'm1',
+        item: pulledItem({ itemType: 'NonInventory' }),
+        taxCategory: TaxCategory.OTHER,
+      });
+      expect(result.productTypeCode).toBeUndefined();
+    });
+
+    it('Unknown leaves productTypeCode unset too', () => {
+      const result = mapMainApiItemToRegisterItemInput({
+        merchantId: 'm1',
+        item: pulledItem({ itemType: 'Unknown' }),
+        taxCategory: TaxCategory.OTHER,
+      });
+      expect(result.productTypeCode).toBeUndefined();
+    });
   });
 });

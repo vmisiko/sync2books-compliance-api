@@ -8,11 +8,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { TaxMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
-import {
-  ClassificationMappingOrmEntity,
-  ClassificationMatchType,
-} from '../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
 import { PaymentTypeMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/payment-type-mapping.orm-entity';
+import { UnitMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/unit-mapping.orm-entity';
 import { MappingSuggestionService } from '../../regulatory/oscu/application/mapping-suggestion.service';
 import { OscuCodeOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-code.orm-entity';
 import { searchCodes } from '../../catalog/application/use-cases/search-codes.usecase';
@@ -28,12 +25,10 @@ import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
 import { MappingStatus } from '../../shared/domain/enums/mapping-status.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
 
-export type MappingType = 'tax' | 'classification' | 'payment';
+export type MappingType = 'tax' | 'payment' | 'quantity_unit';
 
 /** KRA cdCls for the Unit of Quantity code list (qtyUnitCd candidates). */
 const CD_CLS_QTY_UNIT = '10';
-/** KRA cdCls for the Packaging Unit code list (pkgUnitCd candidates). */
-const CD_CLS_PKG_UNIT = '17';
 
 export interface MappingListItem {
   id: string;
@@ -60,34 +55,21 @@ export interface MappingListItem {
   taxCodeExternalValue?: string | null;
   /** 0-100 confidence for taxCodeId specifically, independent of confidenceScore (which is TaxRate-derived). */
   taxCodeConfidenceScore?: number | null;
-  matchType?: ClassificationMatchType;
-  matchValue?: string;
-  itemType?: string | null;
-  itemClsCd?: string | null;
-  priority?: number;
   /**
-   * For a classification row: this item's resolved KRA taxTyCd, cross-
-   * referenced live from resolvedInternalTaxCategory against active
-   * tax_mappings — tax stays category-based (KRA only has 5 tax types).
-   */
-  resolvedInternalTaxCategory?: string | null;
-  resolvedTaxTyCd?: string | null;
-  /**
-   * Quantity unit and packaging unit — resolved independently per item,
-   * each matched directly against the real KRA code list (cdCls '10' and
-   * '17') rather than a shared internal category. Stored on the row itself
-   * (not cross-referenced live) since there's no category table backing
-   * them anymore. confidenceScore null means nothing matched — NEEDS_REVIEW
-   * for that field specifically, never silently defaulted.
+   * Quantity unit: resolved via the shared unit_mappings category table
+   * (see resolveQuantityUnit). Classification code, packaging unit, and
+   * product type are per-item, hand-filled directly in Item Sync — see
+   * classification-resolver.port.ts's doc comment for why they no longer
+   * live here (classification_mappings/the Classification tab were removed
+   * 2026-08-27).
    */
   qtyUnitCd?: string | null;
-  qtyUnitCdConfidence?: number | null;
-  pkgUnitCd?: string | null;
-  pkgUnitCdConfidence?: number | null;
   /** For a payment row: this app's internal payment-method key (e.g. MOBILE_MONEY). */
   internalPaymentMethod?: string | null;
   /** OSCU pmtTyCd (cdCls '07'), e.g. '07' for MOBILE_MONEY. */
   pmtTyCd?: string | null;
+  /** For a quantity_unit row: this app's internal unit bucket key (e.g. KILOGRAM, PIECES) — see QTY_UNIT_ALIASES in mapping-suggestion.service.ts. qtyUnitCd above doubles as this row's own target code. */
+  internalUnit?: string | null;
 }
 
 export interface MappingListFilters {
@@ -100,29 +82,19 @@ export interface CreateMappingInput {
   type: MappingType;
   internalTaxCategory?: string;
   taxTyCd?: string;
-  matchType?: ClassificationMatchType;
-  matchValue?: string;
-  itemType?: string | null;
-  itemClsCd?: string;
   qtyUnitCd?: string;
-  pkgUnitCd?: string;
-  priority?: number;
   internalPaymentMethod?: string;
   pmtTyCd?: string;
+  internalUnit?: string;
 }
 
 export interface UpdateMappingInput {
   internalTaxCategory?: string;
   taxTyCd?: string;
-  matchType?: ClassificationMatchType;
-  matchValue?: string;
-  itemType?: string | null;
-  itemClsCd?: string;
   qtyUnitCd?: string;
-  pkgUnitCd?: string;
-  priority?: number;
   internalPaymentMethod?: string;
   pmtTyCd?: string;
+  internalUnit?: string;
 }
 
 export interface MappingSummary {
@@ -159,8 +131,8 @@ export interface PaymentMethodOption {
 
 type FoundRow =
   | { type: 'tax'; row: TaxMappingOrmEntity }
-  | { type: 'classification'; row: ClassificationMappingOrmEntity }
-  | { type: 'payment'; row: PaymentTypeMappingOrmEntity };
+  | { type: 'payment'; row: PaymentTypeMappingOrmEntity }
+  | { type: 'quantity_unit'; row: UnitMappingOrmEntity };
 
 /**
  * Query-param keys mirror the main API's IntegrationKeyType string values
@@ -226,18 +198,22 @@ const TAX_TY_CD_TO_CATEGORY: Record<string, TaxCategory> = {
 };
 
 /**
- * Backs dashboard-api/mappings — the Mapping Center review workflow. Tax
- * stays category-based (tax_mappings, additive columns — see
- * tax-mapping.orm-entity.ts) since KRA only has 5 tax types. Classification,
- * quantity unit, and packaging unit are all resolved per item on
- * classification_mappings — see that entity's doc comments for why: KRA's
- * real unit code lists are large and business-specific, with no natural
- * shared bucket (packaging especially), so each is matched directly against
- * the real synced KRA code list per item rather than via an internal
- * category table. Global-default rows (merchantId: null) are never written
- * to by this service except that they participate read-only in
- * list()/summary() — approve()/update() reject them (404) since editing a
- * global default here would affect every tenant.
+ * Backs dashboard-api/mappings — the Mapping Center review workflow. Tax and
+ * quantity unit both stay category-based (tax_mappings / unit_mappings,
+ * additive columns — see each entity's doc comment) since both are small,
+ * closed KRA code lists (5 tax types, ~30 quantity-unit codes) that fit a
+ * fix-once-per-source-value model. Classification, packaging unit, and
+ * product type are per-item, hand-filled directly in Item Sync instead —
+ * see classification-resolver.port.ts's doc comment for why the old
+ * classification_mappings-backed Classification tab was removed 2026-08-27
+ * (KRA's real classification tree is thousands of rows deep with no shared
+ * bucket a heuristic could safely guess, and neither QuickBooks nor Odoo has
+ * any packaging concept on an item at all — see
+ * ERP_ITEM_FIELD_MAPPING_CAPABILITY_MATRIX.md for the evidence). Global-
+ * default rows (merchantId: null) are never written to by this service
+ * except that they participate read-only in list()/summary() —
+ * approve()/update() reject them (404) since editing a global default here
+ * would affect every tenant.
  */
 @Injectable()
 export class DashboardMappingApplicationService {
@@ -246,10 +222,10 @@ export class DashboardMappingApplicationService {
   constructor(
     @InjectRepository(TaxMappingOrmEntity)
     private readonly taxRepo: Repository<TaxMappingOrmEntity>,
-    @InjectRepository(ClassificationMappingOrmEntity)
-    private readonly clsRepo: Repository<ClassificationMappingOrmEntity>,
     @InjectRepository(PaymentTypeMappingOrmEntity)
     private readonly paymentRepo: Repository<PaymentTypeMappingOrmEntity>,
+    @InjectRepository(UnitMappingOrmEntity)
+    private readonly unitRepo: Repository<UnitMappingOrmEntity>,
     @InjectRepository(OscuCodeOrmEntity)
     private readonly oscuCodeRepo: Repository<OscuCodeOrmEntity>,
     private readonly suggestions: MappingSuggestionService,
@@ -494,7 +470,8 @@ export class DashboardMappingApplicationService {
 
     const connection =
       await this.mainApiConnections.ensureCompany(complianceTenantId);
-    const connectionId = connection.integrations?.[pullSource]?.connectionId ?? null;
+    const connectionId =
+      connection.integrations?.[pullSource]?.connectionId ?? null;
     if (!connectionId) {
       throw new BadRequestException(
         `No connected ${SOURCE_DISPLAY_NAME[pullSource]} connection for this tenant yet — connect ${SOURCE_DISPLAY_NAME[pullSource]} before pulling payment methods.`,
@@ -792,8 +769,16 @@ export class DashboardMappingApplicationService {
 
   /**
    * Pulls items from the main API (paginated across every page, not just
-   * the first) and derives classification placeholders (one per item,
-   * carrying its own auto-matched qtyUnitCd/pkgUnitCd too) from that fetch.
+   * the first) and tallies how many are "ready" — tax AND quantity unit
+   * both already resolve to a real KRA code via the Tax Mapping/Quantity
+   * Unit tabs' rules — vs. not. Classification code, packaging unit, and
+   * product type are always per-item, hand-filled work done directly in
+   * Item Sync (see classification-resolver.port.ts's doc comment for why
+   * classification_mappings/the old Classification tab were removed
+   * 2026-08-27), so this pull no longer creates any row for them — it only
+   * surfaces the aggregate readiness banner on the Mapping Center pull
+   * result, and as a side effect still upserts unit_mappings suggestions
+   * (via resolveQuantityUnit) the same way it always has.
    */
   private async pullItemClassifications(
     complianceTenantId: string,
@@ -806,16 +791,10 @@ export class DashboardMappingApplicationService {
     // QuickBooks/Odoo-sourced items), so there's nothing real to pull for
     // those sources.
     if (pullSource !== 'quickbooks' && pullSource !== 'odoo') {
-      const results: Array<{
-        externalId: string;
-        externalValue: string;
-        mappingId: string;
-        status: MappingStatus;
-      }> = [];
       return {
         attempted: 0,
-        needsReview: 0,
-        results,
+        ready: 0,
+        notReady: 0,
         skipped: `Item classification pull is currently only available for QuickBooks and Odoo connections — no item/product sync exists yet for ${SOURCE_DISPLAY_NAME[pullSource]}.`,
       };
     }
@@ -823,7 +802,8 @@ export class DashboardMappingApplicationService {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const connection =
       await this.mainApiConnections.ensureCompany(complianceTenantId);
-    const connectionId = connection.integrations?.[pullSource]?.connectionId ?? null;
+    const connectionId =
+      connection.integrations?.[pullSource]?.connectionId ?? null;
     if (!connectionId) {
       throw new BadRequestException(
         `No connected ${SOURCE_DISPLAY_NAME[pullSource]} connection for this tenant yet — connect ${SOURCE_DISPLAY_NAME[pullSource]} before pulling items.`,
@@ -850,7 +830,7 @@ export class DashboardMappingApplicationService {
     }
 
     const items = await this.fetchAllItems(connection.mainApiApiKey);
-    return this.pullClassifications(merchantId, items, SOURCE_FILTER[pullSource]);
+    return this.computeItemReadiness(merchantId, items, SOURCE_FILTER[pullSource]);
   }
 
   /** Loops GET /items across every page — a merchant's full catalog, not just the first page's worth. Capped at 50 pages (5,000 items at the default page size) as a sanity limit against a runaway loop. */
@@ -867,57 +847,36 @@ export class DashboardMappingApplicationService {
   }
 
   /**
-   * One classification_mappings placeholder row per item — deliberately
-   * not deduped, since classification (and, now, each item's own
-   * qtyUnitCd/pkgUnitCd) is inherently per-item, not per-shared-value.
-   * itemClsCd is always left NEEDS_REVIEW with no guessed value (see
-   * MappingSuggestionService.suggestClassificationPlaceholder's doc comment
-   * for why automatic KRA-classification-tree matching is out of scope) —
-   * a human fills it in via PATCH. qtyUnitCd/pkgUnitCd, by contrast, DO get
-   * an auto-match attempt here (matchKraCode), since KRA's unit code lists
-   * are small and standardized enough that a raw ERP label frequently
-   * matches a real code directly — but a confident match still only
-   * pre-fills the row, it never auto-approves it (same trust model as tax:
-   * suggest, never auto-activate).
+   * Tallies how many pulled items are "ready" (tax AND quantity unit both
+   * resolve to a real KRA code via the shared tax_mappings/unit_mappings
+   * rule tables) vs. not — the Mapping Center pull result's aggregate
+   * banner, telling a human whether there's an outstanding *rule* gap
+   * (fix it here) vs. only the always-manual, always-per-item work
+   * (classification code, packaging unit, product type) every item needs
+   * regardless, done directly in Item Sync. Deliberately excludes product
+   * type: Phase 2 of ITEM_MAPPING_CONSOLIDATION_PLAN.md established there's
+   * no rule for it at all, so it can't participate in a "rule gap" framing.
    *
-   * externalId MUST be item.bookId ?? item.itemCode — the same value
-   * mapMainApiItemToRegisterItemInput uses as RegisterItemInput.externalId
-   * (standardized-item.mapper.ts). Registration's ClassificationResolverTypeOrm
-   * looks up an EXTERNAL_ID classification_mappings row by that exact value;
-   * keying this placeholder on item.id (a sync2books-internal UUID with no
-   * relation to QuickBooks) would mean a classification assigned here could
-   * never be found at registration time for any item without a SKU.
+   * resolveQuantityUnit still upserts a unit_mappings suggestion row as a
+   * side effect for any never-before-seen raw unit label (unchanged
+   * behavior) — this method only stops short of creating any per-item
+   * placeholder row, since classification_mappings no longer exists.
    */
-  private async pullClassifications(
+  private async computeItemReadiness(
     merchantId: string,
     items: MainApiItem[],
     defaultSourceSystem: SourceSystem,
   ) {
-    const results: Array<{
-      externalId: string;
-      externalValue: string;
-      mappingId: string;
-      status: MappingStatus;
-    }> = [];
-
     const matchCache = new Map<
       string,
       { cd: string; confidenceScore: number } | null
     >();
+    const taxCache = new Map<string, string | null>();
+
+    let ready = 0;
+    let notReady = 0;
 
     for (const item of items) {
-      const externalId = item.bookId ?? item.itemCode;
-      const placeholder = this.suggestions.suggestClassificationPlaceholder({
-        externalId,
-        sku: item.sku,
-        itemName: item.name,
-      });
-      // externalId falls back to item.itemCode, which is a required
-      // non-empty MainApiItem field, so this should never actually be null
-      // — defensive skip rather than a thrown error if a future item shape
-      // ever lacks all three fields.
-      if (!placeholder) continue;
-
       // Main API's standardization layer normalizes ERP shape (itemType etc.) but
       // deliberately doesn't compute a tax category -- that's KRA-specific
       // classification, which stays this repo's job. Reuse the same
@@ -925,20 +884,9 @@ export class DashboardMappingApplicationService {
       // uses, against this item's own tax-code-ref label, falling back to
       // OTHER for an unresolvable/missing label rather than blocking the pull.
       const resolvedInternalTaxCategory =
-        this.suggestions.suggestTaxCodeMapping(item.defaultTaxCodeRef?.name ?? '')
-          ?.internalTaxCategory ?? TaxCategory.OTHER;
-
-      const rawUnit = item.unitOfMeasure ?? '';
-      const qtyMatch = await this.matchKraCode(
-        rawUnit,
-        CD_CLS_QTY_UNIT,
-        matchCache,
-      );
-      const pkgMatch = await this.matchKraCode(
-        rawUnit,
-        CD_CLS_PKG_UNIT,
-        matchCache,
-      );
+        this.suggestions.suggestTaxCodeMapping(
+          item.defaultTaxCodeRef?.name ?? '',
+        )?.internalTaxCategory ?? TaxCategory.OTHER;
 
       // fetchAllItems() pulls every connected ERP's items unfiltered (see its
       // doc comment) -- a company with both QuickBooks and Odoo connected
@@ -949,30 +897,25 @@ export class DashboardMappingApplicationService {
       const itemSourceSystem =
         (item.bookType && SOURCE_FILTER[item.bookType]) || defaultSourceSystem;
 
-      const row = await this.upsertClassificationPlaceholder(merchantId, itemSourceSystem, {
-        externalValue: item.name,
-        placeholder,
+      const rawUnit = item.unitOfMeasure ?? '';
+      const unitRow = await this.resolveQuantityUnit(
+        merchantId,
+        rawUnit,
+        itemSourceSystem,
+        matchCache,
+      );
+
+      const resolvedTaxTyCd = await this.resolveTaxTyCdForCategory(
+        merchantId,
         resolvedInternalTaxCategory,
-        qtyUnitCd: qtyMatch?.cd ?? null,
-        qtyUnitCdConfidence: qtyMatch?.confidenceScore ?? null,
-        pkgUnitCd: pkgMatch?.cd ?? null,
-        pkgUnitCdConfidence: pkgMatch?.confidenceScore ?? null,
-      });
-      results.push({
-        externalId,
-        externalValue: item.name,
-        mappingId: row.id,
-        status: row.status,
-      });
+        taxCache,
+      );
+
+      if (resolvedTaxTyCd && unitRow?.qtyUnitCd) ready++;
+      else notReady++;
     }
 
-    return {
-      attempted: results.length,
-      needsReview: results.filter(
-        (r) => r.status === MappingStatus.NEEDS_REVIEW,
-      ).length,
-      results,
-    };
+    return { attempted: items.length, ready, notReady };
   }
 
   /**
@@ -1015,69 +958,140 @@ export class DashboardMappingApplicationService {
   }
 
   /**
-   * Keyed by (merchantId, sourceSystem, matchType, matchValue) — matchValue
-   * holds the same externalId (item.bookId ?? item.itemCode) registration
-   * actually looks up by, since suggestClassificationPlaceholder is called
-   * with it first in precedence. Re-pulling a still-pending row refreshes
-   * externalValue (the display name), the resolved tax category, and the
-   * qty/pkg auto-match; an already-approved (active) row is left untouched
-   * entirely, same as upsertUnmappedTaxRate.
+   * Quantity unit is category-based (unit_mappings, mirroring tax_mappings)
+   * — see unit-mapping.orm-entity.ts's doc comment for why this differs
+   * from packaging/classification, which stay per-item. Resolves an
+   * internalUnit bucket for the raw ERP label via
+   * MappingSuggestionService.suggestQuantityUnitAlias (falling back to the
+   * normalized raw label itself when no alias recognizes it, so every
+   * distinct unrecognized label still gets its own reviewable row), then
+   * upserts/refreshes a unit_mappings row for that bucket — an already-
+   * approved row is returned untouched (a human's choice always wins over
+   * a fresh pull's guess), same trust model as upsertTaxSuggestion.
    */
-  private async upsertClassificationPlaceholder(
+  private async resolveQuantityUnit(
     merchantId: string,
+    rawUnit: string,
     sourceSystem: SourceSystem,
-    params: {
-      externalValue: string;
-      placeholder: { matchType: ClassificationMatchType; matchValue: string };
-      resolvedInternalTaxCategory: string;
-      qtyUnitCd: string | null;
-      qtyUnitCdConfidence: number | null;
-      pkgUnitCd: string | null;
-      pkgUnitCdConfidence: number | null;
-    },
-  ): Promise<ClassificationMappingOrmEntity> {
-    const { externalValue, placeholder } = params;
-    const existing = await this.clsRepo.findOne({
-      where: {
-        merchantId,
-        sourceSystem,
-        matchType: placeholder.matchType,
-        matchValue: placeholder.matchValue,
-      },
-    });
-    if (existing) {
-      if (existing.active) return existing;
-      existing.externalValue = externalValue;
-      existing.resolvedInternalTaxCategory = params.resolvedInternalTaxCategory;
-      existing.qtyUnitCd = params.qtyUnitCd;
-      existing.qtyUnitCdConfidence = params.qtyUnitCdConfidence;
-      existing.pkgUnitCd = params.pkgUnitCd;
-      existing.pkgUnitCdConfidence = params.pkgUnitCdConfidence;
-      return this.clsRepo.save(existing);
-    }
+    matchCache: Map<string, { cd: string; confidenceScore: number } | null>,
+  ): Promise<UnitMappingOrmEntity | null> {
+    const label = rawUnit.trim();
+    if (!label) return null;
 
-    return this.clsRepo.save(
-      this.clsRepo.create({
-        id: `clsmap-${randomUUID()}`,
-        merchantId,
-        matchType: placeholder.matchType,
-        matchValue: placeholder.matchValue,
-        itemType: null,
-        itemClsCd: null,
-        priority: 100,
-        source: 'merchant_override',
-        active: false,
-        sourceSystem,
-        status: MappingStatus.NEEDS_REVIEW,
-        confidenceScore: null,
-        externalValue,
-        resolvedInternalTaxCategory: params.resolvedInternalTaxCategory,
-        qtyUnitCd: params.qtyUnitCd,
-        qtyUnitCdConfidence: params.qtyUnitCdConfidence,
-        pkgUnitCd: params.pkgUnitCd,
-        pkgUnitCdConfidence: params.pkgUnitCdConfidence,
+    const alias = this.suggestions.suggestQuantityUnitAlias(label);
+    const internalUnit = alias?.internalUnit ?? label.toUpperCase();
+    const match = await this.matchKraCode(
+      alias?.searchTerm ?? label,
+      CD_CLS_QTY_UNIT,
+      matchCache,
+    );
+
+    return this.upsertUnitMapping(
+      merchantId,
+      internalUnit,
+      label,
+      match?.cd ?? null,
+      // No match at all -> null confidence regardless of alias (a
+      // confident alias whose search term still resolved nothing real
+      // isn't a confident result). Otherwise, an alias hit is a curated,
+      // human-verified pairing (see QTY_UNIT_ALIASES's doc comment)
+      // searched against the live code list, not a blind guess — treat it
+      // as high-confidence like an exact tax/payment alias match (95),
+      // overriding matchKraCode's own exact/fuzzy score for the *search
+      // term* it was given.
+      match ? (alias ? 95 : match.confidenceScore) : null,
+      sourceSystem,
+    );
+  }
+
+  /**
+   * unit_mappings has a unique (merchantId, internalUnit, active) index —
+   * mirrors upsertTaxSuggestion's approved-then-pending lookup order and
+   * never resets a row a human has already resolved. Unlike tax's split
+   * upsertTaxSuggestion/upsertUnmappedTaxRate pair, one method covers both
+   * the confident and unconfident cases here: internalUnit is never null
+   * (it falls back to the normalized raw label itself in
+   * resolveQuantityUnit), so there's no separate "no category yet" key to
+   * upsert against the way tax's UNMAPPED rows need externalId instead.
+   */
+  private async upsertUnitMapping(
+    merchantId: string,
+    internalUnit: string,
+    externalValue: string,
+    qtyUnitCd: string | null,
+    confidenceScore: number | null,
+    sourceSystem: SourceSystem,
+  ): Promise<UnitMappingOrmEntity> {
+    const approved = await this.unitRepo.findOne({
+      where: { merchantId, internalUnit, active: true },
+    });
+    if (approved) return approved;
+
+    const pending = await this.unitRepo.findOne({
+      where: { merchantId, internalUnit, active: false },
+    });
+
+    const patch = {
+      merchantId,
+      internalUnit,
+      qtyUnitCd,
+      sourceSystem,
+      status: qtyUnitCd ? MappingStatus.NEEDS_REVIEW : MappingStatus.UNMAPPED,
+      confidenceScore,
+      externalValue,
+      active: false,
+    };
+
+    if (pending) {
+      return this.unitRepo.save({ ...pending, ...patch });
+    }
+    return this.unitRepo.save(
+      this.unitRepo.create({
+        id: `unitmap-${randomUUID()}`,
+        version: 1,
+        ...patch,
       }),
     );
+  }
+
+  private async activateUnitRow(
+    row: UnitMappingOrmEntity,
+  ): Promise<UnitMappingOrmEntity> {
+    return this.unitRepo.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(UnitMappingOrmEntity);
+      await repo
+        .createQueryBuilder()
+        .update(UnitMappingOrmEntity)
+        .set({ active: false })
+        .where(...merchantIdEquals(row.merchantId))
+        .andWhere('internalUnit = :unit', { unit: row.internalUnit })
+        .andWhere('active = :active', { active: true })
+        .andWhere('id != :id', { id: row.id })
+        .execute();
+      row.active = true;
+      return repo.save(row);
+    });
+  }
+
+  private unitRowToListItem(row: UnitMappingOrmEntity): MappingListItem {
+    return {
+      id: row.id,
+      type: 'quantity_unit',
+      merchantId: row.merchantId,
+      scope: row.merchantId ? 'tenant' : 'global',
+      sourceSystem: row.sourceSystem,
+      status: row.status,
+      confidenceScore: row.confidenceScore,
+      externalValue: row.externalValue,
+      approvedBy: row.approvedBy,
+      approvedAt: row.approvedAt,
+      active: row.active,
+      version: row.version,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      internalUnit: row.internalUnit,
+      qtyUnitCd: row.qtyUnitCd,
+    };
   }
 
   /**
@@ -1301,23 +1315,6 @@ export class DashboardMappingApplicationService {
       });
       items.push(...rows.map((r) => this.taxRowToListItem(r)));
     }
-    if (!type || type === 'classification') {
-      // No global (merchantId: null) rows exist for classification today —
-      // ClassificationResolverTypeOrm has no global fallback for it either.
-      const rows = await this.clsRepo.find({
-        where: {
-          merchantId,
-          ...(sourceSystem ? { sourceSystem } : {}),
-          ...(status ? { status } : {}),
-        },
-      });
-      const taxCache = new Map<string, string | null>();
-      items.push(
-        ...(await Promise.all(
-          rows.map((r) => this.clsRowToListItem(r, taxCache)),
-        )),
-      );
-    }
     if (!type || type === 'payment') {
       const rows = await this.paymentRepo.find({
         where: [
@@ -1335,6 +1332,23 @@ export class DashboardMappingApplicationService {
       });
       items.push(...rows.map((r) => this.paymentRowToListItem(r)));
     }
+    if (!type || type === 'quantity_unit') {
+      const rows = await this.unitRepo.find({
+        where: [
+          {
+            merchantId,
+            ...(sourceSystem ? { sourceSystem } : {}),
+            ...(status ? { status } : {}),
+          },
+          {
+            merchantId: IsNull(),
+            ...(sourceSystem ? { sourceSystem } : {}),
+            ...(status ? { status } : {}),
+          },
+        ],
+      });
+      items.push(...rows.map((r) => this.unitRowToListItem(r)));
+    }
 
     items.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
     return items;
@@ -1343,10 +1357,12 @@ export class DashboardMappingApplicationService {
   async summary(complianceTenantId: string): Promise<MappingSummary> {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
 
-    const [taxRows, clsRows, paymentRows] = await Promise.all([
+    const [taxRows, paymentRows, unitRows] = await Promise.all([
       this.taxRepo.find({ where: [{ merchantId }, { merchantId: IsNull() }] }),
-      this.clsRepo.find({ where: { merchantId } }),
       this.paymentRepo.find({
+        where: [{ merchantId }, { merchantId: IsNull() }],
+      }),
+      this.unitRepo.find({
         where: [{ merchantId }, { merchantId: IsNull() }],
       }),
     ]);
@@ -1357,7 +1373,7 @@ export class DashboardMappingApplicationService {
       merchantId: string | null;
       sourceSystem: SourceSystem | null;
       status: MappingStatus;
-    }> = [...taxRows, ...clsRows, ...paymentRows];
+    }> = [...taxRows, ...paymentRows, ...unitRows];
 
     const global = all.filter((r) => r.merchantId === null);
     const tenantRows = all.filter((r) => r.merchantId !== null);
@@ -1489,17 +1505,16 @@ export class DashboardMappingApplicationService {
     }
 
     const row = found.row;
-    if (!row.itemClsCd || !row.qtyUnitCd || !row.pkgUnitCd) {
+    if (!row.qtyUnitCd) {
       throw new BadRequestException(
-        'Mapping is missing itemClsCd, qtyUnitCd, and/or pkgUnitCd — PATCH the missing ones in before approving',
+        'Mapping has no target qtyUnitCd yet — PATCH one in before approving',
       );
     }
     row.status = MappingStatus.MAPPED;
     row.approvedBy = approvedBy;
     row.approvedAt = new Date();
-    row.active = true;
-    const saved = await this.clsRepo.save(row);
-    return await this.clsRowToListItem(saved);
+    const saved = await this.activateUnitRow(row);
+    return this.unitRowToListItem(saved);
   }
 
   async update(
@@ -1547,93 +1562,16 @@ export class DashboardMappingApplicationService {
       return this.paymentRowToListItem(saved);
     }
 
-    // Classification row — itemClsCd, qtyUnitCd, and pkgUnitCd are three
-    // independent fields, each settable (or left untouched) on its own; a
-    // human fixing just the classification shouldn't have to also have an
-    // opinion on packaging in the same save. The row only becomes MAPPED
-    // and active (usable at registration) once all three are present —
-    // otherwise it's genuine partial progress, still NEEDS_REVIEW.
     const row = found.row;
-    if (input.matchType) row.matchType = input.matchType;
-    if (input.matchValue) row.matchValue = input.matchValue;
-    if (input.itemType !== undefined) row.itemType = input.itemType;
-    if (input.itemClsCd) row.itemClsCd = input.itemClsCd;
-    if (input.qtyUnitCd) {
-      row.qtyUnitCd = input.qtyUnitCd;
-      row.qtyUnitCdConfidence = null; // manually confirmed, not auto-matched anymore
-    }
-    if (input.pkgUnitCd) {
-      row.pkgUnitCd = input.pkgUnitCd;
-      row.pkgUnitCdConfidence = null;
-    }
-    if (input.priority !== undefined) row.priority = input.priority;
-
-    const allSet = !!row.itemClsCd && !!row.qtyUnitCd && !!row.pkgUnitCd;
-    row.status = allSet ? nextStatus : MappingStatus.NEEDS_REVIEW;
+    if (input.internalUnit) row.internalUnit = input.internalUnit;
+    if (input.qtyUnitCd) row.qtyUnitCd = input.qtyUnitCd;
+    if (!row.qtyUnitCd) throw new BadRequestException('qtyUnitCd is required');
+    row.status = nextStatus;
+    row.confidenceScore = null; // manually confirmed, not auto-matched anymore
     row.approvedBy = approvedBy;
     row.approvedAt = new Date();
-    row.active = allSet;
-    const saved = await this.clsRepo.save(row);
-    return await this.clsRowToListItem(saved);
-  }
-
-  /**
-   * Applies one itemClsCd/itemType to many classification_mappings rows in
-   * one call — backs the Mapping Center's multi-select "Assign Classification"
-   * bulk action. Same status-transition rules as the single-row update()
-   * (MAPPED, or REVISED if the row was already approved, only once
-   * qtyUnitCd/pkgUnitCd are also present — otherwise NEEDS_REVIEW), applied
-   * per-row so a row that's already been individually approved still gets
-   * marked REVISED rather than silently overwritten as a fresh MAPPED. Rows
-   * that don't belong to this tenant or aren't classification rows are
-   * skipped (reported back in `skipped`) rather than failing the whole
-   * batch — a stale selection in the UI shouldn't block assigning the rest.
-   */
-  async bulkClassify(
-    complianceTenantId: string,
-    ids: string[],
-    input: { itemClsCd: string; itemType?: string | null },
-    approvedBy: string,
-  ): Promise<{ updated: MappingListItem[]; skipped: string[] }> {
-    if (!input.itemClsCd) {
-      throw new BadRequestException('itemClsCd is required');
-    }
-    const merchantId = await this.resolveMerchantId(complianceTenantId);
-
-    const updated: MappingListItem[] = [];
-    const skipped: string[] = [];
-
-    for (const id of ids) {
-      const found = await this.findRowById(id);
-      if (
-        !found ||
-        found.type !== 'classification' ||
-        found.row.merchantId !== merchantId
-      ) {
-        skipped.push(id);
-        continue;
-      }
-
-      const row = found.row;
-      const wasApproved =
-        row.status === MappingStatus.MAPPED ||
-        row.status === MappingStatus.REVISED;
-      row.itemClsCd = input.itemClsCd;
-      if (input.itemType !== undefined) row.itemType = input.itemType;
-      const allSet = !!row.itemClsCd && !!row.qtyUnitCd && !!row.pkgUnitCd;
-      row.status = allSet
-        ? wasApproved
-          ? MappingStatus.REVISED
-          : MappingStatus.MAPPED
-        : MappingStatus.NEEDS_REVIEW;
-      row.approvedBy = approvedBy;
-      row.approvedAt = new Date();
-      row.active = allSet;
-      const saved = await this.clsRepo.save(row);
-      updated.push(await this.clsRowToListItem(saved));
-    }
-
-    return { updated, skipped };
+    const saved = await this.activateUnitRow(row);
+    return this.unitRowToListItem(saved);
   }
 
   /**
@@ -1641,11 +1579,7 @@ export class DashboardMappingApplicationService {
    * definition, an already-reviewed decision — so manual creation both
    * creates and approves the row in one step (status MAPPED, active
    * immediately, approvedBy/approvedAt stamped now), unlike a QuickBooks-
-   * sourced suggestion which starts life as NEEDS_REVIEW. For a
-   * classification row this still only applies once itemClsCd, qtyUnitCd,
-   * and pkgUnitCd are all supplied — a human can still create a partial
-   * rule (e.g. classification only) that lands NEEDS_REVIEW/inactive until
-   * the rest is filled in via update().
+   * sourced suggestion which starts life as NEEDS_REVIEW.
    */
   async createManual(
     complianceTenantId: string,
@@ -1703,33 +1637,31 @@ export class DashboardMappingApplicationService {
       return this.paymentRowToListItem(saved);
     }
 
-    if (!input.matchType || !input.matchValue || !input.itemClsCd) {
-      throw new BadRequestException(
-        'matchType, matchValue and itemClsCd are required for a classification mapping',
-      );
+    if (input.type === 'quantity_unit') {
+      if (!input.internalUnit || !input.qtyUnitCd) {
+        throw new BadRequestException(
+          'internalUnit and qtyUnitCd are required for a quantity_unit mapping',
+        );
+      }
+      const row = this.unitRepo.create({
+        id: `unitmap-${randomUUID()}`,
+        merchantId,
+        internalUnit: input.internalUnit,
+        qtyUnitCd: input.qtyUnitCd,
+        version: 1,
+        active: true,
+        sourceSystem: SourceSystem.MANUAL,
+        status: MappingStatus.MAPPED,
+        confidenceScore: null,
+        approvedBy: createdBy,
+        approvedAt: now,
+        externalValue: null,
+      });
+      const saved = await this.activateUnitRow(row);
+      return this.unitRowToListItem(saved);
     }
-    const allSet = !!input.itemClsCd && !!input.qtyUnitCd && !!input.pkgUnitCd;
-    const row = this.clsRepo.create({
-      id: `clsmap-${randomUUID()}`,
-      merchantId,
-      matchType: input.matchType,
-      matchValue: input.matchValue,
-      itemType: input.itemType ?? null,
-      itemClsCd: input.itemClsCd,
-      qtyUnitCd: input.qtyUnitCd ?? null,
-      pkgUnitCd: input.pkgUnitCd ?? null,
-      priority: input.priority ?? 100,
-      source: 'merchant_override',
-      active: allSet,
-      sourceSystem: SourceSystem.MANUAL,
-      status: allSet ? MappingStatus.MAPPED : MappingStatus.NEEDS_REVIEW,
-      confidenceScore: null,
-      approvedBy: createdBy,
-      approvedAt: now,
-      externalValue: null,
-    });
-    const saved = await this.clsRepo.save(row);
-    return await this.clsRowToListItem(saved);
+
+    throw new BadRequestException(`Unsupported mapping type: ${input.type}`);
   }
 
   // ---------------------------------------------------------------------
@@ -1769,23 +1701,23 @@ export class DashboardMappingApplicationService {
       const row = await this.taxRepo.findOne({ where: { id } });
       return row ? { type: 'tax', row } : null;
     }
-    if (id.startsWith('clsmap-')) {
-      const row = await this.clsRepo.findOne({ where: { id } });
-      return row ? { type: 'classification', row } : null;
-    }
     if (id.startsWith('paymap-')) {
       const row = await this.paymentRepo.findOne({ where: { id } });
       return row ? { type: 'payment', row } : null;
+    }
+    if (id.startsWith('unitmap-')) {
+      const row = await this.unitRepo.findOne({ where: { id } });
+      return row ? { type: 'quantity_unit', row } : null;
     }
     // Defensive fallback for ids that don't follow our prefix convention
     // (shouldn't normally happen — every id this service or the seed
     // creates is prefixed).
     const tax = await this.taxRepo.findOne({ where: { id } });
     if (tax) return { type: 'tax', row: tax };
-    const cls = await this.clsRepo.findOne({ where: { id } });
-    if (cls) return { type: 'classification', row: cls };
     const payment = await this.paymentRepo.findOne({ where: { id } });
     if (payment) return { type: 'payment', row: payment };
+    const unit = await this.unitRepo.findOne({ where: { id } });
+    if (unit) return { type: 'quantity_unit', row: unit };
     return null;
   }
 
@@ -1811,55 +1743,6 @@ export class DashboardMappingApplicationService {
       taxCodeId: row.taxCodeId,
       taxCodeExternalValue: row.taxCodeExternalValue,
       taxCodeConfidenceScore: row.taxCodeConfidenceScore,
-    };
-  }
-
-  /**
-   * @param taxCache Optional per-call memoization keyed by
-   * internalTaxCategory — list() shares one across all rows so items
-   * sharing a tax category (the common case) don't each trigger their own
-   * tax_mappings query. Single-row callers (approve/update/bulkClassify/
-   * createManual) omit it and just eat one lookup per call. qtyUnitCd/
-   * pkgUnitCd need no equivalent cache — they're stored directly on the row
-   * already, not cross-referenced live against a category table.
-   */
-  private async clsRowToListItem(
-    row: ClassificationMappingOrmEntity,
-    taxCache?: Map<string, string | null>,
-  ): Promise<MappingListItem> {
-    const resolvedTaxTyCd = row.resolvedInternalTaxCategory
-      ? await this.resolveTaxTyCdForCategory(
-          row.merchantId,
-          row.resolvedInternalTaxCategory,
-          taxCache,
-        )
-      : null;
-
-    return {
-      id: row.id,
-      type: 'classification',
-      merchantId: row.merchantId,
-      scope: 'tenant',
-      sourceSystem: row.sourceSystem,
-      status: row.status,
-      confidenceScore: row.confidenceScore,
-      externalValue: row.externalValue,
-      approvedBy: row.approvedBy,
-      approvedAt: row.approvedAt,
-      active: row.active,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      matchType: row.matchType,
-      matchValue: row.matchValue,
-      itemType: row.itemType,
-      itemClsCd: row.itemClsCd,
-      priority: row.priority,
-      resolvedInternalTaxCategory: row.resolvedInternalTaxCategory,
-      resolvedTaxTyCd,
-      qtyUnitCd: row.qtyUnitCd,
-      qtyUnitCdConfidence: row.qtyUnitCdConfidence,
-      pkgUnitCd: row.pkgUnitCd,
-      pkgUnitCdConfidence: row.pkgUnitCdConfidence,
     };
   }
 
@@ -1904,7 +1787,7 @@ export class DashboardMappingApplicationService {
   private parseTypeFilter(type?: string): MappingType | undefined {
     if (!type) return undefined;
     const key = type.toLowerCase();
-    if (key === 'tax' || key === 'classification' || key === 'payment')
+    if (key === 'tax' || key === 'payment' || key === 'quantity_unit')
       return key;
     throw new BadRequestException(`Unknown type filter: ${type}`);
   }

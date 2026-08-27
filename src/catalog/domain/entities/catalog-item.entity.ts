@@ -12,18 +12,58 @@ export interface CatalogItem {
   externalId: string | null;
   name: string;
   sku: string | null;
-  itemType: ItemType;
   taxCategory: TaxCategory;
-  /** OSCU item classification code (itemClsCd) */
+  /**
+   * OSCU item classification code (itemClsCd). Empty string ('') -- never
+   * null, unlike productTypeCode -- means classification resolution found
+   * no mapping at all for this item (see ClassificationMethod's
+   * 'UNRESOLVED'). Kept as a plain string (not string | null) deliberately:
+   * ComplianceItem/EtimsInvoicePayload and everything downstream of
+   * prepareDocument already assume a non-nullable string here, and by the
+   * time an item can reach those layers it must have a real etimsItemCode,
+   * which sync-items.usecase.ts refuses to assign while this is ''. See
+   * needsClassificationMapping.
+   */
   classificationCode: string;
-  /** OSCU unit of quantity code (qtyUnitCd) */
+  /** OSCU unit of quantity code (qtyUnitCd). '' means unresolved -- see classificationCode. */
   unitCode: string;
-  /** OSCU packaging unit code (pkgUnitCd) */
+  /** OSCU packaging unit code (pkgUnitCd). '' means unresolved -- see classificationCode. */
   packagingUnitCode: string;
   /** OSCU tax type code (taxTyCd) */
   taxTyCd: string;
-  /** OSCU product type code (itemTyCd) */
-  productTypeCode: string;
+  /**
+   * OSCU product type code (itemTyCd, Code Classification 24: '1' Raw
+   * Material, '2' Finished Product, '3' Service) -- required by KRA on
+   * saveItem and embedded as a validated component of itemCd itself, but
+   * NEVER guessed by this system. Null means the merchant hasn't chosen one
+   * yet (see needsProductType) -- an ERP pull can only set this when the
+   * source unambiguously says "service" (mapped to '3'); it can never tell
+   * Raw Material from Finished Product, so goods always land here null
+   * until a human picks one, same as a manual entry with nothing selected.
+   * This is the single source of truth for what kind of item this is --
+   * ItemType (GOODS/SERVICE) is derived FROM this, never the reverse; see
+   * deriveItemType below.
+   */
+  productTypeCode: string | null;
+  /**
+   * Derived from productTypeCode: true when it's null, i.e. nobody has
+   * confirmed this item's KRA product type yet. Same shape as
+   * needsClassificationReview, but this one BLOCKS KRA sync entirely
+   * (saveItem's itemTyCd is required and can't be fabricated) rather than
+   * just flagging for later cleanup -- see sync-items.usecase.ts's
+   * eligibility filter.
+   */
+  needsProductType: boolean;
+  /**
+   * True when classificationCode, unitCode, or packagingUnitCode is ''
+   * (unresolved) -- same "blocks KRA sync until a human fixes it" role as
+   * needsProductType, just for the three fields resolveClassification
+   * resolves instead of the one the caller must supply directly. Unlike
+   * needsClassificationReview below (a weak-but-present match), this means
+   * there is genuinely nothing to submit yet. See sync-items.usecase.ts's
+   * eligibility filter, which refuses to sync while this is true.
+   */
+  needsClassificationMapping: boolean;
   /**
    * Which classification-resolver strategy actually matched
    * classificationCode -- see ClassificationMethod. Null for rows written
@@ -56,9 +96,10 @@ export interface CatalogItem {
    * Not part of itemTyCd -- KRA's own item-type code list (cdCls 24: Raw
    * Material / Finished Product / Service) has no distinct "non-stock good"
    * value, so this is tracked as its own flag rather than folded into
-   * productTypeCode. Fully derived from itemType on every register/update,
-   * uniformly regardless of source (manual, QuickBooks pull, Mode A):
-   * ItemType.GOODS -> true, ItemType.SERVICE -> false. No override.
+   * productTypeCode. Fully derived from productTypeCode on every
+   * register/update via computeIsStockItem, uniformly regardless of source:
+   * '1'/'2' -> true, '3' -> false, null (pending) -> false until confirmed.
+   * No override.
    */
   isStockItem: boolean;
   registrationStatus: 'PENDING' | 'REGISTERED' | 'FAILED';
@@ -93,7 +134,11 @@ export interface CatalogItem {
  * persisted row back to the domain shape (catalog-item-typeorm.repository.ts),
  * so the flag can never drift between the two paths.
  */
-const WEAK_CLASSIFICATION_METHODS = new Set(['NAME_CONTAINS', 'DEFAULT']);
+const WEAK_CLASSIFICATION_METHODS = new Set([
+  'NAME_CONTAINS',
+  'DEFAULT',
+  'UNRESOLVED',
+]);
 
 export function computeNeedsClassificationReview(
   classificationMethod: string | null,
@@ -102,4 +147,47 @@ export function computeNeedsClassificationReview(
     classificationMethod === null ||
     WEAK_CLASSIFICATION_METHODS.has(classificationMethod)
   );
+}
+
+/**
+ * Single source of truth for needsClassificationMapping -- true when any of
+ * the three fields resolveClassification is responsible for filling in
+ * came back unresolved ('' -- see CatalogItem.classificationCode's doc
+ * comment). Used identically by register-item.usecase.ts,
+ * update-manual-item.usecase.ts, and catalog-item-typeorm.repository.ts's
+ * read path, same convention as computeNeedsProductType.
+ */
+export function computeNeedsClassificationMapping(
+  classificationCode: string,
+  unitCode: string,
+  packagingUnitCode: string,
+): boolean {
+  return (
+    classificationCode === '' || unitCode === '' || packagingUnitCode === ''
+  );
+}
+
+/**
+ * productTypeCode is the single source of truth for what kind of item this
+ * is -- these three functions are the only place that's allowed to derive
+ * anything from it, so ItemType/isStockItem/needsProductType can never
+ * drift out of sync with it or with each other. Used identically by
+ * register-item.usecase.ts, update-manual-item.usecase.ts, and
+ * catalog-item-typeorm.repository.ts's read path.
+ */
+export function deriveItemType(
+  productTypeCode: string | null,
+): ItemType | null {
+  if (productTypeCode === null) return null;
+  return productTypeCode === '3' ? ItemType.SERVICE : ItemType.GOODS;
+}
+
+export function computeIsStockItem(productTypeCode: string | null): boolean {
+  return productTypeCode !== '3';
+}
+
+export function computeNeedsProductType(
+  productTypeCode: string | null,
+): boolean {
+  return productTypeCode === null;
 }

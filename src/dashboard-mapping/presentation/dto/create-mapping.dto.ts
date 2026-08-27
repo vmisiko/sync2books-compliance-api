@@ -1,5 +1,4 @@
 import { ApiProperty } from '@nestjs/swagger';
-import type { ClassificationMatchType } from '../../../regulatory/oscu/infrastructure/persistence/classification-mapping.orm-entity';
 
 /**
  * Body for POST dashboard-api/mappings. `type` selects which fields are
@@ -8,8 +7,8 @@ import type { ClassificationMatchType } from '../../../regulatory/oscu/infrastru
  * so validation is done in the application layer to match convention).
  */
 export class CreateMappingDto {
-  @ApiProperty({ enum: ['tax', 'classification', 'payment'] })
-  type!: 'tax' | 'classification' | 'payment';
+  @ApiProperty({ enum: ['tax', 'payment', 'quantity_unit'] })
+  type!: 'tax' | 'payment' | 'quantity_unit';
 
   // --- tax ---
   @ApiProperty({
@@ -26,49 +25,6 @@ export class CreateMappingDto {
   })
   taxTyCd?: string;
 
-  // --- classification (also carries this item's own qtyUnitCd/pkgUnitCd —
-  // resolved per item, not via a shared category, see
-  // ClassificationMappingOrmEntity's doc comment) ---
-  @ApiProperty({
-    required: false,
-    enum: ['EXTERNAL_ID', 'SKU', 'NAME_CONTAINS'],
-    description: 'Required when type=classification',
-  })
-  matchType?: ClassificationMatchType;
-
-  @ApiProperty({
-    required: false,
-    description: 'Required when type=classification',
-  })
-  matchValue?: string;
-
-  @ApiProperty({ required: false, nullable: true })
-  itemType?: string | null;
-
-  @ApiProperty({
-    required: false,
-    description: 'Required when type=classification — KRA itemClsCd',
-    example: '14111400',
-  })
-  itemClsCd?: string;
-
-  @ApiProperty({
-    required: false,
-    description: "This item's KRA quantity unit code (cdCls '10')",
-    example: 'KG',
-  })
-  qtyUnitCd?: string;
-
-  @ApiProperty({
-    required: false,
-    description: "This item's KRA packaging unit code (cdCls '17')",
-    example: 'BG',
-  })
-  pkgUnitCd?: string;
-
-  @ApiProperty({ required: false, default: 100 })
-  priority?: number;
-
   // --- payment ---
   @ApiProperty({
     required: false,
@@ -83,4 +39,19 @@ export class CreateMappingDto {
     example: '07',
   })
   pmtTyCd?: string;
+
+  // --- quantity_unit (category-based, like tax) ---
+  @ApiProperty({
+    required: false,
+    description: 'Required when type=quantity_unit',
+    example: 'KILOGRAM',
+  })
+  internalUnit?: string;
+
+  @ApiProperty({
+    required: false,
+    description: "Required when type=quantity_unit — KRA quantity unit code (cdCls '10')",
+    example: 'KG',
+  })
+  qtyUnitCd?: string;
 }

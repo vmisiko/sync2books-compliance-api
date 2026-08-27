@@ -1,9 +1,11 @@
 import { randomUUID } from 'crypto';
 import {
+  computeIsStockItem,
+  computeNeedsClassificationMapping,
   computeNeedsClassificationReview,
+  computeNeedsProductType,
   CatalogItem,
 } from '../../domain/entities/catalog-item.entity';
-import { ItemType } from '../../../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../../../shared/domain/enums/tax-category.enum';
 import type { ICatalogItemRepository } from '../../domain/ports/item-repository.port';
 import type { IClassificationResolver } from '../../domain/ports/classification-resolver.port';
@@ -14,7 +16,6 @@ export interface RegisterItemInput {
   externalId?: string | null;
   name: string;
   sku?: string | null;
-  itemType: ItemType;
   taxCategory: TaxCategory;
   classificationCode?: string;
   /** This item's own KRA quantity unit code — resolved per item, no category fallback. */
@@ -22,6 +23,13 @@ export interface RegisterItemInput {
   /** This item's own KRA packaging unit code — resolved per item, no category fallback. */
   packagingUnitCode?: string;
   taxTyCd?: string;
+  /**
+   * OSCU itemTyCd. Omit when the source doesn't unambiguously know it (e.g.
+   * an ERP pull that can't tell Raw Material from Finished Product) --
+   * NEVER guess a value here. The item registers with productTypeCode null
+   * and needsProductType true, blocked from KRA sync until a human
+   * explicitly picks one (manually or by editing the pulled item).
+   */
   productTypeCode?: string;
   /** OSCU default unit price (dftPrc). */
   unitPrice?: number | null;
@@ -58,11 +66,6 @@ export async function registerItem(
 
   const resolution = await classificationResolver.resolveClassification({
     merchantId: input.merchantId,
-    itemType: input.itemType,
-    itemName: input.name,
-    sku: input.sku ?? undefined,
-    externalId: input.externalId ?? undefined,
-    sourceSystem: input.sourceSystem ?? null,
     classificationCode: input.classificationCode,
     unitCode: input.unitCode,
     packagingUnitCode: input.packagingUnitCode,
@@ -71,26 +74,45 @@ export async function registerItem(
     internalTaxCategory: input.taxCategory,
   });
 
-  const classificationCode = ensureNonEmptyString(
-    resolution.classificationCode,
-    'classificationCode',
-  );
-  const unitCode = ensureNonEmptyString(resolution.unitCode, 'unitCode');
-  const packagingUnitCode = ensureNonEmptyString(
-    resolution.packagingUnitCode,
-    'packagingUnitCode',
+  // Unlike taxTyCd below, these four are allowed to come back unresolved
+  // (null) -- resolveClassification never throws for them. Critically: when
+  // updating an EXISTING item, an unresolved field must fall back to
+  // existing.X, never to '' -- an ERP pull supplies no override for these
+  // fields on every single call (classification/packaging/product-type are
+  // never ERP-known; quantity unit only via whatever the caller looked up),
+  // so without this fallback, every routine re-pull would silently blank
+  // out whatever a human had already set, including on an already-
+  // REGISTERED item (confirmed happening live 2026-08-27 -- a re-pull
+  // wiped 5 KRA-registered items back to blank/PENDING because their
+  // resolution came back null and this used to fall back to '' instead of
+  // the existing value). '' (not null) is still the right sentinel for
+  // classification/unit/packaging on a BRAND NEW item -- see
+  // CatalogItem.classificationCode's doc comment -- there's simply no
+  // existing value to prefer yet.
+  const classificationCode =
+    resolution.classificationCode ?? existing?.classificationCode ?? '';
+  const unitCode = resolution.unitCode ?? existing?.unitCode ?? '';
+  const packagingUnitCode =
+    resolution.packagingUnitCode ?? existing?.packagingUnitCode ?? '';
+  const needsClassificationMapping = computeNeedsClassificationMapping(
+    classificationCode,
+    unitCode,
+    packagingUnitCode,
   );
   const taxTyCd = ensureNonEmptyString(resolution.taxTyCd, 'taxTyCd');
-  const productTypeCode = ensureNonEmptyString(
-    resolution.productTypeCode,
-    'productTypeCode',
-  );
-  // Stock-tracking eligibility is fully determined by item type -- Goods
-  // (Raw Material/Finished Product) are stock-tracked, Service is not. This
-  // is recomputed here on every register/update call, uniformly regardless
-  // of source (manual, QuickBooks pull, or Mode A registration), and there
-  // is no override mechanism.
-  const isStockItem = input.itemType === ItemType.GOODS;
+  // Same existing-preferring fallback as above -- an ERP pull can only ever
+  // supply a genuinely more-confident productTypeCode (e.g. a fresh
+  // Service signal); when it comes back null, that must never erase a
+  // value a human already confirmed on an existing item.
+  const productTypeCode =
+    resolution.productTypeCode ?? existing?.productTypeCode ?? null;
+  const needsProductType = computeNeedsProductType(productTypeCode);
+  // Stock-tracking eligibility is fully determined by productTypeCode --
+  // Goods (Raw Material/Finished Product) are stock-tracked, Service is
+  // not, and an item still pending a product-type choice is treated as
+  // not-yet-stock-tracked until confirmed. Recomputed here on every
+  // register/update call, uniformly regardless of source, with no override.
+  const isStockItem = computeIsStockItem(productTypeCode);
   const now = new Date();
 
   if (existing) {
@@ -101,7 +123,6 @@ export async function registerItem(
     const changed =
       input.name !== existing.name ||
       nextSku !== existing.sku ||
-      input.itemType !== existing.itemType ||
       input.taxCategory !== existing.taxCategory ||
       classificationCode !== existing.classificationCode ||
       unitCode !== existing.unitCode ||
@@ -133,15 +154,16 @@ export async function registerItem(
       ...existing,
       name: input.name,
       sku: nextSku,
-      itemType: input.itemType,
       taxCategory: input.taxCategory,
       classificationCode,
       classificationMethod: resolution.method,
       needsClassificationReview: computeNeedsClassificationReview(resolution.method),
       unitCode,
       packagingUnitCode,
+      needsClassificationMapping,
       taxTyCd,
       productTypeCode,
+      needsProductType,
       unitPrice: nextUnitPrice,
       originCountry: nextOriginCountry,
       sourceSystem: nextSourceSystem,
@@ -177,15 +199,16 @@ export async function registerItem(
     externalId: input.externalId ?? null,
     name: input.name,
     sku: input.sku ?? null,
-    itemType: input.itemType,
     taxCategory: input.taxCategory,
     classificationCode,
     classificationMethod: resolution.method,
     needsClassificationReview: computeNeedsClassificationReview(resolution.method),
     unitCode,
     packagingUnitCode,
+    needsClassificationMapping,
     taxTyCd,
     productTypeCode,
+    needsProductType,
     unitPrice: input.unitPrice ?? null,
     originCountry: input.originCountry ?? 'KE',
     sourceSystem: input.sourceSystem ?? null,

@@ -15,7 +15,6 @@ import type { IEtimsAdapter } from '../regulatory/oscu/ports/etims-adapter.port'
 import type { OscuStockIOSaveReq } from '../regulatory/oscu/transport/endpoints/stock-io-save.dto';
 import { ConnectionEnvironment } from '../shared/domain/enums/connection-environment.enum';
 import { ConnectionStatus } from '../shared/domain/enums/connection-status.enum';
-import { ItemType } from '../shared/domain/enums/item-type.enum';
 import { TaxCategory } from '../shared/domain/enums/tax-category.enum';
 import { MovementType } from './domain/enums/movement-type.enum';
 
@@ -58,7 +57,6 @@ describe('InventoryService eTIMS stock sync', () => {
             merchantId: 'merchant-1',
             name: 'Widget',
             sku: 'SKU-1',
-            itemType: ItemType.GOODS,
             taxCategory: TaxCategory.VAT_STANDARD,
             classificationCode: '14111400',
             unitCode: 'U',
