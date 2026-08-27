@@ -110,6 +110,53 @@ export class PurchaseInvoiceOrmEntity {
   @Column('json', { nullable: true })
   rawKraResponse!: Record<string, unknown> | null;
 
+  /**
+   * `invcNo` reserved from the `purchase_confirm_seq:*` counter in
+   * `oscu_sync_state` for this invoice's `sendPurchaseTransactionInfo` call.
+   * Persisted so a retry after a transient/rejected send reuses the same
+   * number instead of reserving a new one (mirrors `oscuInvcNo` on sales
+   * documents). Cleared back to null when a permanent rejection releases
+   * the number.
+   */
+  @Column('int', { nullable: true })
+  kraConfirmInvcNo!: number | null;
+
+  /** `resultCd` from the last `sendPurchaseTransactionInfo` attempt, e.g. '000' on success. */
+  @Column('varchar', { nullable: true })
+  kraConfirmResultCd!: string | null;
+
+  /** Error/rejection message from the last `sendPurchaseTransactionInfo` attempt, if any. Cleared on success. */
+  @Column('text', { nullable: true })
+  kraConfirmError!: string | null;
+
+  /** When KRA accepted the `sendPurchaseTransactionInfo` confirmation. */
+  @Column('timestamp', { nullable: true })
+  kraConfirmedAt!: Date | null;
+
+  /**
+   * KRA's `pmtTyCd` ("Payment Type Code", e.g. '01' = cash) off the raw purchase record, when
+   * present — see PURCHASE_TO_ERP_SYNC_PLAN.md. Not currently read by anything: ERP sync always
+   * posts a Bill regardless of this value until a cash-purchase branch is built.
+   */
+  @Column('varchar', { nullable: true })
+  paymentTypeCode!: string | null;
+
+  /** The Bill's local id in main API, once `syncToErp` succeeds — main API's own id, not the ERP's own bookId. */
+  @Column('varchar', { nullable: true })
+  erpBillId!: string | null;
+
+  /** main API's `syncBatchId` for the Bill push, for a future retry/status-check flow. */
+  @Column('varchar', { nullable: true })
+  erpSyncBatchId!: string | null;
+
+  /** Error message from the last failed `syncToErp` attempt. Cleared on success. */
+  @Column('text', { nullable: true })
+  erpSyncError!: string | null;
+
+  /** When `syncToErp` last succeeded (queued the bill — not when the ERP write itself completes, which is async). */
+  @Column('timestamp', { nullable: true })
+  erpSyncedAt!: Date | null;
+
   @Column('timestamp')
   pulledAt!: Date;
 

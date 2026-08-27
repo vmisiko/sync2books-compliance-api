@@ -254,6 +254,13 @@ export interface MainApiSupplier {
   phone?: string | null;
   taxNumber?: string | null;
   bookType?: string | null;
+  /**
+   * The *ERP's own* supplier id (QuickBooks Vendor Id / Odoo `res.partner` id) — distinct from
+   * `id` above, which is main API's own record id. Required when building `CreateBillDto.supplierRef.id`
+   * for a bill push (see `MainApiPullClient.createBill`'s doc comment) — `id` alone is not
+   * accepted by the ERP.
+   */
+  bookId?: string | null;
   /** Pre-resolved provenance/address data from main API's standardization layer — null if this row's source ERP isn't supported by it yet. Optional (unlike MainApiItem's) since nothing in this repo constructs/consumes it yet — see getSuppliers' doc comment — kept `| null`-typed rather than fully required so existing fixtures/call sites aren't forced to supply it. */
   standardized?: MainApiStandardizedParty | null;
 }
@@ -264,6 +271,50 @@ export interface MainApiSupplierListResponse {
   page: number;
   limit: number;
   totalPages: number;
+}
+
+/** Request body for `MainApiPullClient.createBill` — mirrors nest-sync-2-books-api's `CreateBillDto` (`src/bill/application/dtos/create-bill.dto.ts`), trimmed to the fields this repo actually populates. */
+export interface MainApiCreateBillLineItem {
+  description?: string;
+  unitAmount: number;
+  quantity: number;
+  subTotal?: number;
+  taxAmount?: number;
+  totalAmount?: number;
+  /** Required by CreateBillDto's line-item schema; a KRA purchase confirmation always represents a direct cost. */
+  isDirectCost: boolean;
+}
+
+export interface MainApiCreateBillRequest {
+  reference?: string;
+  supplierRef: { id: string; supplierName?: string };
+  issueDate: string;
+  currency: string;
+  subTotal: number;
+  taxAmount: number;
+  totalAmount: number;
+  lineItems: MainApiCreateBillLineItem[];
+  note?: string;
+  status: 'Open';
+}
+
+export interface MainApiCreateBillResponse {
+  bill: {
+    id: string;
+    billCode?: string;
+    bookId?: string;
+    syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed';
+    syncError?: string;
+    [key: string]: unknown;
+  };
+  message: string;
+  syncBatchId: string;
+  /**
+   * Reflects the real outcome when `createBill` was called with `awaitSync: true` (the default
+   * here) — `bill.syncStatus`/`bill.syncError` carry the same information. Only stays `false` as
+   * a "not completed yet" placeholder when `awaitSync: false` was explicitly requested.
+   */
+  syncedToBookkeeping: boolean;
 }
 
 export interface MainApiCustomer {
@@ -315,7 +366,12 @@ export class MainApiPullClient {
 
   async getInvoices(
     apiKey: string,
-    params: { page?: number; limit?: number } = {},
+    params: {
+      page?: number;
+      limit?: number;
+      startDate?: string;
+      endDate?: string;
+    } = {},
   ): Promise<MainApiListResponse<MainApiInvoice>> {
     return this.get<MainApiListResponse<MainApiInvoice>>(
       apiKey,
@@ -432,6 +488,32 @@ export class MainApiPullClient {
       connectionId,
       ...params,
     });
+  }
+
+  /**
+   * POST /bills/:connectionId — pushes a purchase as a vendor Bill (Accounts Payable). Always a
+   * Bill, never a one-step "paid" object — see PURCHASE_TO_ERP_SYNC_PLAN.md's decision for why.
+   *
+   * Requests `awaitSync=true` by default: main API then blocks until the ERP write actually
+   * completes and returns the real `bill.syncStatus`/`bill.syncError`, instead of the
+   * fire-and-forget default where `syncedToBookkeeping` is always `false` and unusable as a
+   * completion signal. `syncToErp()` (the sole caller today) relies on this — it already awaits
+   * each purchase sequentially in a loop, so this adds no real latency, it just makes the
+   * existing wait observable. Pass `awaitSync: false` to opt back into fire-and-forget if a
+   * future bulk/background caller needs it.
+   */
+  async createBill(
+    apiKey: string,
+    connectionId: string,
+    body: MainApiCreateBillRequest,
+    options: { awaitSync?: boolean } = {},
+  ): Promise<MainApiCreateBillResponse> {
+    const awaitSync = options.awaitSync ?? true;
+    return this.postJson<MainApiCreateBillResponse>(
+      apiKey,
+      `/bills/${connectionId}?awaitSync=${awaitSync}`,
+      body,
+    );
   }
 
   /**

@@ -17,10 +17,14 @@ export class SupplierOrmEntity {
   @Index()
   merchantId!: string;
 
-  /** Main-API supplier id (bookId), when this row was pulled from an ERP rather than added manually. */
+  /** Main-API supplier id (main API's own record id), when this row was pulled from an ERP rather than added manually. Not the ERP's own id — see `bookId`. */
   @Column('varchar', { nullable: true })
   @Index()
   externalId!: string | null;
+
+  /** The ERP's own supplier/vendor id (QuickBooks Vendor Id / Odoo `res.partner` id) — what a Bill push's `supplierRef.id` must use, distinct from `externalId` above. Null until a pull populates it. */
+  @Column('varchar', { nullable: true })
+  bookId!: string | null;
 
   @Column('varchar')
   name!: string;

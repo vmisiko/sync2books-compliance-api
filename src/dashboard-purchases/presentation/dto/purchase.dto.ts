@@ -37,3 +37,12 @@ export class CreateSupplierFromPurchaseDto {
   @ApiPropertyOptional({ description: 'See phoneNumber.' })
   email?: string;
 }
+
+export class RegisterPurchaseLineItemDto {
+  @ApiProperty({
+    description:
+      "OSCU itemTyCd -- '1' Raw Material, '2' Finished Product, '3' Service. The only field this endpoint can't fill in from the KRA purchase data itself; never guessed.",
+    enum: ['1', '2', '3'],
+  })
+  productTypeCode!: string;
+}

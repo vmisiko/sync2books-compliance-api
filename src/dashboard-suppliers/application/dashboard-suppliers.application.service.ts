@@ -285,6 +285,7 @@ export class DashboardSuppliersApplicationService {
               mainApiSupplier.phone ?? existing.phoneNumber;
             existing.email = mainApiSupplier.emailAddress ?? existing.email;
             existing.sourceSystem = sourceSystem ?? existing.sourceSystem;
+            existing.bookId = mainApiSupplier.bookId ?? existing.bookId;
             const saved = await this.supplierRepo.save(existing);
             results.push({
               mainApiSupplierId: mainApiSupplier.id,
@@ -297,6 +298,7 @@ export class DashboardSuppliersApplicationService {
               id: randomUUID(),
               merchantId,
               externalId: mainApiSupplier.id,
+              bookId: mainApiSupplier.bookId ?? null,
               name,
               tin: mainApiSupplier.taxNumber ?? null,
               phoneNumber: mainApiSupplier.phone ?? null,

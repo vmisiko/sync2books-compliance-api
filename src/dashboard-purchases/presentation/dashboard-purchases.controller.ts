@@ -23,6 +23,7 @@ import {
   LinkSupplierDto,
   PullPurchasesDto,
   PurchaseIdsDto,
+  RegisterPurchaseLineItemDto,
 } from './dto/purchase.dto';
 
 @Controller('dashboard-api/purchases')
@@ -30,7 +31,9 @@ import {
 @UseGuards(DashboardJwtAuthGuard, ActiveTenantGuard)
 @ApiBearerAuth()
 export class DashboardPurchasesController {
-  constructor(private readonly purchases: DashboardPurchasesApplicationService) {}
+  constructor(
+    private readonly purchases: DashboardPurchasesApplicationService,
+  ) {}
 
   @Post('pull')
   @HttpCode(HttpStatus.OK)
@@ -67,12 +70,24 @@ export class DashboardPurchasesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Mark purchase invoices confirmed for Input VAT eligibility (invoices without a supplier PIN are skipped)',
+      "Confirm purchase invoices to KRA via sendPurchaseTransactionInfo (each line item must already exist in this merchant's own registered catalog) and mark them confirmed for Input VAT eligibility",
   })
-  @ApiResponse({ status: 200, description: 'Updated purchase invoice list' })
-  async confirm(@ActiveTenant() tenantId: string, @Body() body: PurchaseIdsDto) {
+  @ApiResponse({
+    status: 200,
+    description:
+      'Updated purchase invoice list, plus any per-invoice confirmation errors',
+  })
+  async confirm(
+    @ActiveTenant() tenantId: string,
+    @Body() body: PurchaseIdsDto,
+  ) {
     const data = await this.purchases.confirm(tenantId, body.ids);
-    return { success: true, message: 'Invoices confirmed', data };
+    const failed = data.errors.length;
+    const succeeded = body.ids.length - failed;
+    const message = failed
+      ? `${succeeded} confirmed, ${failed} failed`
+      : 'Invoices confirmed';
+    return { success: true, message, data };
   }
 
   @Post('reject')
@@ -130,13 +145,44 @@ export class DashboardPurchasesController {
     return { success: true, message, data };
   }
 
+  @Post(':id/line-items/:lineItemId/register-item')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Register a purchase line item as a catalog item, using classification/unit/tax codes straight from the supplier's own KRA filing -- only productTypeCode must be supplied, since that's never inferable. Once synced to KRA (Item Sync), a subsequent confirm() on this invoice will find it by name and stop reporting it as missing.",
+  })
+  @ApiResponse({ status: 200, description: 'Registered (or updated) catalog item' })
+  async registerLineItem(
+    @ActiveTenant() tenantId: string,
+    @Param('id') id: string,
+    @Param('lineItemId') lineItemId: string,
+    @Body() body: RegisterPurchaseLineItemDto,
+  ) {
+    const result = await this.purchases.registerLineItemFromPurchase(
+      tenantId,
+      id,
+      lineItemId,
+      body.productTypeCode,
+    );
+    return {
+      success: true,
+      message: result.created ? 'Item registered' : 'Item updated',
+      data: result.item,
+    };
+  }
+
   @Post('sync-to-erp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Sync confirmed purchase invoices to a connected ERP (not implemented yet)',
+    summary:
+      'Sync confirmed purchase invoices to the connected accounting system as vendor Bills',
   })
-  @ApiResponse({ status: 400, description: 'Not implemented yet' })
-  async syncToErp(@ActiveTenant() tenantId: string, @Body() body: PurchaseIdsDto) {
-    this.purchases.syncToErp(tenantId, body.ids);
+  @ApiResponse({ status: 200, description: 'Purchases synced (per-row errors reported in `errors`)' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  async syncToErp(
+    @ActiveTenant() tenantId: string,
+    @Body() body: PurchaseIdsDto,
+  ) {
+    return this.purchases.syncToErp(tenantId, body.ids);
   }
 }
