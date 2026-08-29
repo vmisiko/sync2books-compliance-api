@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.4
 # Multi-stage build for NestJS application
 FROM node:20-alpine AS builder
 
@@ -11,8 +10,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml* ./
 
 # Install dependencies with cache mount for pnpm store
-RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 # Copy source code
 COPY . .
@@ -37,8 +35,7 @@ ENV PORT=3000
 COPY package.json pnpm-lock.yaml* ./
 
 # Install only production dependencies with cache mount
-RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile --prod
+RUN pnpm install --frozen-lockfile --prod
 
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist
