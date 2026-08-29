@@ -331,4 +331,46 @@ describe('MainApiConnectionApplicationService.getStatus', () => {
       'quickbooks',
     ]);
   });
+
+  describe('self-healing a missing connection row', () => {
+    const ORIGINAL_ENV = process.env;
+
+    beforeEach(() => {
+      process.env = { ...ORIGINAL_ENV };
+    });
+
+    afterEach(() => {
+      process.env = ORIGINAL_ENV;
+    });
+
+    it('seeds a connection from the global credentials for a tenant with no row yet, instead of 404ing', async () => {
+      process.env.MAIN_API_APPLICATION_ID = 'shared-app';
+      process.env.MAIN_API_API_KEY = 'shared-key';
+      const repo = new FakeRepo();
+      const svc = svcWithEnabledKeys(repo, ['quickbooks']);
+
+      // No svc.upsert() call first — this tenant has never been seen before,
+      // matching a pre-existing tenant that predates MAIN_API_APPLICATION_ID
+      // being configured, or one whose business-creation seed failed.
+      const status = await svc.getStatus('never-seen-tenant');
+
+      expect(status.configured).toBe(true);
+      expect(status.mainApiApplicationId).toBe('shared-app');
+      expect(status.integrations.map((i) => i.integrationKey)).toEqual([
+        'quickbooks',
+      ]);
+    });
+
+    it('degrades gracefully instead of throwing when the global credentials themselves are unset', async () => {
+      delete process.env.MAIN_API_APPLICATION_ID;
+      delete process.env.MAIN_API_API_KEY;
+      const repo = new FakeRepo();
+      const svc = svcWithEnabledKeys(repo, ['quickbooks']);
+
+      const status = await svc.getStatus('never-seen-tenant');
+
+      expect(status.configured).toBe(false);
+      expect(status.mainApiApplicationId).toBeNull();
+    });
+  });
 });

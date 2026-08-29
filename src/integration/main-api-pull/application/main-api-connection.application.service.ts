@@ -8,6 +8,7 @@ import type {
 } from '../domain/entities/main-api-connection.entity';
 import { MainApiPullClient } from '../infrastructure/http/main-api-pull.client';
 import { ComplianceOrganizationApplicationService } from '../../../compliance-organization/application/compliance-organization.application.service';
+import { getGlobalMainApiCredentials } from '../../../shared/config/main-api-app-credentials';
 
 /** The only connection.* events we act on — matches the main API's event catalog (see WEBHOOK_SYSTEM.md). */
 const SUBSCRIBED_EVENT_TYPES = [
@@ -488,36 +489,48 @@ export class MainApiConnectionApplicationService {
     };
   }
 
+  /**
+   * Self-heals a missing row from the shared global credentials — every
+   * tenant used to only get a MainApiConnection row seeded at business-
+   * creation time (dashboard-business.controller.ts), which left any tenant
+   * whose creation happened before the credentials were configured (or any
+   * pre-existing tenant never migrated) permanently 404ing here forever,
+   * with no way to recover now that the manual "Save Application" endpoint
+   * is gone. Seeding it lazily on first read makes every call site that
+   * already depends on getForTenant (invoices, items, suppliers, customers,
+   * purchases, mapping, ...) recover on its own instead.
+   */
   async getForTenant(complianceTenantId: string): Promise<MainApiConnection> {
     const connection = await this.repo.findByTenantId(complianceTenantId);
-    if (!connection) {
-      throw new NotFoundException(
-        `No main-API connection configured for tenant ${complianceTenantId}`,
-      );
-    }
-    return connection;
+    if (connection) return connection;
+    return this.upsert(complianceTenantId, getGlobalMainApiCredentials());
   }
 
   async getStatus(
     complianceTenantId: string,
   ): Promise<MainApiConnectionStatus> {
-    const connection = await this.repo.findByTenantId(complianceTenantId);
-    const emptyIntegrations = (): IntegrationStatus[] =>
-      SUPPORTED_INTEGRATION_KEYS.map((key) => ({
-        integrationKey: key,
-        connectionId: null,
-        connectionState: 'not_connected',
-        reason: null,
-        updatedAt: null,
-      }));
-
-    if (!connection) {
+    let connection: MainApiConnection;
+    try {
+      connection = await this.getForTenant(complianceTenantId);
+    } catch (error) {
+      // Only reachable if MAIN_API_APPLICATION_ID/MAIN_API_API_KEY themselves
+      // are unset (a real deployment misconfiguration) — every other case
+      // self-heals above. Degrade gracefully rather than 500ing the page.
+      this.logger.warn(
+        `Could not resolve a main-API connection for tenant ${complianceTenantId}: ${(error as Error).message}`,
+      );
       return {
         configured: false,
         mainApiApplicationId: null,
         maskedApiKey: null,
         mainApiCompanyId: null,
-        integrations: emptyIntegrations(),
+        integrations: SUPPORTED_INTEGRATION_KEYS.map((key) => ({
+          integrationKey: key,
+          connectionId: null,
+          connectionState: 'not_connected',
+          reason: null,
+          updatedAt: null,
+        })),
         autoUploadReceiptToSource: true,
       };
     }
