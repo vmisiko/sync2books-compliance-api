@@ -39,6 +39,29 @@ function trimKraPin(v: string | null | undefined): string | null {
   return t === '' ? null : t;
 }
 
+type SharedSandboxEtimsCredentials = {
+  kraPin: string;
+  dvcSrlNo: string;
+  deviceId: string;
+  cmcKey: string;
+};
+
+/**
+ * One already-`/initialize`d KRA sandbox PIN/device/cmcKey, shared across every test
+ * business so they don't each have to call OSCU `/initialize` (KRA's sandbox has a known
+ * bug where repeated `/initialize` calls against a device serial permanently corrupt it —
+ * see `KRA_SUPPORT_TICKET_DRAFT_2.md`). Configure all four env vars to enable; leave any
+ * unset to fall back to the old per-business provisioning flow.
+ */
+function getSharedSandboxEtimsCredentials(): SharedSandboxEtimsCredentials | null {
+  const kraPin = process.env.ETIMS_SANDBOX_SHARED_KRA_PIN?.trim();
+  const dvcSrlNo = process.env.ETIMS_SANDBOX_SHARED_DVC_SRL_NO?.trim();
+  const deviceId = process.env.ETIMS_SANDBOX_SHARED_DEVICE_ID?.trim();
+  const cmcKey = process.env.ETIMS_SANDBOX_SHARED_CMC_KEY?.trim();
+  if (!kraPin || !dvcSrlNo || !deviceId || !cmcKey) return null;
+  return { kraPin, dvcSrlNo, deviceId, cmcKey };
+}
+
 export type UpsertTenantInput = {
   /** Update an existing tenant (e.g. dashboard-only row) by internal id. */
   id?: string | null;
@@ -173,14 +196,26 @@ export class ComplianceOrganizationApplicationService {
     const branch = await this.getOrCreateDefaultBranch(saved.id);
 
     const kraPin = trimKraPin(input.kraPin);
+    const env = resolveTenantConnectionEnvironment(input);
     let etimsConnection: ComplianceConnection | null = null;
     if (kraPin) {
-      const env = resolveTenantConnectionEnvironment(input);
       etimsConnection = await this.upsertEtimsConnection({
         complianceBranchId: branch.id,
         kraPin,
         environment: env,
       });
+    } else if (env === ConnectionEnvironment.SANDBOX) {
+      const shared = getSharedSandboxEtimsCredentials();
+      if (shared) {
+        etimsConnection = await this.upsertEtimsConnection({
+          complianceBranchId: branch.id,
+          kraPin: shared.kraPin,
+          dvcSrlNo: shared.dvcSrlNo,
+          deviceId: shared.deviceId,
+          cmcKey: shared.cmcKey,
+          environment: env,
+        });
+      }
     }
 
     return {

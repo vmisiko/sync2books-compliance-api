@@ -48,13 +48,19 @@ describe('Compliance organization (e2e)', () => {
     const body = tenantRes.body as {
       tenant: { id: string; sync2booksCompanyId: string | null };
       defaultBranchId: string;
-      etimsConnection: unknown;
+      etimsConnection: { kraPin: string; environment: string } | null;
     };
     const tenantId = body.tenant.id;
     expect(tenantId).toBeTruthy();
     expect(body.tenant.sync2booksCompanyId).toBeNull();
     expect(body.defaultBranchId).toBeTruthy();
-    expect(body.etimsConnection).toBeNull();
+    // A new SANDBOX tenant with no kraPin of its own defaults to the shared,
+    // already-`/initialize`d test eTIMS connection (ETIMS_SANDBOX_SHARED_* env vars)
+    // instead of an empty shell -- so it doesn't have to call OSCU /initialize itself.
+    expect(body.etimsConnection?.kraPin).toBe(
+      process.env.ETIMS_SANDBOX_SHARED_KRA_PIN,
+    );
+    expect(body.etimsConnection?.environment).toBe('SANDBOX');
 
     const listRes = await withSync2BooksM2m(
       request(http).get(`${base}/tenants/${tenantId}/branches`),
