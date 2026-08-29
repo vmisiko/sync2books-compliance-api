@@ -560,6 +560,22 @@ export class MainApiPullClient {
   }
 
   /**
+   * Which integrations (quickbooks/odoo/etc.) are enabled for the Application
+   * behind this apiKey, per its Connectors settings on the main API — lets
+   * the ERP Connection page only offer integrations an admin actually turned
+   * on there, instead of always offering every integration this repo knows
+   * how to render a card for.
+   */
+  async getEnabledIntegrationKeys(apiKey: string): Promise<string[]> {
+    const body = await this.get<{ integrationKeys: string[] }>(
+      apiKey,
+      '/integrations/enabled',
+      {},
+    );
+    return body.integrationKeys ?? [];
+  }
+
+  /**
    * Triggers a fresh QuickBooks fetch on the main API side before listing —
    * without this, getItems()/getInvoices() only return whatever the main API
    * already happened to have cached, not what's currently in QuickBooks.

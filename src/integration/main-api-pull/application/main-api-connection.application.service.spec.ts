@@ -10,6 +10,7 @@ type FakeMainApiPull = Pick<
   | 'createWebhookEndpoint'
   | 'setWebhookEndpointEnvironmentToAny'
   | 'companyExists'
+  | 'getEnabledIntegrationKeys'
 >;
 type FakeOrg = Pick<ComplianceOrganizationApplicationService, 'getTenantById'>;
 
@@ -71,6 +72,12 @@ function fakeMainApiPull(
       await new Promise((r) => setTimeout(r, 5));
       return existingCompanyIds.has(companyId);
     },
+    getEnabledIntegrationKeys: () =>
+      Promise.resolve([
+        'quickbooks',
+        'odoo',
+        'microsoft-dynamics-365-business-central',
+      ]),
   };
 }
 
@@ -246,5 +253,82 @@ describe('MainApiConnectionApplicationService.ensureCompany', () => {
 
     expect(createCompanyCalls.length).toBe(0);
     expect(result.mainApiCompanyId).toBe('live-company-id');
+  });
+});
+
+describe('MainApiConnectionApplicationService.getStatus', () => {
+  function svcWithEnabledKeys(
+    repo: FakeRepo,
+    enabledKeys: string[],
+  ): MainApiConnectionApplicationService {
+    const fake: FakeMainApiPull = {
+      ...fakeMainApiPull([], []),
+      getEnabledIntegrationKeys: () => Promise.resolve(enabledKeys),
+    };
+    return new MainApiConnectionApplicationService(
+      repo,
+      fake as MainApiPullClient,
+      fakeOrg() as ComplianceOrganizationApplicationService,
+    );
+  }
+
+  it('only includes integrations enabled on the shared Main API Application', async () => {
+    const repo = new FakeRepo();
+    const svc = svcWithEnabledKeys(repo, ['quickbooks']);
+    await svc.upsert('tenant-1', {
+      mainApiApplicationId: 'app-1',
+      mainApiApiKey: 'key-1',
+    });
+
+    const status = await svc.getStatus('tenant-1');
+
+    expect(status.integrations.map((i) => i.integrationKey)).toEqual([
+      'quickbooks',
+    ]);
+  });
+
+  it('still includes an integration the tenant already has a live connection to, even if no longer enabled', async () => {
+    const repo = new FakeRepo();
+    const svc = svcWithEnabledKeys(repo, ['quickbooks']);
+    await svc.upsert('tenant-1', {
+      mainApiApplicationId: 'app-1',
+      mainApiApiKey: 'key-1',
+    });
+    await svc.recordConnection('tenant-1', 'odoo', 'odoo-connection-1');
+
+    const status = await svc.getStatus('tenant-1');
+
+    expect(status.integrations.map((i) => i.integrationKey).sort()).toEqual([
+      'odoo',
+      'quickbooks',
+    ]);
+    const odoo = status.integrations.find((i) => i.integrationKey === 'odoo');
+    expect(odoo?.connectionState).toBe('connected');
+  });
+
+  it('falls back to every supported integration if the main API call fails', async () => {
+    const repo = new FakeRepo();
+    const fake: FakeMainApiPull = {
+      ...fakeMainApiPull([], []),
+      getEnabledIntegrationKeys: () =>
+        Promise.reject(new Error('main API unreachable')),
+    };
+    const svc = new MainApiConnectionApplicationService(
+      repo,
+      fake as MainApiPullClient,
+      fakeOrg() as ComplianceOrganizationApplicationService,
+    );
+    await svc.upsert('tenant-1', {
+      mainApiApplicationId: 'app-1',
+      mainApiApiKey: 'key-1',
+    });
+
+    const status = await svc.getStatus('tenant-1');
+
+    expect(status.integrations.map((i) => i.integrationKey).sort()).toEqual([
+      'microsoft-dynamics-365-business-central',
+      'odoo',
+      'quickbooks',
+    ]);
   });
 });

@@ -20,7 +20,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:e2e:compliance": "jest --config ./test/jest-e2e.json --runInBand --testPathPattern=compliance-organization\\.e2e-spec",
     "swagger:generate": "ts-node -r tsconfig-paths/register src/swagger.ts",
-    "backfill:stock-rows": "ts-node -r tsconfig-paths/register scripts/backfill-stock-rows.ts"
+    "backfill:stock-rows": "ts-node -r tsconfig-paths/register scripts/backfill-stock-rows.ts",
+    "migrate:shared-main-api-app": "ts-node -r tsconfig-paths/register scripts/migrate-to-shared-main-api-app.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

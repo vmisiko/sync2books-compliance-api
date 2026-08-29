@@ -9,9 +9,6 @@ function toDomain(e: DashboardOrganizationOrmEntity): DashboardOrganization {
   return {
     id: e.id,
     displayName: e.displayName,
-    mainApiOrganizationId: e.mainApiOrganizationId,
-    mainApiApplicationId: e.mainApiApplicationId,
-    mainApiApiKey: e.mainApiApiKey,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
   };
@@ -35,9 +32,6 @@ export class DashboardOrganizationTypeOrmRepository
     const e = this.repo.create({
       id: organization.id,
       displayName: organization.displayName,
-      mainApiOrganizationId: organization.mainApiOrganizationId,
-      mainApiApplicationId: organization.mainApiApplicationId,
-      mainApiApiKey: organization.mainApiApiKey,
       createdAt: organization.createdAt,
       updatedAt: organization.updatedAt,
     });

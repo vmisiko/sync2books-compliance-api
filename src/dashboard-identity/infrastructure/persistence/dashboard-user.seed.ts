@@ -55,7 +55,7 @@ export class DashboardUserSeed {
     // rather than minting a second one, so local dev isn't stuck empty.
     let organizationId = tenant.organizationId;
     if (!organizationId) {
-      const devOrg = await this.dashboardOrganizations.createLocal('Dev Org');
+      const devOrg = await this.dashboardOrganizations.create('Dev Org');
       await this.organization.upsertTenant({
         id: tenant.id,
         organizationId: devOrg.id,

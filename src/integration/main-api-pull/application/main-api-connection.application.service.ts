@@ -75,6 +75,18 @@ export class MainApiConnectionApplicationService {
    */
   private readonly ensureCompanyChains = new Map<string, Promise<unknown>>();
 
+  /**
+   * Every tenant now shares one Main API Application, so "which integrations
+   * are enabled" is the same answer for all of them — cache it briefly per
+   * apiKey rather than calling the main API on every single status load
+   * (getStatus() is polled/re-fetched on every ERP Connection page render).
+   */
+  private readonly enabledIntegrationsCache = new Map<
+    string,
+    { keys: Set<string>; expiresAt: number }
+  >();
+  private readonly ENABLED_INTEGRATIONS_CACHE_TTL_MS = 60_000;
+
   constructor(
     @Inject(MAIN_API_CONNECTION_REPO)
     private readonly repo: IMainApiConnectionRepository,
@@ -286,6 +298,37 @@ export class MainApiConnectionApplicationService {
     }
   }
 
+  /**
+   * Fails open (falls back to every SUPPORTED_INTEGRATION_KEYS) on error —
+   * this filter is a UX nicety, not a security boundary, so a transient main
+   * API/network failure shouldn't hide the entire ERP Connection page.
+   */
+  private async getEnabledIntegrationKeys(
+    apiKey: string,
+  ): Promise<Set<string>> {
+    const now = Date.now();
+    const cached = this.enabledIntegrationsCache.get(apiKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.keys;
+    }
+
+    try {
+      const keys = new Set(
+        await this.mainApiPull.getEnabledIntegrationKeys(apiKey),
+      );
+      this.enabledIntegrationsCache.set(apiKey, {
+        keys,
+        expiresAt: now + this.ENABLED_INTEGRATIONS_CACHE_TTL_MS,
+      });
+      return keys;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to fetch enabled integrations from Main API — showing all supported integrations: ${(error as Error).message}`,
+      );
+      return new Set(SUPPORTED_INTEGRATION_KEYS);
+    }
+  }
+
   private webhookUrlFor(complianceTenantId: string): string {
     const base = (
       process.env.COMPLIANCE_API_PUBLIC_URL || 'http://localhost:3001'
@@ -479,7 +522,16 @@ export class MainApiConnectionApplicationService {
       };
     }
 
-    const integrations = SUPPORTED_INTEGRATION_KEYS.map((key) => {
+    const enabledKeys = await this.getEnabledIntegrationKeys(
+      connection.mainApiApiKey,
+    );
+    // Gate new "Connect" opportunities by what's enabled on the shared Main
+    // API Application, but never hide an integration this tenant already has
+    // a live connection to — an admin disabling a connector globally later
+    // shouldn't make an existing customer's working sync vanish from view.
+    const integrations = SUPPORTED_INTEGRATION_KEYS.filter(
+      (key) => enabledKeys.has(key) || connection.integrations[key],
+    ).map((key) => {
       const state = connection.integrations[key];
       // Fall back to 'connected' when a connectionId exists but no webhook has
       // landed yet (e.g. registration failed) — presence of the id is still a

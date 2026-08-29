@@ -14,15 +14,6 @@ export class DashboardOrganizationOrmEntity {
   @Column('varchar')
   displayName!: string;
 
-  @Column('varchar', { nullable: true })
-  mainApiOrganizationId!: string | null;
-
-  @Column('varchar', { nullable: true })
-  mainApiApplicationId!: string | null;
-
-  @Column('varchar', { nullable: true })
-  mainApiApiKey!: string | null;
-
   @CreateDateColumn()
   createdAt!: Date;
 

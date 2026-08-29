@@ -1,12 +1,26 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
-import { DashboardOrganizationApplicationService } from '../../dashboard-organization/application/dashboard-organization.application.service';
 import { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
 import type { DashboardRequestUser } from '../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
 import { CreateBusinessDto } from './dto/create-business.dto';
+import { getGlobalMainApiCredentials } from '../../shared/config/main-api-app-credentials';
 
 export type BusinessSummaryResponse = {
   id: string;
@@ -25,7 +39,6 @@ export type BusinessSummaryResponse = {
 export class DashboardBusinessController {
   constructor(
     private readonly organizations: ComplianceOrganizationApplicationService,
-    private readonly dashboardOrganizations: DashboardOrganizationApplicationService,
     private readonly mainApiConnections: MainApiConnectionApplicationService,
   ) {}
 
@@ -58,15 +71,12 @@ export class DashboardBusinessController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary:
-      'Add a business (PIN No., display name, Live/Test) under the caller\'s organisation. ' +
-      'Also creates the matching main-API Company when the org has a provisioned apiKey.',
+      "Add a business (PIN No., display name, Live/Test) under the caller's organisation. " +
+      'Also creates the matching main-API Company under the shared Main API Application.',
   })
   @ApiResponse({ status: 201, description: 'Business created' })
   async create(@Req() req: Request, @Body() body: CreateBusinessDto) {
     const user = req.user as DashboardRequestUser;
-    const organization = await this.dashboardOrganizations.getById(
-      user.organizationId,
-    );
 
     const { tenant } = await this.organizations.upsertTenant({
       displayName: body.displayName,
@@ -76,19 +86,17 @@ export class DashboardBusinessController {
     });
 
     let merchantId = tenant.sync2booksCompanyId ?? tenant.id;
-    if (organization.mainApiApiKey && organization.mainApiApplicationId) {
-      await this.mainApiConnections.upsert(tenant.id, {
-        mainApiApplicationId: organization.mainApiApplicationId,
-        mainApiApiKey: organization.mainApiApiKey,
+    await this.mainApiConnections.upsert(
+      tenant.id,
+      getGlobalMainApiCredentials(),
+    );
+    const connection = await this.mainApiConnections.ensureCompany(tenant.id);
+    if (connection.mainApiCompanyId) {
+      const stamped = await this.organizations.upsertTenant({
+        id: tenant.id,
+        sync2booksCompanyId: connection.mainApiCompanyId,
       });
-      const connection = await this.mainApiConnections.ensureCompany(tenant.id);
-      if (connection.mainApiCompanyId) {
-        const stamped = await this.organizations.upsertTenant({
-          id: tenant.id,
-          sync2booksCompanyId: connection.mainApiCompanyId,
-        });
-        merchantId = stamped.tenant.sync2booksCompanyId ?? tenant.id;
-      }
+      merchantId = stamped.tenant.sync2booksCompanyId ?? tenant.id;
     }
 
     const summary = await this.organizations.getTenantSummary(tenant.id);

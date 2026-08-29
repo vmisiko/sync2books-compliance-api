@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import {
   ConflictException,
   Inject,
@@ -116,11 +116,9 @@ export class DashboardAuthApplicationService {
   }
 
   /**
-   * Real self-serve signup: provisions a DashboardOrganization (which
-   * auto-creates the matching main-API Organization + Application, see
-   * DashboardOrganizationApplicationService.provisionForSignup), then the
-   * first admin DashboardUser under it. Does not create any business —
-   * matches the empty "no businesses yet" landing state.
+   * Real self-serve signup: creates a DashboardOrganization, then the first
+   * admin DashboardUser under it. Does not create any business — matches the
+   * empty "no businesses yet" landing state.
    */
   async signUp(input: SignUpInput): Promise<DashboardAuthResult> {
     const normalizedEmail = input.email.trim().toLowerCase();
@@ -131,13 +129,9 @@ export class DashboardAuthApplicationService {
       );
     }
 
-    const organization = await this.organizations.provisionForSignup({
-      displayName: input.organizationName,
-      adminFirstName: input.firstName,
-      adminLastName: input.lastName,
-      adminEmail: normalizedEmail,
-      adminPassword: input.password,
-    });
+    const organization = await this.organizations.create(
+      input.organizationName,
+    );
 
     const user = await this.createUser({
       email: normalizedEmail,
@@ -272,21 +266,7 @@ export class DashboardAuthApplicationService {
       throw new ConflictException('An account with this email already exists');
     }
 
-    // The main API's own /auth/signup (called inside provisionForSignup)
-    // requires a password -- there isn't a user-chosen one for an OAuth
-    // signup, so a random one is generated here purely to satisfy that
-    // contract. It's discarded immediately after: this dashboard user logs
-    // in only via [[loginOrSignUpWithOAuth]] from now on (see the null
-    // passwordHash guard in login()).
-    const mainApiProvisioningPassword = randomBytes(24).toString('base64url');
-
-    const organization = await this.organizations.provisionForSignup({
-      displayName: organizationName,
-      adminFirstName: payload.firstName,
-      adminLastName: payload.lastName,
-      adminEmail: payload.email,
-      adminPassword: mainApiProvisioningPassword,
-    });
+    const organization = await this.organizations.create(organizationName);
 
     const user = await this.createOAuthUser({
       email: payload.email,

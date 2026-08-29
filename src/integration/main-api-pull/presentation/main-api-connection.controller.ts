@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -12,7 +12,6 @@ import { ActiveTenant } from '../../../dashboard-identity/infrastructure/decorat
 import {
   RecordIntegrationConnectionDto,
   UpdateReceiptSettingsDto,
-  UpsertMainApiConnectionDto,
 } from './dto/upsert-main-api-connection.dto';
 
 @Controller('dashboard-api/erp/main-api-connection')
@@ -32,27 +31,6 @@ export class MainApiConnectionController {
   async getStatus(@ActiveTenant() tenantId: string) {
     const status = await this.connections.getStatus(tenantId);
     return { success: true, message: 'OK', data: status };
-  }
-
-  @Put()
-  @ApiOperation({
-    summary:
-      'Save this main-API Application id + api key so items/invoices can be pulled',
-  })
-  @ApiResponse({ status: 200, description: 'Connection saved' })
-  async upsert(
-    @ActiveTenant() tenantId: string,
-    @Body() body: UpsertMainApiConnectionDto,
-  ) {
-    await this.connections.upsert(tenantId, {
-      mainApiApplicationId: body.mainApiApplicationId,
-      mainApiApiKey: body.mainApiApiKey,
-    });
-    // Auto-creates the main-API Company on first save, per the documented
-    // flow — no manual companyId entry needed (concepts/companies-and-connections.mdx).
-    await this.connections.ensureCompany(tenantId);
-    const status = await this.connections.getStatus(tenantId);
-    return { success: true, message: 'Connection saved', data: status };
   }
 
   @Post('record-connection')
