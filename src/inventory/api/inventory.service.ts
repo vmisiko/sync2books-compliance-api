@@ -81,6 +81,25 @@ export class InventoryService {
    * same requirement as the OSCU itemCd sequence (see sync-items.usecase.ts).
    * A timestamp-based sarNo will eventually collide with the sandbox's
    * "Invalid sarNo: Expected X" check, so persist a real counter instead.
+   *
+   * The read (findOne) and write (upsert) below run inside one transaction
+   * with a `pessimistic_write` row lock -- same pattern as
+   * StockTypeOrmRepository.applyDelta() -- so two concurrent allocations for
+   * the same (kraPin, environment) serialize instead of racing: the second
+   * transaction blocks on the locked row until the first commits its
+   * increment, rather than reading the pre-increment value and silently
+   * clobbering it. Without this, a read-then-write gap let two concurrent
+   * insertStockIO calls both read the same lastReqDt and both write next+1,
+   * permanently stranding the counter one ahead of KRA's true accepted value
+   * (exactly what happened to tenant P600004185A/SANDBOX).
+   *
+   * Known accepted gap, same as applyDelta(): two concurrent *first-ever*
+   * allocations for a brand-new (kraPin, environment) pair could both see no
+   * row to lock and both upsert to 1, since there's nothing yet to lock.
+   * Narrower than the bug this fixes (only the very first movement for a
+   * pin can race, not every subsequent one), and self-heals the same way
+   * any sarNo mismatch does: KRA rejects one of the two, and its
+   * insertStockIO failure path calls releaseSarNo to roll the counter back.
    */
   private async allocateSarNo(
     kraPin: string,
@@ -88,13 +107,17 @@ export class InventoryService {
   ): Promise<number> {
     if (!this.syncStateRepo) return Date.now();
     const syncKey = `stock_sar_no:${kraPin}:${environment}`;
-    const existing = await this.syncStateRepo.findOne({ where: { syncKey } });
-    const next =
-      (existing?.lastReqDt ? parseInt(existing.lastReqDt, 10) : 0) + 1;
-    await this.syncStateRepo.upsert({ syncKey, lastReqDt: String(next) }, [
-      'syncKey',
-    ]);
-    return next;
+    return this.syncStateRepo.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(OscuSyncStateOrmEntity);
+      const existing = await repo.findOne({
+        where: { syncKey },
+        lock: { mode: 'pessimistic_write' },
+      });
+      const next =
+        (existing?.lastReqDt ? parseInt(existing.lastReqDt, 10) : 0) + 1;
+      await repo.upsert({ syncKey, lastReqDt: String(next) }, ['syncKey']);
+      return next;
+    });
   }
 
   /**
@@ -105,6 +128,14 @@ export class InventoryService {
    * insertStockIO failure, retryable or not, or the counter permanently
    * drifts ahead of what KRA actually accepted. Only rolls back if no one
    * else has advanced past this value in the meantime.
+   *
+   * Done as a single atomic conditional UPDATE (WHERE syncKey = ? AND
+   * lastReqDt = ?) rather than the old findOne-then-upsert: MySQL's row lock
+   * on the UPDATE itself makes the "is this still the current value" check
+   * and the write indivisible, so there's no gap in which another call's
+   * allocateSarNo can advance the counter between our read and our write.
+   * Same semantic as the old `current === sarNo` guard, just applied
+   * atomically instead of racily.
    */
   private async releaseSarNo(
     kraPin: string,
@@ -113,14 +144,10 @@ export class InventoryService {
   ): Promise<void> {
     if (!this.syncStateRepo) return;
     const syncKey = `stock_sar_no:${kraPin}:${environment}`;
-    const existing = await this.syncStateRepo.findOne({ where: { syncKey } });
-    const current = existing?.lastReqDt ? parseInt(existing.lastReqDt, 10) : 0;
-    if (current === sarNo) {
-      await this.syncStateRepo.upsert(
-        { syncKey, lastReqDt: String(sarNo - 1) },
-        ['syncKey'],
-      );
-    }
+    await this.syncStateRepo.update(
+      { syncKey, lastReqDt: String(sarNo) },
+      { lastReqDt: String(sarNo - 1) },
+    );
   }
 
   private mapSarTyCd(movement: StockMovement): string {
