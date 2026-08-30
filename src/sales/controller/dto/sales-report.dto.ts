@@ -158,6 +158,20 @@ export class SaleReportDto {
   @ApiProperty({ nullable: true })
   originalSaleId!: string | null;
 
+  @ApiProperty({
+    nullable: true,
+    description:
+      'Main API Invoice id this sale was created from, when pulled from an ERP invoice (see createSaleFromInvoice). Null for a manually-entered sale.',
+  })
+  sourceInvoiceId!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    description:
+      "The KRA/OSCU rejection reason from the latest REJECTED event, populated only on the single-sale detail fetch (GET /sales/:id) when status is failed -- always null on the list endpoint.",
+  })
+  syncErrorMessage!: string | null;
+
   @ApiProperty({ nullable: true })
   offlineUrl!: string | null;
 

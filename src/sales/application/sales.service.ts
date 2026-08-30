@@ -274,11 +274,36 @@ export class SalesService {
     return null;
   }
 
+  /**
+   * The KRA/OSCU rejection reason from the latest REJECTED event, for
+   * surfacing in the dashboard's failed-sale review sheet. Only meaningful
+   * once a document has actually reached REJECTED -- callers should gate on
+   * `complianceStatus` first rather than calling this unconditionally, since
+   * it's an extra events-table query.
+   */
+  async getLatestRejectionReason(documentId: string): Promise<string | null> {
+    const events: ComplianceEvent[] =
+      await this.eventRepo.findByDocumentId(documentId);
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.eventType === 'REJECTED') {
+        const snapshot = e.responseSnapshot as { error?: unknown } | null;
+        return typeof snapshot?.error === 'string' ? snapshot.error : null;
+      }
+    }
+    return null;
+  }
+
   async getNormalizedSaleReport(
     documentId: string,
   ): Promise<import('../controller/dto/sales-report.dto').SaleReportDto> {
     const { document } = await this.getDocument(documentId);
     const kraRaw = await this.getKraSalesSaveResponse(documentId);
+    const syncErrorMessage =
+      document.complianceStatus === ComplianceStatus.REJECTED ||
+      document.complianceStatus === ComplianceStatus.FAILED
+        ? await this.getLatestRejectionReason(documentId)
+        : null;
 
     const itemIds = [...new Set(document.lines.map((l) => l.itemId))];
     const items: ComplianceItem[] = await this.itemRepo.findByIds(itemIds);
@@ -331,6 +356,8 @@ export class SalesService {
       receiptSignature: rcptSign || null,
       etimsUrl,
       originalSaleId: document.originalSaleId,
+      sourceInvoiceId: document.sourceInvoiceId,
+      syncErrorMessage,
       offlineUrl: null,
       status: mapComplianceStatusToDigitax(document.complianceStatus),
       supplierName: tenant?.displayName ?? null,
@@ -653,6 +680,15 @@ function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
+/**
+ * Maps a document's internal state machine (DRAFT/VALIDATED/READY_FOR_SUBMISSION/
+ * SUBMITTED/ACCEPTED/REJECTED/FAILED/RETRYING/CANCELLED) onto the coarser,
+ * Digitax-like status the dashboard shows. `DRAFT`/`VALIDATED`/
+ * `READY_FOR_SUBMISSION` were previously all lumped into `'pending'` alongside
+ * `SUBMITTED` -- indistinguishable from "sent to KRA, awaiting outcome" even
+ * though nothing had actually been sent yet. Split out as `'ready_to_submit'`
+ * so the dashboard can offer a Review/Submit action instead of just a spinner.
+ */
 function mapComplianceStatusToDigitax(status: ComplianceStatus): string {
   switch (status) {
     case ComplianceStatus.ACCEPTED:
@@ -664,6 +700,10 @@ function mapComplianceStatusToDigitax(status: ComplianceStatus): string {
       return 'retrying';
     case ComplianceStatus.CANCELLED:
       return 'cancelled';
+    case ComplianceStatus.DRAFT:
+    case ComplianceStatus.VALIDATED:
+    case ComplianceStatus.READY_FOR_SUBMISSION:
+      return 'ready_to_submit';
     default:
       return 'pending';
   }
@@ -833,6 +873,11 @@ function buildNormalizedSaleReport(input: {
     receiptSignature: rcptSign || null,
     etimsUrl,
     originalSaleId: document.originalSaleId,
+    sourceInvoiceId: document.sourceInvoiceId,
+    // Not batched for the list view (would add an events-table query per row) --
+    // fetch the single-document detail (getNormalizedSaleReport) for the real
+    // value when a failed row is actually opened for review.
+    syncErrorMessage: null,
     offlineUrl: null,
     status: mapComplianceStatusToDigitax(document.complianceStatus),
     supplierName,
