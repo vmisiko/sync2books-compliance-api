@@ -220,6 +220,11 @@ export class DashboardInvoicesApplicationService {
     if (!branch) {
       throw new BadRequestException('No branch configured for this tenant');
     }
+    if (!branch.sync2booksBranchId) {
+      throw new BadRequestException(
+        `Branch ${branch.id} has no linked sync2books branch id — link an ERP branch before submitting to KRA`,
+      );
+    }
 
     const lines = await Promise.all(
       pulled.lines.map(async (line) => {
@@ -264,7 +269,7 @@ export class DashboardInvoicesApplicationService {
     const createResult = await this.sales.createDocument(
       {
         merchantId,
-        branchId: branch.id,
+        branchId: branch.sync2booksBranchId,
         // Prefer the real ERP provenance main API's standardization layer
         // resolved for this invoice (see enrich()); fall back to the generic
         // API tag only when that ERP isn't standardized yet, so this doesn't
@@ -357,8 +362,30 @@ export class DashboardInvoicesApplicationService {
         );
       }
 
-      if (existing.complianceStatus === ComplianceStatus.DRAFT && shouldSubmit) {
-        await this.sales.submitDraftDocument(documentId);
+      if (shouldSubmit) {
+        // Resume from wherever the document actually got stuck. Inventory
+        // movements were already applied on the original attempt for
+        // VALIDATED/READY_FOR_SUBMISSION (that's how it got past DRAFT in the
+        // first place) -- only the DRAFT case goes through
+        // `submitDraftDocument` (which applies them). Re-applying here would
+        // double-debit stock, so the VALIDATED/READY_FOR_SUBMISSION branches
+        // call `prepareDocument`/`submitDocument` directly instead.
+        switch (existing.complianceStatus) {
+          case ComplianceStatus.DRAFT:
+            await this.sales.submitDraftDocument(documentId);
+            break;
+          case ComplianceStatus.VALIDATED:
+            await this.sales.prepareDocument(documentId);
+            await this.sales.submitDocument(documentId);
+            break;
+          case ComplianceStatus.READY_FOR_SUBMISSION:
+            await this.sales.submitDocument(documentId);
+            break;
+          default:
+            // SUBMITTED/ACCEPTED/REJECTED/FAILED/RETRYING/CANCELLED: already
+            // past this point or needs the dedicated retry flow -- no-op here.
+            break;
+        }
       }
 
       const alreadyAccepted =

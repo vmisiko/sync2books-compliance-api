@@ -12,6 +12,7 @@ import type { Sync2BooksCorrelationPersistenceService } from '../../integration/
 import type { Sync2BooksMainApiOscuClient } from '../../integration/platform-outbound/sync2books-main-api-oscu.client';
 import type { SalesService } from '../../sales/application/sales.service';
 import type { IPaymentTypeResolver } from '../../regulatory/oscu/domain/ports/payment-type-resolver.port';
+import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
 
 /**
@@ -74,6 +75,8 @@ type Deps = {
     SalesService,
     | 'createDocument'
     | 'submitDraftDocument'
+    | 'prepareDocument'
+    | 'submitDocument'
     | 'getNormalizedSaleReport'
     | 'getDocumentBySourceInvoiceId'
     | 'patchSourceInvoiceLink'
@@ -105,6 +108,9 @@ function makeService(deps: Deps): DashboardInvoicesApplicationService {
 function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
   postInvoiceReceipt: jest.Mock;
   patchMainApiSyncRef: jest.Mock;
+  submitDraftDocument: jest.Mock;
+  prepareDocument: jest.Mock;
+  submitDocument: jest.Mock;
 } {
   const postInvoiceReceipt = jest.fn().mockResolvedValue({
     syncItemId: 'sync-item-1',
@@ -112,6 +118,9 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
     status: 'pending',
   });
   const patchMainApiSyncRef = jest.fn().mockResolvedValue(undefined);
+  const submitDraftDocument = jest.fn().mockResolvedValue({});
+  const prepareDocument = jest.fn().mockResolvedValue({});
+  const submitDocument = jest.fn().mockResolvedValue({});
 
   return {
     catalog: {
@@ -132,7 +141,7 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
           ReturnType<ComplianceOrganizationApplicationService['getTenantById']>
         >,
       listBranches: async () =>
-        [{ id: 'branch-1' }] as Awaited<
+        [{ id: 'branch-1', sync2booksBranchId: 'erp-branch-1' }] as Awaited<
           ReturnType<ComplianceOrganizationApplicationService['listBranches']>
         >,
     },
@@ -148,8 +157,9 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
           created: true,
           document: { id: 'doc-1' },
         }) as Awaited<ReturnType<SalesService['createDocument']>>,
-      submitDraftDocument: async () =>
-        ({}) as Awaited<ReturnType<SalesService['submitDraftDocument']>>,
+      submitDraftDocument,
+      prepareDocument,
+      submitDocument,
       getNormalizedSaleReport: async () =>
         ({ id: 'doc-1' }) as Awaited<
           ReturnType<SalesService['getNormalizedSaleReport']>
@@ -172,6 +182,9 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
     },
     postInvoiceReceipt,
     patchMainApiSyncRef,
+    submitDraftDocument,
+    prepareDocument,
+    submitDocument,
   };
 }
 
@@ -237,5 +250,79 @@ describe('DashboardInvoicesApplicationService — receipt push-back toggle', () 
       service.uploadReceiptToSource('tenant-1', 'invoice-1'),
     ).rejects.toThrow('No sale has been created from this invoice yet');
     expect(deps.postInvoiceReceipt).not.toHaveBeenCalled();
+  });
+});
+
+describe('DashboardInvoicesApplicationService — idempotency self-heal resumption', () => {
+  /**
+   * Simulates `createDocument` matching an existing document (idempotency
+   * key hit, `created: false`) stuck at `complianceStatus`, and asserts the
+   * self-heal branch resumes from the correct step without re-running steps
+   * already completed on the original attempt (notably `applyInventoryMovements`,
+   * which only `submitDraftDocument` — the DRAFT case — invokes).
+   */
+  function makeStuckDeps(
+    complianceStatus: ComplianceStatus,
+  ): ReturnType<typeof defaultDeps> {
+    const deps = defaultDeps(true);
+    deps.sales.createDocument = async () =>
+      ({
+        created: false,
+        document: {
+          id: 'doc-1',
+          sourceInvoiceId: 'invoice-1',
+          mainApiSyncItemId: null,
+          complianceStatus,
+        },
+      }) as Awaited<ReturnType<SalesService['createDocument']>>;
+    return deps;
+  }
+
+  it('resumes via submitDraftDocument when stuck at DRAFT', async () => {
+    const deps = makeStuckDeps(ComplianceStatus.DRAFT);
+    const service = makeService(deps);
+
+    await service.createSaleFromInvoice('tenant-1', 'invoice-1');
+
+    expect(deps.submitDraftDocument).toHaveBeenCalledTimes(1);
+    expect(deps.submitDraftDocument).toHaveBeenCalledWith('doc-1');
+    expect(deps.prepareDocument).not.toHaveBeenCalled();
+    expect(deps.submitDocument).not.toHaveBeenCalled();
+  });
+
+  it('resumes via prepareDocument + submitDocument when stuck at VALIDATED, without re-applying inventory movements', async () => {
+    const deps = makeStuckDeps(ComplianceStatus.VALIDATED);
+    const service = makeService(deps);
+
+    await service.createSaleFromInvoice('tenant-1', 'invoice-1');
+
+    expect(deps.submitDraftDocument).not.toHaveBeenCalled();
+    expect(deps.prepareDocument).toHaveBeenCalledTimes(1);
+    expect(deps.prepareDocument).toHaveBeenCalledWith('doc-1');
+    expect(deps.submitDocument).toHaveBeenCalledTimes(1);
+    expect(deps.submitDocument).toHaveBeenCalledWith('doc-1');
+  });
+
+  it('resumes via submitDocument only when stuck at READY_FOR_SUBMISSION', async () => {
+    const deps = makeStuckDeps(ComplianceStatus.READY_FOR_SUBMISSION);
+    const service = makeService(deps);
+
+    await service.createSaleFromInvoice('tenant-1', 'invoice-1');
+
+    expect(deps.submitDraftDocument).not.toHaveBeenCalled();
+    expect(deps.prepareDocument).not.toHaveBeenCalled();
+    expect(deps.submitDocument).toHaveBeenCalledTimes(1);
+    expect(deps.submitDocument).toHaveBeenCalledWith('doc-1');
+  });
+
+  it('does nothing when already past submission (e.g. SUBMITTED)', async () => {
+    const deps = makeStuckDeps(ComplianceStatus.SUBMITTED);
+    const service = makeService(deps);
+
+    await service.createSaleFromInvoice('tenant-1', 'invoice-1');
+
+    expect(deps.submitDraftDocument).not.toHaveBeenCalled();
+    expect(deps.prepareDocument).not.toHaveBeenCalled();
+    expect(deps.submitDocument).not.toHaveBeenCalled();
   });
 });
