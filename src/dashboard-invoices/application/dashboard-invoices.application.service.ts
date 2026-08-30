@@ -156,9 +156,19 @@ export class DashboardInvoicesApplicationService {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const connection =
       await this.mainApiConnections.getForTenant(complianceTenantId);
+    // Main API's GET /invoices now requires companyId/connectionId scoping
+    // -- see main-api-pull.client.ts's getInvoices doc comment for why (it
+    // used to leak every company's invoices to every tenant sharing the
+    // main API Application).
+    if (!connection.mainApiCompanyId) {
+      throw new BadRequestException(
+        'This tenant has no main-API company resolved yet — reconnect an ERP before listing invoices.',
+      );
+    }
 
     const response = await this.mainApiPull.getInvoices(
       connection.mainApiApiKey,
+      connection.mainApiCompanyId,
       params,
     );
     const invoices = await Promise.all(
@@ -445,6 +455,11 @@ export class DashboardInvoicesApplicationService {
         receipt.syncItemId,
         receipt.syncBatchId,
       );
+      await this.correlationPersistence.patchAttachmentSyncStatus(
+        documentId,
+        receipt.status,
+        null,
+      );
     } catch (error) {
       this.logger.warn(
         `invoice-receipt notification failed for document ${documentId} (invoice ${sourceInvoiceId}): ${
@@ -522,6 +537,11 @@ export class DashboardInvoicesApplicationService {
     const status = await this.mainApiPull.getSyncItemStatus(
       connection.mainApiApiKey,
       document.mainApiSyncItemId,
+    );
+    await this.correlationPersistence.patchAttachmentSyncStatus(
+      document.id,
+      typeof status.status === 'string' ? status.status : null,
+      typeof status.syncErrorMessage === 'string' ? status.syncErrorMessage : null,
     );
 
     return {

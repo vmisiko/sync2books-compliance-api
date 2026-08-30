@@ -172,6 +172,19 @@ export class SaleReportDto {
   })
   syncErrorMessage!: string | null;
 
+  @ApiProperty({
+    nullable: true,
+    description:
+      "Cached Main API sync_item status for the eTIMS receipt-attachment push (pending/syncing/synced/failed/skipped), refreshed whenever notifyMainApiOfReceipt or the receipt-attachment-status route runs. Null until the sale has been ACCEPTED and a push has been attempted at least once.",
+  })
+  attachmentSyncStatus!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Latest error alongside attachmentSyncStatus, if the push failed.',
+  })
+  attachmentSyncError!: string | null;
+
   @ApiProperty({ nullable: true })
   offlineUrl!: string | null;
 

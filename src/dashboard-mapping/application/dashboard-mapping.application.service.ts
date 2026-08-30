@@ -809,6 +809,16 @@ export class DashboardMappingApplicationService {
         `No connected ${SOURCE_DISPLAY_NAME[pullSource]} connection for this tenant yet — connect ${SOURCE_DISPLAY_NAME[pullSource]} before pulling items.`,
       );
     }
+    // ensureCompany() above always resolves mainApiCompanyId (creating the
+    // main-API company if this is the first call for this tenant), so this
+    // should never actually be null -- but GET /items now requires it (see
+    // main-api-pull.client.ts's getItems doc comment for why), so guard
+    // explicitly rather than letting `string | null` silently widen.
+    if (!connection.mainApiCompanyId) {
+      throw new BadRequestException(
+        'This tenant has no main-API company resolved yet — reconnect an ERP before pulling items.',
+      );
+    }
 
     // Best-effort refresh of the main API's own items cache from the source
     // ERP before reading -- without this, a connection that's never had
@@ -829,17 +839,17 @@ export class DashboardMappingApplicationService {
       );
     }
 
-    const items = await this.fetchAllItems(connection.mainApiApiKey);
+    const items = await this.fetchAllItems(connection.mainApiApiKey, connection.mainApiCompanyId);
     return this.computeItemReadiness(merchantId, items, SOURCE_FILTER[pullSource]);
   }
 
   /** Loops GET /items across every page — a merchant's full catalog, not just the first page's worth. Capped at 50 pages (5,000 items at the default page size) as a sanity limit against a runaway loop. */
-  private async fetchAllItems(apiKey: string): Promise<MainApiItem[]> {
+  private async fetchAllItems(apiKey: string, companyId: string): Promise<MainApiItem[]> {
     const items: MainApiItem[] = [];
     let page = 1;
     const limit = 100;
     for (; page <= 50; page++) {
-      const response = await this.mainApiPull.getItems(apiKey, { page, limit });
+      const response = await this.mainApiPull.getItems(apiKey, companyId, { page, limit });
       items.push(...response.data);
       if (page >= response.totalPages || response.data.length === 0) break;
     }

@@ -49,6 +49,16 @@ export interface ComplianceDocument {
   /** Main API `sync_batch` id returned alongside `mainApiSyncItemId`, kept for completeness. */
   mainApiSyncBatchId: string | null;
   /**
+   * Cached copy of the Main API sync_item's own `status` (pending/syncing/synced/failed/
+   * skipped) for the eTIMS receipt-attachment push -- refreshed opportunistically whenever
+   * `notifyMainApiOfReceipt` first records a status, or the dashboard's receipt-attachment-
+   * status route does a live check. Lets the sales list show an "ERP Sync" column without a
+   * per-row Main API call; the detail view still fetches live for the authoritative value.
+   */
+  attachmentSyncStatus: string | null;
+  /** Latest `syncErrorMessage` from the same Main API sync_item, cached alongside the status. */
+  attachmentSyncError: string | null;
+  /**
    * For CREDIT_NOTE: credit note datetime (OSCU `rfdDt`) formatted as `yyyyMMddhhmmss`.
    * Optional per spec.
    */

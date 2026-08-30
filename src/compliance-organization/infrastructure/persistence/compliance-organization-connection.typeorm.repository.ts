@@ -84,8 +84,16 @@ export class ComplianceOrganizationConnectionTypeOrmRepository implements ICompl
       where: { sync2booksCompanyId: merchantId },
     });
     if (!tenant) return null;
+    // `branchId` is `branch.sync2booksBranchId ?? branch.id` wherever we hand
+    // it out (see toDomain above and compliance-organization.application
+    // .service.ts's getTenantSummary) -- match on either column so a
+    // dashboard-only branch (sync2booksBranchId null, no ERP link) resolves
+    // by its own id instead of never matching anything.
     const branch = await this.branchRepo.findOne({
-      where: { tenantId: tenant.id, sync2booksBranchId: branchId },
+      where: [
+        { tenantId: tenant.id, sync2booksBranchId: branchId },
+        { tenantId: tenant.id, id: branchId },
+      ],
       relations: ['etimsConnection'],
     });
     if (!branch?.etimsConnection) return null;

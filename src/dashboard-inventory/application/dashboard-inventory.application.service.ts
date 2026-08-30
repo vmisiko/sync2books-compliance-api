@@ -163,6 +163,15 @@ export class DashboardInventoryApplicationService {
     );
     const connectionId = connection.integrations[pullSource]?.connectionId;
     const sourceSystem = PULL_SOURCE_TO_SOURCE_SYSTEM[pullSource];
+    // Main API's GET /items now requires companyId/connectionId scoping --
+    // see main-api-pull.client.ts's getItems doc comment for why (it used
+    // to leak every company's items to every tenant sharing the main API
+    // Application).
+    if (!connection.mainApiCompanyId) {
+      throw new BadRequestException(
+        'This tenant has no main-API company resolved yet — reconnect an ERP before reconciling stock.',
+      );
+    }
     if (connectionId) {
       try {
         await this.mainApiPull.syncItemsFromBookkeeping(
@@ -186,6 +195,7 @@ export class DashboardInventoryApplicationService {
     do {
       const response = await this.mainApiPull.getItems(
         connection.mainApiApiKey,
+        connection.mainApiCompanyId,
         { page, limit },
       );
       totalPages = response.totalPages || 1;

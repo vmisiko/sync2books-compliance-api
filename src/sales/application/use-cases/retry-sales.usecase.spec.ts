@@ -23,6 +23,8 @@ function makeDocument(
     sourceInvoiceId: null,
     mainApiSyncItemId: null,
     mainApiSyncBatchId: null,
+    attachmentSyncStatus: null,
+    attachmentSyncError: null,
     creditNoteDate: null,
     creditNoteReasonCode: null,
     saleDate: '2026-08-14',

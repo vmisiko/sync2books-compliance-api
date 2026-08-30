@@ -7,6 +7,7 @@ import {
 import { CatalogService } from '../../catalog/api/catalog.service';
 import type { CatalogItem } from '../../catalog/domain/entities/catalog-item.entity';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
+import { InventoryService } from '../../inventory/api/inventory.service';
 import {
   MainApiConnectionApplicationService,
   SUPPORTED_INTEGRATION_KEYS,
@@ -80,6 +81,7 @@ export class DashboardItemsApplicationService {
     private readonly mainApiConnections: MainApiConnectionApplicationService,
     private readonly mainApiPull: MainApiPullClient,
     private readonly suggestions: MappingSuggestionService,
+    private readonly inventory: InventoryService,
   ) {}
 
   async pullItems(
@@ -95,6 +97,18 @@ export class DashboardItemsApplicationService {
     if (!connectionId) {
       throw new BadRequestException(
         `No connected ${SOURCE_DISPLAY_NAME[pullSource]} connection for this tenant yet — connect ${SOURCE_DISPLAY_NAME[pullSource]} before pulling items.`,
+      );
+    }
+    // Main API's GET /items now requires companyId/connectionId scoping (it
+    // used to leak every company's items to every tenant sharing the main
+    // API Application -- see main-api-pull.client.ts's getItems doc
+    // comment). mainApiCompanyId should already be set by this point since
+    // having a connectionId implies this tenant already went through
+    // ensureCompany() during the connect flow, but guard it explicitly
+    // rather than letting main API's own 400 surface with less context.
+    if (!connection.mainApiCompanyId) {
+      throw new BadRequestException(
+        'This tenant has no main-API company resolved yet — reconnect an ERP before pulling items.',
       );
     }
 
@@ -114,6 +128,22 @@ export class DashboardItemsApplicationService {
       );
     }
 
+    // Best-effort: stock reconciliation is additive on top of catalog
+    // registration, so a tenant with no branch linked yet (or one whose
+    // branch isn't wired to a sync2books branch id -- see resolveBranchId's
+    // doc comment) should still get its items registered; it just won't get
+    // stock reconciled until that's fixed.
+    let branchId: string | null = null;
+    try {
+      branchId = await this.resolveBranchId(complianceTenantId);
+    } catch (error) {
+      this.logger.warn(
+        `Skipping stock reconciliation for tenant ${complianceTenantId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
     const results: PullItemsResult['results'] = [];
     let page = 1;
     const limit = 100;
@@ -122,6 +152,7 @@ export class DashboardItemsApplicationService {
     do {
       const response = await this.mainApiPull.getItems(
         connection.mainApiApiKey,
+        connection.mainApiCompanyId,
         {
           page,
           limit,
@@ -172,6 +203,32 @@ export class DashboardItemsApplicationService {
             sourceSystem,
           };
           const result = await this.catalog.registerItem(input);
+
+          // Additive on top of catalog registration: only fires once the
+          // item has a real catalog row (registerItem above already
+          // returned), and only ever touches the local stock ledger --
+          // reconcileStock's own KRA push still gates on etimsItemCode being
+          // set, so a PENDING item's stock is tracked locally without
+          // anything reaching KRA before it's accepted.
+          if (branchId && mainApiItem.qtyOnHand != null) {
+            try {
+              await this.inventory.reconcileStock({
+                itemId: result.item.id,
+                branchId,
+                externalQtyOnHand: mainApiItem.qtyOnHand,
+                sourceSystem: sourceSystem ?? undefined,
+                unitPrice: result.item.unitPrice ?? undefined,
+              });
+            } catch (error) {
+              this.logger.warn(
+                `Stock reconciliation failed for item ${result.item.id} ` +
+                  `(main API item ${mainApiItem.id}): ${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+              );
+            }
+          }
+
           results.push({
             mainApiItemId: mainApiItem.id,
             catalogItemId: result.item.id,

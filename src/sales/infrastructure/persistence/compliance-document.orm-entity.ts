@@ -47,6 +47,14 @@ export class ComplianceDocumentOrmEntity {
   @Column('varchar', { nullable: true })
   mainApiSyncBatchId!: string | null;
 
+  /** Cached Main API sync_item status for the eTIMS receipt-attachment push. */
+  @Column('varchar', { nullable: true })
+  attachmentSyncStatus!: string | null;
+
+  /** Cached Main API sync_item syncErrorMessage, alongside attachmentSyncStatus. */
+  @Column('text', { nullable: true })
+  attachmentSyncError!: string | null;
+
   @Column('varchar', { nullable: true })
   creditNoteDate!: string | null;
 

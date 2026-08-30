@@ -357,15 +357,33 @@ export class MainApiPullClient {
     return base.replace(/\/?$/, '');
   }
 
+  /**
+   * GET /items?companyId=... — companyId (not connectionId) is required here:
+   * main API scopes this list by company, and a company can have more than
+   * one connected ERP (QuickBooks + Odoo), so companyId is what returns every
+   * connected source's items in one paginated call, matching this method's
+   * existing multi-ERP-in-one-pass callers (DashboardItemsApplicationService
+   * .pullItems, DashboardInventoryApplicationService.reconcile). Required,
+   * not optional -- main API 400s without it (or a connectionId) since
+   * `applicationId` alone spans every company sharing this deployment's one
+   * Application, and omitting scoping here previously leaked every other
+   * company's items into whichever tenant happened to call this.
+   */
   async getItems(
     apiKey: string,
+    companyId: string,
     params: { page?: number; limit?: number } = {},
   ): Promise<MainApiListResponse<MainApiItem>> {
-    return this.get<MainApiListResponse<MainApiItem>>(apiKey, '/items', params);
+    return this.get<MainApiListResponse<MainApiItem>>(apiKey, '/items', {
+      companyId,
+      ...params,
+    });
   }
 
+  /** GET /invoices?companyId=... — see getItems' doc comment; same reasoning applies here. */
   async getInvoices(
     apiKey: string,
+    companyId: string,
     params: {
       page?: number;
       limit?: number;
@@ -376,7 +394,7 @@ export class MainApiPullClient {
     return this.get<MainApiListResponse<MainApiInvoice>>(
       apiKey,
       '/invoices',
-      params,
+      { companyId, ...params },
     );
   }
 

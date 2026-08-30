@@ -358,6 +358,8 @@ export class SalesService {
       originalSaleId: document.originalSaleId,
       sourceInvoiceId: document.sourceInvoiceId,
       syncErrorMessage,
+      attachmentSyncStatus: document.attachmentSyncStatus,
+      attachmentSyncError: document.attachmentSyncError,
       offlineUrl: null,
       status: mapComplianceStatusToDigitax(document.complianceStatus),
       supplierName: tenant?.displayName ?? null,
@@ -878,6 +880,11 @@ function buildNormalizedSaleReport(input: {
     // fetch the single-document detail (getNormalizedSaleReport) for the real
     // value when a failed row is actually opened for review.
     syncErrorMessage: null,
+    // Cheap: these two are plain cached columns on the document itself (see
+    // Sync2BooksCorrelationPersistenceService.patchAttachmentSyncStatus), unlike
+    // syncErrorMessage above -- no extra query needed for the list view.
+    attachmentSyncStatus: document.attachmentSyncStatus,
+    attachmentSyncError: document.attachmentSyncError,
     offlineUrl: null,
     status: mapComplianceStatusToDigitax(document.complianceStatus),
     supplierName,

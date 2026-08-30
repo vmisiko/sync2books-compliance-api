@@ -84,7 +84,7 @@ type Deps = {
   oscuCallback: Pick<PlatformOscuCallbackService, 'postOutcomeWithCorrelation'>;
   correlationPersistence: Pick<
     Sync2BooksCorrelationPersistenceService,
-    'patchComplianceDocument' | 'patchMainApiSyncRef'
+    'patchComplianceDocument' | 'patchMainApiSyncRef' | 'patchAttachmentSyncStatus'
   >;
   mainApiOscuClient: Pick<Sync2BooksMainApiOscuClient, 'postInvoiceReceipt'>;
   paymentTypeResolver: IPaymentTypeResolver;
@@ -173,6 +173,7 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
     correlationPersistence: {
       patchComplianceDocument: async () => undefined,
       patchMainApiSyncRef,
+      patchAttachmentSyncStatus: async () => undefined,
     },
     mainApiOscuClient: {
       postInvoiceReceipt,

@@ -140,6 +140,8 @@ export async function createDocument(
     sourceInvoiceId: input.sourceInvoiceId ?? null,
     mainApiSyncItemId: null,
     mainApiSyncBatchId: null,
+    attachmentSyncStatus: null,
+    attachmentSyncError: null,
     creditNoteDate: input.creditNoteDate ?? null,
     creditNoteReasonCode: input.creditNoteReasonCode ?? null,
     saleDate: input.saleDate ?? null,

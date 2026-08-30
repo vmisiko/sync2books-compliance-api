@@ -46,6 +46,8 @@ function docOrmToDomain(
     sourceInvoiceId: row.sourceInvoiceId,
     mainApiSyncItemId: row.mainApiSyncItemId,
     mainApiSyncBatchId: row.mainApiSyncBatchId,
+    attachmentSyncStatus: row.attachmentSyncStatus,
+    attachmentSyncError: row.attachmentSyncError,
     creditNoteDate: row.creditNoteDate,
     creditNoteReasonCode: row.creditNoteReasonCode,
     saleDate: row.saleDate,
@@ -90,6 +92,8 @@ function docDomainToOrm(
   e.sourceInvoiceId = document.sourceInvoiceId;
   e.mainApiSyncItemId = document.mainApiSyncItemId;
   e.mainApiSyncBatchId = document.mainApiSyncBatchId;
+  e.attachmentSyncStatus = document.attachmentSyncStatus;
+  e.attachmentSyncError = document.attachmentSyncError;
   e.creditNoteDate = document.creditNoteDate;
   e.creditNoteReasonCode = document.creditNoteReasonCode;
   e.saleDate = document.saleDate;

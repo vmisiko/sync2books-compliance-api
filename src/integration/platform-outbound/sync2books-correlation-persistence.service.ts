@@ -45,6 +45,24 @@ export class Sync2BooksCorrelationPersistenceService {
     );
   }
 
+  /**
+   * Caches the Main API sync_item's own status/error for the eTIMS
+   * receipt-attachment push, so the sales list's "ERP Sync" column can show
+   * a real value without a per-row Main API call. Called right after
+   * `notifyMainApiOfReceipt` first records a status, and again whenever the
+   * dashboard's receipt-attachment-status route does a live check.
+   */
+  async patchAttachmentSyncStatus(
+    documentId: string,
+    attachmentSyncStatus: string | null,
+    attachmentSyncError: string | null,
+  ): Promise<void> {
+    await this.documents.update(
+      { id: documentId },
+      { attachmentSyncStatus, attachmentSyncError },
+    );
+  }
+
   async patchCatalogItem(
     itemId: string,
     corr: Sync2BooksCorrelationStored,
