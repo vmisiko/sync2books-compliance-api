@@ -10,6 +10,11 @@ import {
 import { listItems } from '../application/use-cases/list-items.usecase';
 import { syncItemsToEtims } from '../application/use-cases/sync-items.usecase';
 import {
+  resyncItemCdSequenceFromKra,
+  type ResyncItemCdSequenceInput,
+  type ResyncItemCdSequenceResult,
+} from '../application/use-cases/resync-item-cd-sequence.usecase';
+import {
   searchItemClassifications,
   type SearchItemClassificationsInput,
 } from '../application/use-cases/search-item-classifications.usecase';
@@ -166,6 +171,17 @@ export class CatalogService {
     force?: boolean;
   }) {
     return syncItemsToEtims(params, {
+      itemRepo: this.itemRepo,
+      connectionRepo: this.connectionRepo,
+      etimsAdapter: this.etimsAdapter,
+      syncStateRepo: this.oscuSyncStateRepo,
+    });
+  }
+
+  async resyncItemCdSequenceFromKra(
+    params: ResyncItemCdSequenceInput,
+  ): Promise<ResyncItemCdSequenceResult> {
+    return resyncItemCdSequenceFromKra(params, {
       itemRepo: this.itemRepo,
       connectionRepo: this.connectionRepo,
       etimsAdapter: this.etimsAdapter,

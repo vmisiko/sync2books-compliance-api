@@ -24,6 +24,7 @@ import {
 } from './dto/search-codes.dto';
 import { SyncCodeListDto } from './dto/sync-code-list.dto';
 import { SyncReferenceDataNowDto } from './dto/sync-reference-data-now.dto';
+import { ResyncOscuSequenceDto } from './dto/resync-oscu-sequence.dto';
 import { ComplianceServiceAuthGuard } from '../../integration/compliance-service-auth.guard';
 import { PlatformOscuCallbackService } from '../../integration/platform-outbound/platform-oscu-callback.service';
 import { Sync2BooksCorrelationPersistenceService } from '../../integration/platform-outbound/sync2books-correlation-persistence.service';
@@ -110,6 +111,16 @@ export class CatalogController {
       });
     }
     return result;
+  }
+
+  @Post('items/resync-item-cd-sequence')
+  @ApiOperation({
+    summary:
+      'Recover the true itemCd sequence for this tin directly from KRA (/itemInfo) instead of guessing, and backfill any local item KRA already has registered',
+  })
+  @ApiResponse({ status: 201, description: 'Sequence resynced' })
+  async resyncItemCdSequence(@Body() body: ResyncOscuSequenceDto) {
+    return this.catalogService.resyncItemCdSequenceFromKra(body);
   }
 
   @Get('item-classifications')

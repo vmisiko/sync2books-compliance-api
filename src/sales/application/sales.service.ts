@@ -15,6 +15,11 @@ import { prepareDocument as prepareDocumentUseCase } from './use-cases/prepare-d
 import { submitDocument as submitDocumentUseCase } from './use-cases/submit-document.usecase';
 import { validateDocument as validateDocumentUseCase } from './use-cases/validate-document.usecase';
 import {
+  resyncInvoiceSequenceFromKra,
+  type ResyncInvoiceSequenceInput,
+  type ResyncInvoiceSequenceResult,
+} from './use-cases/resync-invoice-sequence.usecase';
+import {
   retrySalesToEtims,
   type RetrySalesInput,
   type RetrySalesResult,
@@ -171,6 +176,16 @@ export class SalesService {
     );
   }
 
+  async resyncInvoiceSequenceFromKra(
+    params: ResyncInvoiceSequenceInput,
+  ): Promise<ResyncInvoiceSequenceResult> {
+    return resyncInvoiceSequenceFromKra(params, {
+      connectionRepo: this.connectionRepo,
+      etimsAdapter: this.etimsAdapter,
+      syncStateRepo: this.syncStateRepo,
+    });
+  }
+
   /**
    * Bulk/single retry for sales stuck in a Pending/Failed status -- backs the
    * dashboard's "Retry Sync" row action and multi-select bulk-action bar.
@@ -313,9 +328,10 @@ export class SalesService {
       document.merchantId,
       document.branchId,
     );
-    const tenant = await this.organizationService.getTenantBySync2booksCompanyId(
-      document.merchantId,
-    );
+    const tenant =
+      await this.organizationService.getTenantBySync2booksCompanyId(
+        document.merchantId,
+      );
 
     const saleDate = document.saleDate ?? null;
     const date = saleDate ? formatDdMmYyyy(saleDate) : null;
@@ -443,9 +459,10 @@ export class SalesService {
       document.merchantId,
       document.branchId,
     );
-    const tenant = await this.organizationService.getTenantBySync2booksCompanyId(
-      document.merchantId,
-    );
+    const tenant =
+      await this.organizationService.getTenantBySync2booksCompanyId(
+        document.merchantId,
+      );
 
     const etimsUrl =
       connection?.kraPin && rcptSign
@@ -555,7 +572,9 @@ export class SalesService {
 
     // Cache tenant display names within page (merchantId only)
     const supplierNameByMerchant = new Map<string, string | null>();
-    const getSupplierName = async (merchantId: string): Promise<string | null> => {
+    const getSupplierName = async (
+      merchantId: string,
+    ): Promise<string | null> => {
       if (supplierNameByMerchant.has(merchantId)) {
         return supplierNameByMerchant.get(merchantId) ?? null;
       }

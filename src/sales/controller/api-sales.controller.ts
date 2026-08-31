@@ -29,6 +29,7 @@ import {
   SalesReportListResponseDto,
 } from './dto/sales-report.dto';
 import { CreateExpressCreditNoteDto } from './dto/create-express-credit-note.dto';
+import { ResyncOscuSequenceDto } from './dto/resync-oscu-sequence.dto';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import { ComplianceServiceAuthGuard } from '../../integration/compliance-service-auth.guard';
 import { PlatformOscuCallbackService } from '../../integration/platform-outbound/platform-oscu-callback.service';
@@ -166,6 +167,16 @@ export class ApiSalesController {
 
     const data = await this.salesService.getNormalizedSaleReport(documentId);
     return { data };
+  }
+
+  @Post('resync-invoice-sequence')
+  @ApiOperation({
+    summary:
+      'Recover the true invcNo sequence for this tin directly from KRA (/selectSalesTransactions) instead of guessing',
+  })
+  @ApiResponse({ status: 201, description: 'Sequence resynced' })
+  async resyncInvoiceSequence(@Body() body: ResyncOscuSequenceDto) {
+    return this.salesService.resyncInvoiceSequenceFromKra(body);
   }
 
   @Post('credit-notes/express')
