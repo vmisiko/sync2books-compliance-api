@@ -35,11 +35,21 @@ export class DashboardInvoicesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      "Refresh invoices from the main API and return the current list, previewed only (nothing is submitted to eTIMS). Defaults to whichever ERP is actually connected -- pass ?source= explicitly (quickbooks | odoo | microsoft-dynamics-365-business-central) when more than one is connected.",
+      'Refresh invoices from the main API and return the current list, previewed only (nothing is submitted to eTIMS). Defaults to whichever ERP is actually connected -- pass ?source= explicitly (quickbooks | odoo | microsoft-dynamics-365-business-central) when more than one is connected.',
   })
   @ApiResponse({ status: 200, description: 'Pull result' })
-  @ApiQuery({ name: 'startDate', required: false, type: String, description: 'ISO date — filter invoices with issueDate >= startDate' })
-  @ApiQuery({ name: 'endDate', required: false, type: String, description: 'ISO date — filter invoices with issueDate <= endDate' })
+  @ApiQuery({
+    name: 'startDate',
+    required: false,
+    type: String,
+    description: 'ISO date — filter invoices with issueDate >= startDate',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: false,
+    type: String,
+    description: 'ISO date — filter invoices with issueDate <= endDate',
+  })
   async pull(
     @ActiveTenant() tenantId: string,
     @Query('page') page?: string,
@@ -65,8 +75,18 @@ export class DashboardInvoicesController {
   @ApiResponse({ status: 200, description: 'Invoice list' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'startDate', required: false, type: String, description: 'ISO date — filter invoices with issueDate >= startDate' })
-  @ApiQuery({ name: 'endDate', required: false, type: String, description: 'ISO date — filter invoices with issueDate <= endDate' })
+  @ApiQuery({
+    name: 'startDate',
+    required: false,
+    type: String,
+    description: 'ISO date — filter invoices with issueDate >= startDate',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: false,
+    type: String,
+    description: 'ISO date — filter invoices with issueDate <= endDate',
+  })
   async list(
     @ActiveTenant() tenantId: string,
     @Query('page') page?: string,
@@ -117,7 +137,14 @@ export class DashboardInvoicesController {
     const data = await this.invoices.createSaleFromInvoice(
       tenantId,
       id,
-      { submit: body.submit },
+      {
+        submit: body.submit,
+        customerPin: body.customerPin,
+        customerName: body.customerName,
+        customerPhoneNumber: body.customerPhoneNumber,
+        customerEmail: body.customerEmail,
+        lineOverrides: body.lineOverrides,
+      },
       req,
     );
     return { success: true, message: 'Sale created', data };
@@ -135,7 +162,10 @@ export class DashboardInvoicesController {
     status: 400,
     description: 'No sale has been created from this invoice yet',
   })
-  async uploadReceipt(@ActiveTenant() tenantId: string, @Param('id') id: string) {
+  async uploadReceipt(
+    @ActiveTenant() tenantId: string,
+    @Param('id') id: string,
+  ) {
     const data = await this.invoices.uploadReceiptToSource(tenantId, id);
     return { success: true, message: 'Upload triggered', data };
   }

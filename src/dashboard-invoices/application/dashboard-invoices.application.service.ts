@@ -213,11 +213,31 @@ export class DashboardInvoicesApplicationService {
    * Every line's item must already be registered+classified in the catalog —
    * this never auto-registers items, matching the deliberate two-step flow
    * (classify first, then sell) called for by the dashboard's workflow.
+   *
+   * `customerPin`/`customerName`/`customerPhoneNumber`/`customerEmail` and
+   * `lineOverrides` (description/quantity/unitAmount, keyed by the pulled
+   * invoice's own line index) let the dashboard correct what the ERP pull
+   * carried before submitting — most pulled invoices have no customer PIN
+   * at all, since QuickBooks doesn't track one. Applies to this submission
+   * only: the pulled invoice's own cached data and the source ERP are never
+   * touched by these overrides.
    */
   async createSaleFromInvoice(
     complianceTenantId: string,
     mainApiInvoiceId: string,
-    options: { submit?: boolean } = {},
+    options: {
+      submit?: boolean;
+      customerPin?: string;
+      customerName?: string;
+      customerPhoneNumber?: string;
+      customerEmail?: string;
+      lineOverrides?: Array<{
+        index: number;
+        description?: string;
+        quantity?: number;
+        unitAmount?: number;
+      }>;
+    } = {},
     req?: Request,
   ) {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
@@ -244,7 +264,7 @@ export class DashboardInvoicesApplicationService {
       await this.organization.resolveDashboardBranchId(complianceTenantId);
 
     const lines = await Promise.all(
-      pulled.lines.map(async (line) => {
+      pulled.lines.map(async (line, index) => {
         const catalogItem = await this.catalog.getItemById(
           line.catalogItemId as string,
         );
@@ -253,6 +273,11 @@ export class DashboardInvoicesApplicationService {
             `Catalog item ${line.catalogItemId} no longer exists`,
           );
         }
+        // Dashboard-supplied correction for this one submission -- the
+        // pulled invoice's own cached line and the source ERP are untouched.
+        const override = options.lineOverrides?.find((o) => o.index === index);
+        const quantity = override?.quantity ?? line.quantity;
+        const unitAmount = override?.unitAmount ?? line.unitAmount;
         // Don't trust the pulled line's own taxAmount -- QuickBooks (and
         // likely other ERPs) only total tax at the invoice header
         // (TxnTaxDetail), never per SalesItemLine, so it's reliably absent
@@ -261,14 +286,15 @@ export class DashboardInvoicesApplicationService {
         // never submits a line doomed to fail TAX_VAT_STANDARD_RATE/TAX_VAT_8_RATE.
         return {
           itemId: catalogItem.id,
-          description: line.description ?? catalogItem.name,
-          quantity: line.quantity,
-          unitPrice: line.unitAmount,
+          description:
+            override?.description ?? line.description ?? catalogItem.name,
+          quantity,
+          unitPrice: unitAmount,
           taxCategory: catalogItem.taxCategory,
           taxAmount: expectedTaxAmount(
             catalogItem.taxCategory,
-            line.quantity,
-            line.unitAmount,
+            quantity,
+            unitAmount,
           ),
         };
       }),
@@ -315,7 +341,10 @@ export class DashboardInvoicesApplicationService {
           (sum, l) => sum + l.quantity * l.unitPrice + l.taxAmount,
           0,
         ),
-        customerPin: null,
+        customerPin: options.customerPin ?? null,
+        customerName: options.customerName ?? pulled.customerName ?? null,
+        customerPhoneNumber: options.customerPhoneNumber ?? null,
+        customerEmail: options.customerEmail ?? null,
         lines,
       },
       { enqueueProcessing: false },

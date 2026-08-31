@@ -285,6 +285,80 @@ describe('DashboardInvoicesApplicationService — receipt push-back toggle', () 
       branchId: 'branch-1',
     });
   });
+
+  it('applies customer and per-line overrides for this submission, without touching the pulled invoice or requiring them', async () => {
+    const deps = defaultDeps(false);
+    const createDocument = jest
+      .fn<
+        ReturnType<SalesService['createDocument']>,
+        Parameters<SalesService['createDocument']>
+      >()
+      .mockResolvedValue({
+        created: true,
+        document: { id: 'doc-1' },
+      } as Awaited<ReturnType<SalesService['createDocument']>>);
+    deps.sales.createDocument = createDocument;
+    const service = makeService(deps);
+
+    await expect(
+      service.createSaleFromInvoice('tenant-1', 'invoice-1', {
+        customerPin: 'P123456789Z',
+        customerName: 'Overridden Customer',
+        customerPhoneNumber: '0712345678',
+        customerEmail: 'customer@example.com',
+        lineOverrides: [
+          {
+            index: 0,
+            description: 'Corrected Widget',
+            quantity: 3,
+            unitAmount: 50,
+          },
+        ],
+      }),
+    ).resolves.toBeDefined();
+
+    expect(createDocument.mock.calls[0][0]).toMatchObject({
+      customerPin: 'P123456789Z',
+      customerName: 'Overridden Customer',
+      customerPhoneNumber: '0712345678',
+      customerEmail: 'customer@example.com',
+    });
+    expect(createDocument.mock.calls[0][0].lines[0]).toMatchObject({
+      description: 'Corrected Widget',
+      quantity: 3,
+      unitPrice: 50,
+    });
+  });
+
+  it('falls back to the pulled data when no overrides are supplied', async () => {
+    const deps = defaultDeps(false);
+    const createDocument = jest
+      .fn<
+        ReturnType<SalesService['createDocument']>,
+        Parameters<SalesService['createDocument']>
+      >()
+      .mockResolvedValue({
+        created: true,
+        document: { id: 'doc-1' },
+      } as Awaited<ReturnType<SalesService['createDocument']>>);
+    deps.sales.createDocument = createDocument;
+    const service = makeService(deps);
+
+    await expect(
+      service.createSaleFromInvoice('tenant-1', 'invoice-1'),
+    ).resolves.toBeDefined();
+
+    expect(createDocument.mock.calls[0][0]).toMatchObject({
+      customerPin: null,
+      customerPhoneNumber: null,
+      customerEmail: null,
+    });
+    expect(createDocument.mock.calls[0][0].lines[0]).toMatchObject({
+      description: 'Widget',
+      quantity: 1,
+      unitPrice: 100,
+    });
+  });
 });
 
 describe('DashboardInvoicesApplicationService — idempotency self-heal resumption', () => {
