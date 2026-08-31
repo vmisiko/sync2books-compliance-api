@@ -286,8 +286,9 @@ export class ComplianceOrganizationApplicationService {
     const tenant = await this.tenantRepo.findById(tenantId);
     if (!tenant) return null;
     const branch = await this.getOrCreateDefaultBranch(tenantId);
-    const found =
-      await this.orgConnectionRepo.findBranchTenantEtimsByBranchId(branch.id);
+    const found = await this.orgConnectionRepo.findBranchTenantEtimsByBranchId(
+      branch.id,
+    );
     const etimsConnection =
       found?.etims && found.tenant && found.branch
         ? {
@@ -367,6 +368,29 @@ export class ComplianceOrganizationApplicationService {
 
   async listBranches(tenantId: string): Promise<ComplianceBranch[]> {
     return this.branchRepo.listByTenantId(tenantId);
+  }
+
+  /**
+   * Mode B (compliance dashboard) branch resolution. The dashboard has no
+   * branch-selection UI and no ERP-branch concept to cross-reference — it
+   * always means the tenant's one branch — so this returns `branch.id`
+   * directly instead of routing through `sync2booksBranchId`, which exists
+   * only so Mode A (main API) can match its own external branch ids and is
+   * never itself sent to KRA (only `branch.kraBhfId` is, resolved downstream
+   * by whichever id gets passed into `findByMerchantAndBranch`/
+   * `syncItemsToEtims`). Centralizes what was previously duplicated as
+   * `branch.sync2booksBranchId ?? branch.id` in each dashboard application
+   * service.
+   */
+  async resolveDashboardBranchId(tenantId: string): Promise<string> {
+    const branches = await this.listBranches(tenantId);
+    const branch = branches[0];
+    if (!branch) {
+      throw new NotFoundException(
+        `No branch configured for tenant ${tenantId}`,
+      );
+    }
+    return branch.id;
   }
 
   async getBranchById(branchId: string): Promise<ComplianceBranch | null> {

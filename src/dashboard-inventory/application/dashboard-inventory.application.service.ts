@@ -259,23 +259,13 @@ export class DashboardInventoryApplicationService {
   /**
    * Reconciliation always targets the default/HQ branch (this session's
    * confirmed decision) -- redistributing to other branches is a manual
-   * internal transfer. Mirrors DashboardItemsApplicationService.resolveBranchId
-   * (branches[0], the same "no branch-selection UI yet" convention).
+   * internal transfer. Mode B branch resolution — see
+   * ComplianceOrganizationApplicationService.resolveDashboardBranchId's doc
+   * comment.
    */
   private async resolveDefaultBranchId(
     complianceTenantId: string,
   ): Promise<string> {
-    const branches = await this.organization.listBranches(complianceTenantId);
-    const branch = branches[0];
-    if (!branch) {
-      throw new NotFoundException(
-        `No branch configured for tenant ${complianceTenantId}`,
-      );
-    }
-    // Falls back to the branch's own internal id when it has no linked ERP
-    // branch — mirrors DashboardItemsApplicationService.resolveBranchId and
-    // the same fallback IComplianceConnectionRepository.findByMerchantAndBranch
-    // already applies on the lookup side.
-    return branch.sync2booksBranchId ?? branch.id;
+    return this.organization.resolveDashboardBranchId(complianceTenantId);
   }
 }

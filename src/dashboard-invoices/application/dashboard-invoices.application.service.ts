@@ -224,16 +224,11 @@ export class DashboardInvoicesApplicationService {
       });
     }
 
-    const branches = await this.organization.listBranches(complianceTenantId);
-    const branch = branches[0];
-    if (!branch) {
-      throw new BadRequestException('No branch configured for this tenant');
-    }
-    // Falls back to the branch's own internal id when it has no linked ERP
-    // branch — mirrors DashboardItemsApplicationService.resolveBranchId and
-    // the same fallback IComplianceConnectionRepository.findByMerchantAndBranch
-    // already applies on the lookup side.
-    const branchId = branch.sync2booksBranchId ?? branch.id;
+    // Mode B branch resolution — see
+    // ComplianceOrganizationApplicationService.resolveDashboardBranchId's doc
+    // comment.
+    const branchId =
+      await this.organization.resolveDashboardBranchId(complianceTenantId);
 
     const lines = await Promise.all(
       pulled.lines.map(async (line) => {

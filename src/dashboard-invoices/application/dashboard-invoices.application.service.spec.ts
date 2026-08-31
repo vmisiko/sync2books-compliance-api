@@ -65,7 +65,7 @@ type Deps = {
   catalog: Pick<CatalogService, 'getItemById' | 'findByExternalId'>;
   organization: Pick<
     ComplianceOrganizationApplicationService,
-    'getTenantById' | 'listBranches'
+    'getTenantById' | 'listBranches' | 'resolveDashboardBranchId'
   >;
   mainApiConnections: Pick<
     MainApiConnectionApplicationService,
@@ -151,6 +151,7 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
         [{ id: 'branch-1', sync2booksBranchId: 'erp-branch-1' }] as Awaited<
           ReturnType<ComplianceOrganizationApplicationService['listBranches']>
         >,
+      resolveDashboardBranchId: async () => 'branch-1',
     },
     mainApiConnections: {
       getForTenant: async () => makeConnection(autoUploadReceiptToSource),
@@ -261,12 +262,9 @@ describe('DashboardInvoicesApplicationService — receipt push-back toggle', () 
     expect(deps.postInvoiceReceipt).not.toHaveBeenCalled();
   });
 
-  it("falls back to the branch's own internal id instead of throwing when it has no linked ERP branch", async () => {
+  it('resolves the branch id directly via resolveDashboardBranchId (Mode B, no sync2booksBranchId involved)', async () => {
     const deps = defaultDeps(false);
-    deps.organization.listBranches = async () =>
-      [{ id: 'branch-1', sync2booksBranchId: null }] as Awaited<
-        ReturnType<ComplianceOrganizationApplicationService['listBranches']>
-      >;
+    deps.organization.resolveDashboardBranchId = async () => 'branch-1';
     const createDocument = jest
       .fn<
         ReturnType<SalesService['createDocument']>,

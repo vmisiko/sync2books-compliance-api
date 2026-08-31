@@ -485,27 +485,8 @@ export class DashboardItemsApplicationService {
     return this.mainApiConnections.resolveMerchantId(complianceTenantId);
   }
 
-  /**
-   * The dashboard has no branch-selection UI yet, so this resolves the
-   * tenant's first branch the same way `getOrCreateDefaultBranch` does
-   * internally — fine for the common single-branch case this UI targets.
-   * `syncItemsToEtims` looks connections up by `sync2booksBranchId`
-   * (`IComplianceConnectionRepository.findByMerchantAndBranch`), which is
-   * null for branches provisioned only from the dashboard (no eTIMS
-   * provisioning has run for this tenant) — but that lookup already falls
-   * back to matching on the branch's own internal id when
-   * sync2booksBranchId doesn't match anything, so falling back to it here
-   * too keeps items syncable without requiring an ERP link that may not
-   * exist yet.
-   */
+  /** Mode B branch resolution — see resolveDashboardBranchId's doc comment. */
   private async resolveBranchId(complianceTenantId: string): Promise<string> {
-    const branches = await this.organization.listBranches(complianceTenantId);
-    const branch = branches[0];
-    if (!branch) {
-      throw new NotFoundException(
-        `No branch configured for tenant ${complianceTenantId}`,
-      );
-    }
-    return branch.sync2booksBranchId ?? branch.id;
+    return this.organization.resolveDashboardBranchId(complianceTenantId);
   }
 }
