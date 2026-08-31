@@ -69,7 +69,10 @@ type Deps = {
     ComplianceOrganizationApplicationService,
     'getTenantById' | 'listBranches'
   >;
-  mainApiConnections: Pick<MainApiConnectionApplicationService, 'getForTenant'>;
+  mainApiConnections: Pick<
+    MainApiConnectionApplicationService,
+    'getForTenant' | 'resolveMerchantId'
+  >;
   mainApiPull: Pick<MainApiPullClient, 'getInvoiceById'>;
   sales: Pick<
     SalesService,
@@ -147,6 +150,7 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
     },
     mainApiConnections: {
       getForTenant: async () => makeConnection(autoUploadReceiptToSource),
+      resolveMerchantId: async () => 'merchant-1',
     },
     mainApiPull: {
       getInvoiceById: async () => makeInvoice(),

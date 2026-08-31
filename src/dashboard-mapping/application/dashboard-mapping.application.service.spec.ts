@@ -44,7 +44,10 @@ function fakeOrg(): Pick<
 function fakeConnections(
   quickbooksConnectionId: string | null,
   odooConnectionId: string | null = null,
-): Pick<MainApiConnectionApplicationService, 'ensureCompany'> {
+): Pick<
+  MainApiConnectionApplicationService,
+  'ensureCompany' | 'resolveMerchantId'
+> {
   const integrations: Record<string, unknown> = {};
   if (quickbooksConnectionId) {
     integrations.quickbooks = {
@@ -77,6 +80,7 @@ function fakeConnections(
         createdAt: new Date(),
         updatedAt: new Date(),
       } as MainApiConnection),
+    resolveMerchantId: () => Promise.resolve(MERCHANT_ID),
   };
 }
 
@@ -808,14 +812,30 @@ describe('DashboardMappingApplicationService', () => {
           [],
           [],
           [
-            item({ id: 'i1', itemCode: 'QB_1', name: 'Flour 1kg', unitOfMeasure: 'kg' }),
-            item({ id: 'i2', itemCode: 'QB_2', name: 'Mystery Widget', unitOfMeasure: 'zorblax' }),
+            item({
+              id: 'i1',
+              itemCode: 'QB_1',
+              name: 'Flour 1kg',
+              unitOfMeasure: 'kg',
+            }),
+            item({
+              id: 'i2',
+              itemCode: 'QB_2',
+              name: 'Mystery Widget',
+              unitOfMeasure: 'zorblax',
+            }),
           ],
         ),
       );
 
       await oscuCodeRepo.save(
-        oscuCodeRepo.create({ cdCls: '10', cd: 'KG', cdNm: 'Kilo-Gramme', srtOrd: 1, useYn: 'Y' }),
+        oscuCodeRepo.create({
+          cdCls: '10',
+          cd: 'KG',
+          cdNm: 'Kilo-Gramme',
+          srtOrd: 1,
+          useYn: 'Y',
+        }),
       );
       // Both items have no defaultTaxCodeRef, so both resolve to internal
       // category OTHER — approve one active tax_mappings row for it so tax
@@ -1096,7 +1116,6 @@ describe('DashboardMappingApplicationService', () => {
       expect(secondRow?.active).toBe(true);
     });
   });
-
 
   describe('searchItemClassifications', () => {
     it('delegates to CatalogService.searchItemClassifications', async () => {

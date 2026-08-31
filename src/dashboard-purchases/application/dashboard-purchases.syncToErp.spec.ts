@@ -105,7 +105,10 @@ function makeService(setup: Partial<Setup> & { rows: PurchaseInvoiceOrmEntity[] 
     jest.fn().mockResolvedValue({ id: 'supplier-1', bookId: 'qb-vendor-1', name: 'ABC Supplies' });
   const suppliers = { getById };
   const getForTenant = setup.getForTenant ?? jest.fn().mockResolvedValue(makeConnection());
-  const mainApiConnections = { getForTenant };
+  const mainApiConnections = {
+    getForTenant,
+    resolveMerchantId: jest.fn().mockResolvedValue(MERCHANT_ID),
+  };
   const createBill =
     setup.createBill ??
     jest.fn().mockResolvedValue({

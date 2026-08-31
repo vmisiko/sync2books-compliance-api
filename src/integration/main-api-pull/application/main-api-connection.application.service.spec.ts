@@ -12,7 +12,10 @@ type FakeMainApiPull = Pick<
   | 'companyExists'
   | 'getEnabledIntegrationKeys'
 >;
-type FakeOrg = Pick<ComplianceOrganizationApplicationService, 'getTenantById'>;
+type FakeOrg = Pick<
+  ComplianceOrganizationApplicationService,
+  'getTenantById' | 'upsertTenant'
+>;
 
 /**
  * In-memory fake standing in for the real TypeORM repo — includes an
@@ -87,6 +90,17 @@ function fakeOrg(): FakeOrg {
       Promise.resolve({ id, displayName: 'Dev merchant' } as Awaited<
         ReturnType<FakeOrg['getTenantById']>
       >),
+    // Not under test in this describe block — see the dedicated
+    // ensureCompany/resolveMerchantId stamping tests below.
+    upsertTenant: (input) =>
+      Promise.resolve({
+        tenant: {
+          id: input.id,
+          sync2booksCompanyId: input.sync2booksCompanyId,
+        },
+        defaultBranchId: 'branch-1',
+        etimsConnection: null,
+      } as Awaited<ReturnType<FakeOrg['upsertTenant']>>),
   };
 }
 
@@ -253,6 +267,118 @@ describe('MainApiConnectionApplicationService.ensureCompany', () => {
 
     expect(createCompanyCalls.length).toBe(0);
     expect(result.mainApiCompanyId).toBe('live-company-id');
+  });
+
+  it('stamps sync2booksCompanyId onto the tenant once mainApiCompanyId is established', async () => {
+    const repo = new FakeRepo();
+    const upsertTenantCalls: Array<{
+      id?: string | null;
+      sync2booksCompanyId?: string | null;
+    }> = [];
+    const org: FakeOrg = {
+      ...fakeOrg(),
+      upsertTenant: (input) => {
+        upsertTenantCalls.push(input);
+        return Promise.resolve({
+          tenant: {
+            id: input.id!,
+            sync2booksCompanyId: input.sync2booksCompanyId ?? null,
+          },
+          defaultBranchId: 'branch-1',
+          etimsConnection: null,
+        } as Awaited<ReturnType<FakeOrg['upsertTenant']>>);
+      },
+    };
+    const svc = new MainApiConnectionApplicationService(
+      repo,
+      fakeMainApiPull([], []) as MainApiPullClient,
+      org as ComplianceOrganizationApplicationService,
+    );
+    await svc.upsert('tenant-1', {
+      mainApiApplicationId: 'app-1',
+      mainApiApiKey: 'key-1',
+    });
+
+    await svc.ensureCompany('tenant-1');
+
+    expect(upsertTenantCalls).toContainEqual(
+      expect.objectContaining({
+        id: 'tenant-1',
+        sync2booksCompanyId: 'company-1',
+      }),
+    );
+  });
+});
+
+describe('MainApiConnectionApplicationService.resolveMerchantId', () => {
+  it('returns the tenant sync2booksCompanyId directly, without touching ensureCompany, when already set', async () => {
+    const repo = new FakeRepo();
+    let createCompanyCalled = false;
+    const fakeMainApiPullSpy: FakeMainApiPull = {
+      ...fakeMainApiPull([], []),
+      async createCompany(apiKey: string, name: string) {
+        createCompanyCalled = true;
+        return fakeMainApiPull([], []).createCompany(apiKey, name);
+      },
+    };
+    const org: FakeOrg = {
+      getTenantById: (id: string) =>
+        Promise.resolve({
+          id,
+          displayName: 'Dev merchant',
+          sync2booksCompanyId: 'company-already-linked',
+        } as Awaited<ReturnType<FakeOrg['getTenantById']>>),
+      upsertTenant: fakeOrg().upsertTenant,
+    };
+    const svc = new MainApiConnectionApplicationService(
+      repo,
+      fakeMainApiPullSpy as MainApiPullClient,
+      org as ComplianceOrganizationApplicationService,
+    );
+
+    const merchantId = await svc.resolveMerchantId('tenant-1');
+
+    expect(merchantId).toBe('company-already-linked');
+    expect(createCompanyCalled).toBe(false);
+  });
+
+  it('self-heals: creates/links mainApiCompanyId via ensureCompany and returns it when sync2booksCompanyId was never stamped', async () => {
+    const repo = new FakeRepo();
+    let currentSync2booksCompanyId: string | null = null;
+    const org: FakeOrg = {
+      getTenantById: (id: string) =>
+        Promise.resolve({
+          id,
+          displayName: 'Dev merchant',
+          sync2booksCompanyId: currentSync2booksCompanyId,
+        } as Awaited<ReturnType<FakeOrg['getTenantById']>>),
+      upsertTenant: (input) => {
+        currentSync2booksCompanyId =
+          input.sync2booksCompanyId ?? currentSync2booksCompanyId;
+        return Promise.resolve({
+          tenant: {
+            id: input.id!,
+            sync2booksCompanyId: currentSync2booksCompanyId,
+          },
+          defaultBranchId: 'branch-1',
+          etimsConnection: null,
+        } as Awaited<ReturnType<FakeOrg['upsertTenant']>>);
+      },
+    };
+    const svc = new MainApiConnectionApplicationService(
+      repo,
+      fakeMainApiPull([], []) as MainApiPullClient,
+      org as ComplianceOrganizationApplicationService,
+    );
+    await svc.upsert('tenant-1', {
+      mainApiApplicationId: 'app-1',
+      mainApiApiKey: 'key-1',
+    });
+
+    const merchantId = await svc.resolveMerchantId('tenant-1');
+
+    expect(merchantId).toBe('company-1');
+    expect(currentSync2booksCompanyId).toBe('company-1');
   });
 });
 

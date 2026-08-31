@@ -1,5 +1,11 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { MAIN_API_CONNECTION_REPO } from '../../../shared/tokens';
 import type { IMainApiConnectionRepository } from './ports/main-api-connection.repository.port';
 import type {
@@ -226,7 +232,47 @@ export class MainApiConnectionApplicationService {
       });
     }
 
+    // Keep the compliance tenant's sync2booksCompanyId in step with
+    // mainApiCompanyId. DashboardBusinessController.create() stamps this at
+    // business-creation time, but tenants created before that existed, or
+    // healed above after their mainApiCompanyId went stale, never get it —
+    // every ensureCompany() caller now self-heals it too.
+    if (connection.mainApiCompanyId) {
+      const tenant = await this.organization.getTenantById(complianceTenantId);
+      if (tenant && !tenant.sync2booksCompanyId) {
+        await this.organization.upsertTenant({
+          id: complianceTenantId,
+          sync2booksCompanyId: connection.mainApiCompanyId,
+        });
+      }
+    }
+
     return this.ensureWebhookEndpoint(connection);
+  }
+
+  /**
+   * Resolves the merchantId (sync2booksCompanyId) dashboard services need for
+   * mapping/catalog/document calls. Self-heals via ensureCompany() before
+   * giving up, instead of failing whenever a tenant's sync2booksCompanyId
+   * hasn't been stamped yet — see ensureCompanyLocked.
+   */
+  async resolveMerchantId(complianceTenantId: string): Promise<string> {
+    const tenant = await this.organization.getTenantById(complianceTenantId);
+    if (!tenant) {
+      throw new NotFoundException(`Tenant ${complianceTenantId} not found`);
+    }
+    if (tenant.sync2booksCompanyId) {
+      return tenant.sync2booksCompanyId;
+    }
+
+    await this.ensureCompany(complianceTenantId);
+    const healed = await this.organization.getTenantById(complianceTenantId);
+    if (!healed?.sync2booksCompanyId) {
+      throw new BadRequestException(
+        'This tenant has no sync2booksCompanyId configured — cannot resolve merchantId',
+      );
+    }
+    return healed.sync2booksCompanyId;
   }
 
   /**

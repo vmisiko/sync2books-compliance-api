@@ -85,19 +85,16 @@ export class DashboardBusinessController {
       organizationId: user.organizationId,
     });
 
-    let merchantId = tenant.sync2booksCompanyId ?? tenant.id;
     await this.mainApiConnections.upsert(
       tenant.id,
       getGlobalMainApiCredentials(),
     );
-    const connection = await this.mainApiConnections.ensureCompany(tenant.id);
-    if (connection.mainApiCompanyId) {
-      const stamped = await this.organizations.upsertTenant({
-        id: tenant.id,
-        sync2booksCompanyId: connection.mainApiCompanyId,
-      });
-      merchantId = stamped.tenant.sync2booksCompanyId ?? tenant.id;
-    }
+    // ensureCompany() stamps sync2booksCompanyId onto the tenant itself now
+    // (see MainApiConnectionApplicationService.ensureCompanyLocked) — no
+    // need to re-upsert it here too.
+    await this.mainApiConnections.ensureCompany(tenant.id);
+    const healed = await this.organizations.getTenantById(tenant.id);
+    const merchantId = healed?.sync2booksCompanyId ?? tenant.id;
 
     const summary = await this.organizations.getTenantSummary(tenant.id);
     const business: BusinessSummaryResponse = {

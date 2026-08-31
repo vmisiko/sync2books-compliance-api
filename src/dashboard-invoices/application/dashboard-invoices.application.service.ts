@@ -3,7 +3,6 @@ import {
   Inject,
   Injectable,
   Logger,
-  NotFoundException,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { randomUUID } from 'crypto';
@@ -642,15 +641,6 @@ export class DashboardInvoicesApplicationService {
   }
 
   private async resolveMerchantId(complianceTenantId: string): Promise<string> {
-    const tenant = await this.organization.getTenantById(complianceTenantId);
-    if (!tenant) {
-      throw new NotFoundException(`Tenant ${complianceTenantId} not found`);
-    }
-    if (!tenant.sync2booksCompanyId) {
-      throw new BadRequestException(
-        'This tenant has no sync2booksCompanyId configured — cannot resolve catalog merchantId',
-      );
-    }
-    return tenant.sync2booksCompanyId;
+    return this.mainApiConnections.resolveMerchantId(complianceTenantId);
   }
 }
