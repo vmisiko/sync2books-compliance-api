@@ -100,6 +100,17 @@ export class ComplianceOrganizationConnectionTypeOrmRepository implements ICompl
     return toDomain(branch.etimsConnection, tenant, branch);
   }
 
+  async findAnyConnected(
+    environment: ConnectionEnvironment,
+  ): Promise<ComplianceConnection | null> {
+    const conn = await this.connRepo.findOne({
+      where: { environment, status: ConnectionStatus.ACTIVE },
+      relations: ['branch', 'branch.tenant'],
+    });
+    if (!conn?.branch?.tenant) return null;
+    return toDomain(conn, conn.branch.tenant, conn.branch);
+  }
+
   async upsertEtimsConnection(
     input: UpsertEtimsConnectionInput,
   ): Promise<ComplianceConnection> {

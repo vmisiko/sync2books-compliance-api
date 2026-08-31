@@ -93,6 +93,7 @@ describe('SalesService.getNormalizedSaleReport tax type resolution', () => {
     };
     const connectionRepo: IComplianceConnectionRepository = {
       findByMerchantAndBranch: jest.fn().mockResolvedValue(null),
+      findAnyConnected: jest.fn().mockResolvedValue(null),
     };
 
     const organizationService = {

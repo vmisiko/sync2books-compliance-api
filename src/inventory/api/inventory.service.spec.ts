@@ -118,7 +118,9 @@ describe('InventoryService sarNo allocation/release', () => {
     };
   }
 
-  function buildService(syncStateRepo: ReturnType<typeof makeAtomicSyncStateRepo>) {
+  function buildService(
+    syncStateRepo: ReturnType<typeof makeAtomicSyncStateRepo>,
+  ) {
     const insertStockIO = jest
       .fn<
         ReturnType<IEtimsAdapter['insertStockIO']>,
@@ -154,6 +156,7 @@ describe('InventoryService sarNo allocation/release', () => {
           createdAt: new Date(),
           updatedAt: new Date(),
         }),
+      findAnyConnected: () => Promise.resolve(null),
     };
 
     // Constructed directly rather than through Nest's DI/TestingModule:
@@ -209,7 +212,7 @@ describe('InventoryService sarNo allocation/release', () => {
 
     expect(insertStockIO).toHaveBeenCalledTimes(CONCURRENCY);
     const sarNos = insertStockIO.mock.calls
-      .map((call) => (call[0] as OscuStockIOSaveReq).sarNo)
+      .map((call) => call[0].sarNo)
       .sort((a, b) => a - b);
     // All unique (no two movements raced to the same value) and perfectly
     // consecutive (no allocation was silently lost between another call's
@@ -228,7 +231,10 @@ describe('InventoryService sarNo allocation/release', () => {
     syncStateRepo._store.set(key, '5');
 
     // This release's sarNo (5) is still current -> rolls back to 4.
-    await syncStateRepo.update({ syncKey: key, lastReqDt: '5' }, { lastReqDt: '4' });
+    await syncStateRepo.update(
+      { syncKey: key, lastReqDt: '5' },
+      { lastReqDt: '4' },
+    );
     expect(syncStateRepo._store.get(key)).toBe('4');
 
     // Someone else already advanced the counter past this release's sarNo
@@ -236,7 +242,10 @@ describe('InventoryService sarNo allocation/release', () => {
     // stomp the newer value. This is exactly the race the old
     // findOne-then-upsert code could lose.
     syncStateRepo._store.set(key, '7');
-    await syncStateRepo.update({ syncKey: key, lastReqDt: '5' }, { lastReqDt: '4' });
+    await syncStateRepo.update(
+      { syncKey: key, lastReqDt: '5' },
+      { lastReqDt: '4' },
+    );
     expect(syncStateRepo._store.get(key)).toBe('7');
   });
 });

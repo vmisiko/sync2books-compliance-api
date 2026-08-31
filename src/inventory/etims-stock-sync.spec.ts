@@ -87,6 +87,7 @@ describe('InventoryService eTIMS stock sync', () => {
           createdAt: new Date(),
           updatedAt: new Date(),
         }),
+      findAnyConnected: () => Promise.resolve(null),
     };
 
     const module: TestingModule = await Test.createTestingModule({

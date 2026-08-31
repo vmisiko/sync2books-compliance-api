@@ -13,6 +13,16 @@ export class ConnectionRepositoryStub implements IComplianceConnectionRepository
     const key = `${merchantId}:${branchId}`;
     return Promise.resolve(connections.get(key) ?? null);
   }
+
+  async findAnyConnected(
+    environment: ConnectionEnvironment,
+  ): Promise<ComplianceConnection | null> {
+    const match = [...connections.values()].find(
+      (c) =>
+        c.environment === environment && c.status === ConnectionStatus.ACTIVE,
+    );
+    return Promise.resolve(match ?? null);
+  }
 }
 
 /** Seed stub connection data for local/testing */

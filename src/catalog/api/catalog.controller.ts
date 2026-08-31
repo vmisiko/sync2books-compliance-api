@@ -23,6 +23,7 @@ import {
   SearchCodesQueryDto,
 } from './dto/search-codes.dto';
 import { SyncCodeListDto } from './dto/sync-code-list.dto';
+import { SyncReferenceDataNowDto } from './dto/sync-reference-data-now.dto';
 import { ComplianceServiceAuthGuard } from '../../integration/compliance-service-auth.guard';
 import { PlatformOscuCallbackService } from '../../integration/platform-outbound/platform-oscu-callback.service';
 import { Sync2BooksCorrelationPersistenceService } from '../../integration/platform-outbound/sync2books-correlation-persistence.service';
@@ -212,5 +213,18 @@ export class CatalogController {
       branchId: body.branchId,
       full: body.full,
     });
+  }
+
+  @Post('reference-data/sync-now')
+  @ApiOperation({
+    summary:
+      "On-demand version of the daily 2am reference-data sync — pulls both the OSCU code list and item classifications for every environment that has an ACTIVE eTIMS connection, without needing to know that connection's merchantId/branchId. Pass full:true to ignore each environment's watermark and re-pull everything instead of just what's new.",
+  })
+  @ApiResponse({ status: 201, description: 'Per-environment sync results' })
+  async syncReferenceDataNow(@Body() body: SyncReferenceDataNowDto) {
+    const results = await this.catalogService.syncReferenceDataFromOscu(
+      body?.full ?? false,
+    );
+    return { results };
   }
 }

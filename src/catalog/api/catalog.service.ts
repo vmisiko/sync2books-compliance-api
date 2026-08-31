@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
 import { registerItem } from '../application/use-cases/register-item.usecase';
@@ -15,6 +16,7 @@ import {
 import {
   syncItemClassifications,
   type SyncItemClassificationsInput,
+  type SyncItemClassificationsResult,
 } from '../application/use-cases/sync-item-classifications.usecase';
 import {
   listCodeClasses,
@@ -24,10 +26,12 @@ import {
 import {
   syncCodeList,
   type SyncCodeListInput,
+  type SyncCodeListResult,
 } from '../application/use-cases/sync-code-list.usecase';
 import type { ICatalogItemRepository } from '../domain/ports/item-repository.port';
 import type { IClassificationResolver } from '../domain/ports/classification-resolver.port';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
+import { ConnectionEnvironment } from '../../shared/domain/enums/connection-environment.enum';
 import {
   CATALOG_ITEM_REPO,
   CLASSIFICATION_RESOLVER,
@@ -203,4 +207,89 @@ export class CatalogService {
       syncStateRepo: this.oscuSyncStateRepo,
     });
   }
+
+  /**
+   * Keeps oscu_codes (tax types, payment types, quantity units, ...) and
+   * item classifications current without anyone having to remember to hit
+   * POST catalog/codes/sync / item-classifications/sync by hand — both were
+   * previously manual-only, so a fresh environment's reference tables stayed
+   * empty (KRA classification dropdown showing nothing) until someone did.
+   *
+   * Both OSCU lists are environment-wide, not merchant-scoped, so this only
+   * needs *any one* ACTIVE connection per environment to authenticate the
+   * pull — not one per merchant. Each usecase already tracks its own
+   * lastReqDt watermark, so a daily run only fetches what's new (pass
+   * `full: true` — e.g. from the on-demand POST reference-data/sync-now
+   * route — to ignore the watermark and re-pull everything). Sandbox and
+   * production are synced independently so one having no connection yet (or
+   * erroring) doesn't block the other.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_2AM)
+  async syncReferenceDataFromOscu(
+    full = false,
+  ): Promise<ReferenceDataSyncEnvironmentResult[]> {
+    const results: ReferenceDataSyncEnvironmentResult[] = [];
+    for (const environment of [
+      ConnectionEnvironment.SANDBOX,
+      ConnectionEnvironment.PRODUCTION,
+    ]) {
+      const connection =
+        await this.connectionRepo.findAnyConnected(environment);
+      if (!connection) {
+        this.logger.log(
+          `Skipping OSCU reference-data sync for ${environment}: no ACTIVE connection yet`,
+        );
+        results.push({ environment, skipped: true });
+        continue;
+      }
+
+      const params = {
+        merchantId: connection.merchantId,
+        branchId: connection.branchId,
+        full,
+      };
+      const result: ReferenceDataSyncEnvironmentResult = {
+        environment,
+        skipped: false,
+      };
+
+      try {
+        result.codes = await this.syncCodeList(params);
+        this.logger.log(
+          `Synced OSCU code list for ${environment}: ${result.codes.codesFetched} codes across ${result.codes.groupsFetched} groups`,
+        );
+      } catch (error) {
+        result.codesError =
+          error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `OSCU code list sync failed for ${environment}: ${result.codesError}`,
+        );
+      }
+
+      try {
+        result.classifications = await this.syncItemClassifications(params);
+        this.logger.log(
+          `Synced OSCU item classifications for ${environment}: ${result.classifications.upserted} rows`,
+        );
+      } catch (error) {
+        result.classificationsError =
+          error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `OSCU item classification sync failed for ${environment}: ${result.classificationsError}`,
+        );
+      }
+
+      results.push(result);
+    }
+    return results;
+  }
 }
+
+export type ReferenceDataSyncEnvironmentResult = {
+  environment: ConnectionEnvironment;
+  skipped: boolean;
+  codes?: SyncCodeListResult;
+  codesError?: string;
+  classifications?: SyncItemClassificationsResult;
+  classificationsError?: string;
+};
