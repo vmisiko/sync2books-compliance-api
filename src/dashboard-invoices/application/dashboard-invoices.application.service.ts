@@ -140,7 +140,20 @@ export class DashboardInvoicesApplicationService {
       }
     }
 
-    return this.listInvoices(complianceTenantId, params);
+    // `source` is this method's own param (the dashboard's ERP selector,
+    // already consumed above by resolveInvoicePullSource) -- it isn't part
+    // of listInvoices'/getInvoices' declared params, so pick only those out
+    // explicitly rather than forwarding the whole `params` object through.
+    // Forwarding it whole was leaking `source` onto the actual GET /invoices
+    // query string sent to main API, which 400s ("property source should
+    // not exist") since its DTO doesn't whitelist it.
+    const { page, limit, startDate, endDate } = params;
+    return this.listInvoices(complianceTenantId, {
+      page,
+      limit,
+      startDate,
+      endDate,
+    });
   }
 
   async listInvoices(
