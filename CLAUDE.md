@@ -31,6 +31,8 @@ pnpm run test:e2e -- --testPathPattern=<name>
 
 There's a dedicated `etims-golive-testing` skill (`.claude/skills/`) for driving the KRA Go-Live certification checklist against this service and the main API — use it when working through KRA sandbox test cases rather than improvising the flow.
 
+Before standing up or debugging a UAT/production deploy, read `.docs/ENVIRONMENT_SETUP_CHECKLIST.md` — covers the dev-seed fixture tenant that must not leak into a shared environment, `COMPLIANCE_SERVICE_TOKEN` failing open when unset, the shared sandbox eTIMS credential env vars, and why a fresh environment won't sync OSCU reference data until something real is connected. `NODE_ENV=production` is the Dockerfile default for every deploy including UAT — it does not distinguish UAT from real production.
+
 ## Architecture
 
 Per `.docs/MAIN_API_COMPLIANCE_SYNCHRONOUS_CONTRACT.md` and `.docs/THREE_SERVICE_TRUST_AND_CONNECTION_ARCHITECTURE.md`: the main API calls this service **synchronously over HTTP** ("Mode A" — client → main API → compliance-api → KRA/OSCU → back up the same chain). Async queue/webhook delivery is discussed only as a future option, not implemented. Main API handles developer/API-key auth and maps `companyId` → `merchantId`/branch ids before forwarding; this service is the source of truth for OSCU execution state (`cmcKey`, `deviceId`, submission outcomes), while main API remains the source of truth for the integration/connection catalog. Calls from main API are authenticated via `ComplianceServiceAuthGuard` checking a bearer token (unenforced locally unless `COMPLIANCE_SERVICE_TOKEN` is set).
