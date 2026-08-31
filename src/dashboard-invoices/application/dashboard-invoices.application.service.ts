@@ -660,7 +660,20 @@ export class DashboardInvoicesApplicationService {
           itemExternalId,
           itemName: line.itemRef?.name,
           catalogItemId: catalogItem?.id ?? null,
-          classified: Boolean(catalogItem),
+          // Matching to *some* catalog row isn't enough -- saveItem/sales
+          // submission also needs classificationCode/unitCode/
+          // packagingUnitCode resolved and productTypeCode set, exactly
+          // what needsClassificationMapping/needsProductType already track
+          // (see sync-items.usecase.ts's own eligibility filter, which
+          // skips an item for the identical reason). Without this, an item
+          // matched-but-incomplete showed as "classified"/readyForSale here
+          // while still failing sale validation downstream with
+          // CLASSIFICATION_UNIT_REQUIRED — confirmed live 2026-08-31.
+          classified: Boolean(
+            catalogItem &&
+            !catalogItem.needsClassificationMapping &&
+            !catalogItem.needsProductType,
+          ),
         };
       }),
     );

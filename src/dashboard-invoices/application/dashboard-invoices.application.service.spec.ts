@@ -359,6 +359,32 @@ describe('DashboardInvoicesApplicationService — receipt push-back toggle', () 
       unitPrice: 100,
     });
   });
+
+  /**
+   * Regression: a line matched to a real catalog row that's still missing
+   * unitCode/classificationCode/packagingUnitCode or productTypeCode used to
+   * show as "classified"/readyForSale (classified only checked the match
+   * existed), letting the dashboard's Submit button unblock for an invoice
+   * that then failed sale validation downstream with
+   * CLASSIFICATION_UNIT_REQUIRED -- confirmed live 2026-08-31. classified
+   * must also require needsClassificationMapping/needsProductType to be
+   * false, the same eligibility sync-items.usecase.ts itself enforces.
+   */
+  it('does not mark a line "classified" when its matched catalog item is still missing required fields', async () => {
+    const deps = defaultDeps(false);
+    deps.catalog.findByExternalId = async () =>
+      ({
+        id: 'catalog-ext-item-1',
+        needsClassificationMapping: true,
+        needsProductType: false,
+      }) as Awaited<ReturnType<CatalogService['findByExternalId']>>;
+    const service = makeService(deps);
+
+    const invoice = await service.getInvoiceById('tenant-1', 'invoice-1');
+
+    expect(invoice.lines[0].classified).toBe(false);
+    expect(invoice.readyForSale).toBe(false);
+  });
 });
 
 describe('DashboardInvoicesApplicationService — idempotency self-heal resumption', () => {
