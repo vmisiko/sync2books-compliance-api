@@ -42,11 +42,15 @@ function makeItem(overrides: Partial<CatalogItem> = {}): CatalogItem {
 function makeSyncStateRepo() {
   const store = new Map<string, string>();
   return {
-    findOne: jest.fn().mockImplementation(({ where: { syncKey } }) =>
-      Promise.resolve(
-        store.has(syncKey) ? { syncKey, lastReqDt: store.get(syncKey) } : null,
+    findOne: jest
+      .fn()
+      .mockImplementation(({ where: { syncKey } }) =>
+        Promise.resolve(
+          store.has(syncKey)
+            ? { syncKey, lastReqDt: store.get(syncKey) }
+            : null,
+        ),
       ),
-    ),
     upsert: jest.fn().mockImplementation(({ syncKey, lastReqDt }) => {
       store.set(syncKey, lastReqDt);
       return Promise.resolve(undefined);
@@ -290,6 +294,129 @@ describe('syncItemsToEtims', () => {
   });
 
   /**
+   * Regression for the 2026-08-31 shared-sandbox-tin incident: a database
+   * whose local item_cd_seq counter has fallen behind what KRA actually
+   * expects for this tin (e.g. because another environment also submits to
+   * it) must self-heal by advancing the counter and resubmitting, not get
+   * stuck resubmitting the same rejected value forever.
+   */
+  it('self-heals an itemCd sequence drift rejection by advancing the counter and resubmitting', async () => {
+    const item = makeItem();
+    const itemRepo = {
+      findByMerchant: jest.fn().mockResolvedValue([item]),
+      save: jest.fn().mockImplementation((i) => Promise.resolve(i)),
+    };
+    const connectionRepo = {
+      findByMerchantAndBranch: jest.fn().mockResolvedValue({
+        kraPin: 'P600004185A',
+        kraBhfId: '00',
+        cmcKey: 'cmc-key',
+        deviceId: 'device-1',
+        environment: 'SANDBOX',
+      }),
+    };
+    // Rejects the first two attempts as drift (mirrors the live KRA
+    // response), then accepts the third.
+    const saveItem = jest
+      .fn()
+      .mockResolvedValueOnce({
+        success: false,
+        error: undefined,
+        rawResponse: {
+          resultCd: '',
+          resultMsg:
+            'The itemCd is either reused or not incremented properly. Expected sequence ending with ********11',
+        },
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        error: undefined,
+        rawResponse: {
+          resultCd: '',
+          resultMsg:
+            'The itemCd is either reused or not incremented properly. Expected sequence ending with ********11',
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        rawResponse: { resultCd: '000', resultMsg: 'OK' },
+      });
+    const etimsAdapter = { saveItem };
+    const syncStateRepo = makeSyncStateRepo();
+
+    const result = await syncItemsToEtims(
+      { merchantId: 'merchant-1', branchId: 'branch-1' },
+      {
+        itemRepo: itemRepo as any,
+        connectionRepo: connectionRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+      },
+    );
+
+    expect(saveItem).toHaveBeenCalledTimes(3);
+    expect(result.synced).toBe(1);
+    expect(result.failed).toBe(0);
+    // Counter advanced through all three allocations (1, 2, 3) -- not
+    // released back down after the two drift rejections.
+    expect(syncStateRepo._store.get('item_cd_seq:P600004185A:SANDBOX')).toBe(
+      '3',
+    );
+    const savedItem = itemRepo.save.mock.calls[0][0];
+    expect(savedItem.etimsItemCode).toBe('KE2NTNO0000003');
+    expect(savedItem.registrationStatus).toBe('REGISTERED');
+  });
+
+  it('gives up after MAX_ITEM_CD_DRIFT_RETRIES and fails visibly without releasing the advanced counter', async () => {
+    const item = makeItem();
+    const itemRepo = {
+      findByMerchant: jest.fn().mockResolvedValue([item]),
+      save: jest.fn().mockImplementation((i) => Promise.resolve(i)),
+    };
+    const connectionRepo = {
+      findByMerchantAndBranch: jest.fn().mockResolvedValue({
+        kraPin: 'P600004185A',
+        kraBhfId: '00',
+        cmcKey: 'cmc-key',
+        deviceId: 'device-1',
+        environment: 'SANDBOX',
+      }),
+    };
+    const saveItem = jest.fn().mockResolvedValue({
+      success: false,
+      error: undefined,
+      rawResponse: {
+        resultCd: '',
+        resultMsg:
+          'The itemCd is either reused or not incremented properly. Expected sequence ending with ********11',
+      },
+    });
+    const etimsAdapter = { saveItem };
+    const syncStateRepo = makeSyncStateRepo();
+
+    const result = await syncItemsToEtims(
+      { merchantId: 'merchant-1', branchId: 'branch-1' },
+      {
+        itemRepo: itemRepo as any,
+        connectionRepo: connectionRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+      },
+    );
+
+    // 1 initial attempt + MAX_ITEM_CD_DRIFT_RETRIES self-heal retries.
+    expect(saveItem).toHaveBeenCalledTimes(26);
+    expect(result.failed).toBe(1);
+    // Stayed at 26, not released back down -- releasing would just
+    // reproduce the identical failure on the next attempt.
+    expect(syncStateRepo._store.get('item_cd_seq:P600004185A:SANDBOX')).toBe(
+      '26',
+    );
+    const savedItem = itemRepo.save.mock.calls[0][0];
+    expect(savedItem.registrationStatus).toBe('FAILED');
+  });
+
+  /**
    * Regression: an item pulled with no approved classification_mappings row
    * now still registers locally (registerItem no longer throws -- see
    * register-item.spec.ts's "4)"/"4b)" tests), so it can reach this
@@ -334,6 +461,8 @@ describe('syncItemsToEtims', () => {
     expect(result.synced).toBe(0);
     expect(etimsAdapter.saveItem).not.toHaveBeenCalled();
     expect(itemRepo.save).not.toHaveBeenCalled();
-    expect(result.results[0].error).toMatch(/classification and\/or unit codes/i);
+    expect(result.results[0].error).toMatch(
+      /classification and\/or unit codes/i,
+    );
   });
 });

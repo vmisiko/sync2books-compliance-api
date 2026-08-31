@@ -54,6 +54,15 @@ export interface SyncItemsResult {
 const QTY_UNIT_CD_SLICE_FALLBACK = 'NO'; // "Number" (cdCls 10) -- generic, always valid
 const PKG_UNIT_CD_SLICE_FALLBACK = 'NT'; // "Not applicable" (cdCls 17) -- generic, always valid
 
+/**
+ * Bounds isItemCdSequenceDriftRejection's self-heal loop. Covers realistic
+ * drift from casual local/shared-tin testing (a handful to a few dozen
+ * items) while still failing visibly, instead of looping forever, if the
+ * connection is broken in some other way that happens to produce the same
+ * message.
+ */
+const MAX_ITEM_CD_DRIFT_RETRIES = 25;
+
 function itemCdSlice(code: string, fallback: string): string {
   return code.length === 2 ? code : fallback;
 }
@@ -150,6 +159,33 @@ function normalizeNonEmptyString(value: unknown): string | null {
   return s === '' ? null : s;
 }
 
+/**
+ * KRA rejects an itemCd whose sequence tail doesn't match what it expects
+ * next for this tin -- confirmed live 2026-08-31 (shared sandbox PIN
+ * P600004185A): a shared tin gets submitted to from more than one database
+ * (e.g. local dev and a deployed environment), each tracking its own
+ * independent `oscu_sync_state` counter, so whichever one falls behind gets
+ * this rejection on every single item from then on. It's classified HTTP
+ * 400 (non-retryable) by isRetryableStatus, so without this, clicking
+ * "Retry Sync" just re-burns the exact same wrong sequence forever.
+ *
+ * Matched on KRA's stable message substrings rather than trying to parse
+ * the numeric tail out of its response -- KRA masks a different number of
+ * digits with asterisks in different rejections ("********1" vs
+ * "********11" have both been observed live), so the revealed suffix isn't
+ * reliably a usable sequence value.
+ */
+function isItemCdSequenceDriftRejection(message: string | null): boolean {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return (
+    m.includes('itemcd') &&
+    (m.includes('reused') ||
+      m.includes('not incremented properly') ||
+      m.includes('invalid itemcd sequence'))
+  );
+}
+
 export async function syncItemsToEtims(
   input: SyncItemsInput,
   deps: {
@@ -242,66 +278,88 @@ export async function syncItemsToEtims(
     // and continuing with the rest.
     try {
       let itemCd = normalizeNonEmptyString(item.etimsItemCode);
-      if (!itemCd) {
-        const seq = await allocateItemCdSequence(
-          deps.syncStateRepo,
-          connection.kraPin,
-          connection.environment,
+
+      let res: Awaited<ReturnType<IEtimsAdapter['saveItem']>>;
+      let resultCd: string | null;
+      let resultMsg: string | null;
+      let isDrift = false;
+      let driftRetries = 0;
+
+      for (;;) {
+        if (!itemCd) {
+          const seq = await allocateItemCdSequence(
+            deps.syncStateRepo,
+            connection.kraPin,
+            connection.environment,
+          );
+          itemCd = generateEtimsItemCd({ ...item, productTypeCode }, seq);
+        }
+
+        const request: OscuItemSaveReq = {
+          tin: connection.kraPin,
+          bhfId: connection.kraBhfId,
+          cmcKey: connection.cmcKey,
+          itemClsCd: item.classificationCode,
+          itemCd,
+          itemTyCd: productTypeCode,
+          itemNm: item.name,
+          itemStdNm: null,
+          orgnNatCd: item.originCountry ?? 'KE',
+          pkgUnitCd: item.packagingUnitCode,
+          qtyUnitCd: item.unitCode,
+          taxTyCd: item.taxTyCd,
+          btchNo: null,
+          bcd: item.sku ?? null,
+          dftPrc: item.unitPrice ?? 0,
+          grpPrcL1: 0,
+          grpPrcL2: 0,
+          grpPrcL3: 0,
+          grpPrcL4: 0,
+          grpPrcL5: null,
+          addInfo: null,
+          sftyQty: null,
+          isrcAplcbYn: 'N',
+          useYn: 'Y',
+          regrId: 'sync2books',
+          regrNm: 'sync2books',
+          modrId: 'sync2books',
+          modrNm: 'sync2books',
+        };
+
+        res = await deps.etimsAdapter.saveItem(request, {
+          merchantId: input.merchantId,
+          branchId: connection.kraBhfId,
+          kraPin: connection.kraPin,
+          environment: connection.environment,
+          cmcKey: connection.cmcKey,
+          deviceId: connection.deviceId,
+        });
+
+        // The HTTP adapter's rawResponse fields go through `safeString()` on its
+        // side, which returns '' (not undefined) when the raw KRA/Apigee body
+        // has no resultCd/resultMsg key at all -- e.g. a gateway-level
+        // rejection that never reached KRA's own envelope. A bare `?? null`
+        // here doesn't catch that ('' is not nullish), so a genuinely blank
+        // resultMsg would silently block the `res.error` fallback below from
+        // ever running -- normalize through the same helper used for itemCd
+        // so "blank" and "absent" are treated identically everywhere.
+        resultCd = normalizeNonEmptyString(res.rawResponse?.resultCd);
+        resultMsg = normalizeNonEmptyString(res.rawResponse?.resultMsg);
+
+        if (res.success) break;
+
+        isDrift = isItemCdSequenceDriftRejection(
+          resultMsg ?? res.error ?? null,
         );
-        itemCd = generateEtimsItemCd({ ...item, productTypeCode }, seq);
+        if (isDrift && driftRetries < MAX_ITEM_CD_DRIFT_RETRIES) {
+          driftRetries += 1;
+          itemCd = null; // force a fresh allocation next iteration
+          continue;
+        }
+        break;
       }
+
       const now = new Date();
-
-      const request: OscuItemSaveReq = {
-        tin: connection.kraPin,
-        bhfId: connection.kraBhfId,
-        cmcKey: connection.cmcKey,
-        itemClsCd: item.classificationCode,
-        itemCd,
-        itemTyCd: productTypeCode,
-        itemNm: item.name,
-        itemStdNm: null,
-        orgnNatCd: item.originCountry ?? 'KE',
-        pkgUnitCd: item.packagingUnitCode,
-        qtyUnitCd: item.unitCode,
-        taxTyCd: item.taxTyCd,
-        btchNo: null,
-        bcd: item.sku ?? null,
-        dftPrc: item.unitPrice ?? 0,
-        grpPrcL1: 0,
-        grpPrcL2: 0,
-        grpPrcL3: 0,
-        grpPrcL4: 0,
-        grpPrcL5: null,
-        addInfo: null,
-        sftyQty: null,
-        isrcAplcbYn: 'N',
-        useYn: 'Y',
-        regrId: 'sync2books',
-        regrNm: 'sync2books',
-        modrId: 'sync2books',
-        modrNm: 'sync2books',
-      };
-
-      const res = await deps.etimsAdapter.saveItem(request, {
-        merchantId: input.merchantId,
-        branchId: connection.kraBhfId,
-        kraPin: connection.kraPin,
-        environment: connection.environment,
-        cmcKey: connection.cmcKey,
-        deviceId: connection.deviceId,
-      });
-
-      // The HTTP adapter's rawResponse fields go through `safeString()` on its
-      // side, which returns '' (not undefined) when the raw KRA/Apigee body
-      // has no resultCd/resultMsg key at all -- e.g. a gateway-level
-      // rejection that never reached KRA's own envelope. A bare `?? null`
-      // here doesn't catch that ('' is not nullish), so a genuinely blank
-      // resultMsg would silently block the `res.error` fallback below from
-      // ever running -- normalize through the same helper used for itemCd
-      // so "blank" and "absent" are treated identically everywhere.
-      const resultCd = normalizeNonEmptyString(res.rawResponse?.resultCd);
-      const resultMsg = normalizeNonEmptyString(res.rawResponse?.resultMsg);
 
       if (res.success) {
         const updated: CatalogItem = {
@@ -327,7 +385,13 @@ export async function syncItemsToEtims(
       }
 
       const retryable = (res.error ?? '').includes('retryable');
-      if (!retryable) {
+      // A drift rejection must never release its sequence back -- doing so
+      // would decrement the counter right back to the value KRA just
+      // rejected, guaranteeing the identical failure on the next attempt.
+      // Leaving the counter where the drift loop advanced it to is the
+      // whole point of the self-heal, whether it exhausted its retry budget
+      // or the item is skipped for some other reason.
+      if (!retryable && !isDrift) {
         const seq = parseItemCdSeq(itemCd);
         if (seq != null) {
           await releaseItemCdSequence(
