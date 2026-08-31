@@ -107,7 +107,13 @@ export async function resyncInvoiceSequenceFromKra(
   const previousCounter = existing?.lastReqDt
     ? parseInt(existing.lastReqDt, 10)
     : 0;
-  const newCounter = Math.max(previousCounter, maxInvcNoFromKra);
+  // Authoritative overwrite, not Math.max(previous, kra) -- see
+  // resync-item-cd-sequence.usecase.ts's doc comment: KRA rejects any seq
+  // that isn't exactly last-accepted + 1, so a local counter that has
+  // drifted *ahead* (not just behind) can never self-correct by continuing
+  // to increment. previous is exactly the value that's wrong when this
+  // needs to run at all.
+  const newCounter = maxInvcNoFromKra;
   if (newCounter !== previousCounter) {
     await deps.syncStateRepo.upsert(
       { syncKey, lastReqDt: String(newCounter) },

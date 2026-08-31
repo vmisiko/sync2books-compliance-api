@@ -5,6 +5,7 @@ import type { IComplianceConnectionRepository } from '../../../shared/ports/repo
 import type { IEtimsAdapter } from '../../../regulatory/oscu/ports/etims-adapter.port';
 import type { OscuItemSaveReq } from '../../../regulatory/oscu/transport/endpoints/item-save.dto';
 import { OscuSyncStateOrmEntity } from '../../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
+import { fetchMaxItemCdSeqFromKra } from './resync-item-cd-sequence.usecase';
 
 export interface SyncItemsInput {
   merchantId: string;
@@ -55,13 +56,20 @@ const QTY_UNIT_CD_SLICE_FALLBACK = 'NO'; // "Number" (cdCls 10) -- generic, alwa
 const PKG_UNIT_CD_SLICE_FALLBACK = 'NT'; // "Not applicable" (cdCls 17) -- generic, always valid
 
 /**
- * Bounds isItemCdSequenceDriftRejection's self-heal loop. Covers realistic
- * drift from casual local/shared-tin testing (a handful to a few dozen
- * items) while still failing visibly, instead of looping forever, if the
- * connection is broken in some other way that happens to produce the same
- * message.
+ * Small residual bound for isItemCdSequenceDriftRejection retries AFTER the
+ * one-time authoritative KRA correction below has already run this batch --
+ * only meant to absorb a genuine race (another writer allocating a slot
+ * between our correction and our retry), not to be the primary recovery
+ * mechanism. It used to be 25 with blind +1 guessing as the only strategy,
+ * which is exactly what caused the 2026-08-31 incident: KRA rejects any seq
+ * that isn't precisely last-accepted + 1 (confirmed live: 508-516, nine
+ * consecutive increasing guesses, all rejected identically), so once local
+ * has overshot the real target -- which is exactly what repeated blind
+ * +1 retries eventually does -- continuing to increment can never converge.
+ * It only digs the counter further from correct. See
+ * resync-item-cd-sequence.usecase.ts's doc comment for the full incident.
  */
-const MAX_ITEM_CD_DRIFT_RETRIES = 25;
+const MAX_ITEM_CD_DRIFT_RETRIES = 5;
 
 function itemCdSlice(code: string, fallback: string): string {
   return code.length === 2 ? code : fallback;
@@ -222,6 +230,10 @@ export async function syncItemsToEtims(
     : picked;
 
   const results: SyncItemResult[] = [];
+  // Scoped to the whole batch, not per item -- the itemCd sequence is a
+  // single global counter per tin, so one authoritative correction fixes it
+  // for every item in this call, not just the one that first hit drift.
+  let driftCorrectionAttempted = false;
   for (const item of toSync) {
     // itemTyCd is required by saveItem and embedded in itemCd itself, but
     // this system never guesses it (see CatalogItem.productTypeCode's doc
@@ -351,6 +363,34 @@ export async function syncItemsToEtims(
         isDrift = isItemCdSequenceDriftRejection(
           resultMsg ?? res.error ?? null,
         );
+        // Primary correction: ask KRA what it actually expects, once per
+        // batch, and overwrite the counter to match exactly. Must happen
+        // before the blind-retry fallback below, not after it -- guessing
+        // forward first is what let the counter overshoot in the first
+        // place, at which point no amount of further guessing can recover.
+        if (isDrift && !driftCorrectionAttempted) {
+          driftCorrectionAttempted = true;
+          const { maxSeq } = await fetchMaxItemCdSeqFromKra(
+            {
+              kraPin: connection.kraPin,
+              kraBhfId: connection.kraBhfId,
+              cmcKey: connection.cmcKey,
+              environment: connection.environment,
+              deviceId: connection.deviceId,
+            },
+            input.merchantId,
+            deps.etimsAdapter,
+          );
+          await deps.syncStateRepo.upsert(
+            {
+              syncKey: `item_cd_seq:${connection.kraPin}:${connection.environment}`,
+              lastReqDt: String(maxSeq),
+            },
+            ['syncKey'],
+          );
+          itemCd = null; // force a fresh allocation off the now-correct counter
+          continue;
+        }
         if (isDrift && driftRetries < MAX_ITEM_CD_DRIFT_RETRIES) {
           driftRetries += 1;
           itemCd = null; // force a fresh allocation next iteration

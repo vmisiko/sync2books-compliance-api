@@ -295,12 +295,16 @@ describe('syncItemsToEtims', () => {
 
   /**
    * Regression for the 2026-08-31 shared-sandbox-tin incident: a database
-   * whose local item_cd_seq counter has fallen behind what KRA actually
+   * whose local item_cd_seq counter has drifted from what KRA actually
    * expects for this tin (e.g. because another environment also submits to
-   * it) must self-heal by advancing the counter and resubmitting, not get
-   * stuck resubmitting the same rejected value forever.
+   * it) must self-heal by asking KRA for the real value and resubmitting,
+   * not get stuck resubmitting the same rejected value forever. This used to
+   * blind-guess forward by 1 per retry -- replaced after that strategy
+   * itself caused a much worse incident (the counter overshot to 500+ and
+   * could never recover by continuing to guess forward, since KRA requires
+   * exactly last-accepted + 1, not merely "higher than before").
    */
-  it('self-heals an itemCd sequence drift rejection by advancing the counter and resubmitting', async () => {
+  it('self-heals an itemCd sequence drift rejection by querying KRA for the true next value and resubmitting once', async () => {
     const item = makeItem();
     const itemRepo = {
       findByMerchant: jest.fn().mockResolvedValue([item]),
@@ -315,19 +319,10 @@ describe('syncItemsToEtims', () => {
         environment: 'SANDBOX',
       }),
     };
-    // Rejects the first two attempts as drift (mirrors the live KRA
-    // response), then accepts the third.
+    // Rejects the first (locally-guessed) attempt as drift, then accepts
+    // whatever seq the post-correction retry generates.
     const saveItem = jest
       .fn()
-      .mockResolvedValueOnce({
-        success: false,
-        error: undefined,
-        rawResponse: {
-          resultCd: '',
-          resultMsg:
-            'The itemCd is either reused or not incremented properly. Expected sequence ending with ********11',
-        },
-      })
       .mockResolvedValueOnce({
         success: false,
         error: undefined,
@@ -341,8 +336,18 @@ describe('syncItemsToEtims', () => {
         success: true,
         rawResponse: { resultCd: '000', resultMsg: 'OK' },
       });
-    const etimsAdapter = { saveItem };
+    // KRA's real max sequence for this tin right now is 10 -- next is 11.
+    const getItemInfo = jest.fn().mockResolvedValue({
+      success: true,
+      rawResponse: {
+        resultCd: '000',
+        data: { itemList: [{ itemCd: 'KE2NTNO0000010' }] },
+      },
+    });
+    const etimsAdapter = { saveItem, getItemInfo };
     const syncStateRepo = makeSyncStateRepo();
+    // Locally-guessed counter has already overshot far past KRA's real state.
+    syncStateRepo._store.set('item_cd_seq:P600004185A:SANDBOX', '500');
 
     const result = await syncItemsToEtims(
       { merchantId: 'merchant-1', branchId: 'branch-1' },
@@ -354,20 +359,21 @@ describe('syncItemsToEtims', () => {
       },
     );
 
-    expect(saveItem).toHaveBeenCalledTimes(3);
+    expect(getItemInfo).toHaveBeenCalledTimes(1);
+    expect(saveItem).toHaveBeenCalledTimes(2);
     expect(result.synced).toBe(1);
     expect(result.failed).toBe(0);
-    // Counter advanced through all three allocations (1, 2, 3) -- not
-    // released back down after the two drift rejections.
+    // Counter was overwritten to KRA's real max (10), then advanced by the
+    // one successful allocation to 11 -- not left at the overshot 500+.
     expect(syncStateRepo._store.get('item_cd_seq:P600004185A:SANDBOX')).toBe(
-      '3',
+      '11',
     );
     const savedItem = itemRepo.save.mock.calls[0][0];
-    expect(savedItem.etimsItemCode).toBe('KE2NTNO0000003');
+    expect(savedItem.etimsItemCode).toBe('KE2NTNO0000011');
     expect(savedItem.registrationStatus).toBe('REGISTERED');
   });
 
-  it('gives up after MAX_ITEM_CD_DRIFT_RETRIES and fails visibly without releasing the advanced counter', async () => {
+  it('falls back to a small bounded blind retry if drift persists after the authoritative correction, and fails visibly without releasing the counter once exhausted', async () => {
     const item = makeItem();
     const itemRepo = {
       findByMerchant: jest.fn().mockResolvedValue([item]),
@@ -391,7 +397,11 @@ describe('syncItemsToEtims', () => {
           'The itemCd is either reused or not incremented properly. Expected sequence ending with ********11',
       },
     });
-    const etimsAdapter = { saveItem };
+    const getItemInfo = jest.fn().mockResolvedValue({
+      success: true,
+      rawResponse: { resultCd: '000', data: { itemList: [] } },
+    });
+    const etimsAdapter = { saveItem, getItemInfo };
     const syncStateRepo = makeSyncStateRepo();
 
     const result = await syncItemsToEtims(
@@ -404,13 +414,14 @@ describe('syncItemsToEtims', () => {
       },
     );
 
-    // 1 initial attempt + MAX_ITEM_CD_DRIFT_RETRIES self-heal retries.
-    expect(saveItem).toHaveBeenCalledTimes(26);
+    // 1 initial attempt + 1 post-correction attempt + MAX_ITEM_CD_DRIFT_RETRIES (5) blind fallback retries.
+    expect(getItemInfo).toHaveBeenCalledTimes(1);
+    expect(saveItem).toHaveBeenCalledTimes(7);
     expect(result.failed).toBe(1);
-    // Stayed at 26, not released back down -- releasing would just
-    // reproduce the identical failure on the next attempt.
+    // Stayed at the last allocated value, not released back down --
+    // releasing would just reproduce the identical failure next time.
     expect(syncStateRepo._store.get('item_cd_seq:P600004185A:SANDBOX')).toBe(
-      '26',
+      '6',
     );
     const savedItem = itemRepo.save.mock.calls[0][0];
     expect(savedItem.registrationStatus).toBe('FAILED');

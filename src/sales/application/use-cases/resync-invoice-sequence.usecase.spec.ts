@@ -96,7 +96,7 @@ describe('resyncInvoiceSequenceFromKra', () => {
     expect(syncStateRepo.upsert).not.toHaveBeenCalled();
   });
 
-  it('never regresses the counter when the local value is already ahead of KRA', async () => {
+  it("corrects the counter DOWN when a local value has drifted ahead of KRA's real state", async () => {
     const connectionRepo = {
       findByMerchantAndBranch: jest.fn().mockResolvedValue(connection),
     };
@@ -119,7 +119,9 @@ describe('resyncInvoiceSequenceFromKra', () => {
       },
     );
 
-    expect(result.newCounter).toBe(20);
-    expect(syncStateRepo.upsert).not.toHaveBeenCalled();
+    expect(result.newCounter).toBe(6);
+    expect(syncStateRepo._store.get('invoice_seq:P600004185A:SANDBOX')).toBe(
+      '6',
+    );
   });
 });

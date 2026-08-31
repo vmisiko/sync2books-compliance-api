@@ -125,7 +125,7 @@ describe('resyncItemCdSequenceFromKra', () => {
     );
   });
 
-  it('never regresses the counter when the local value is already ahead of KRA', async () => {
+  it("corrects the counter DOWN when a local value has drifted ahead of KRA's real state (e.g. from repeated failed self-heal guesses) -- KRA rejects any seq that isn't exactly last-accepted + 1, so overshooting can never self-correct by continuing to increment", async () => {
     const itemRepo = {
       findByMerchant: jest.fn().mockResolvedValue([]),
       save: jest.fn(),
@@ -140,7 +140,7 @@ describe('resyncItemCdSequenceFromKra', () => {
       }),
     };
     const syncStateRepo = makeSyncStateRepo({
-      'item_cd_seq:P600004185A:SANDBOX': '25',
+      'item_cd_seq:P600004185A:SANDBOX': '508',
     });
 
     const result = await resyncItemCdSequenceFromKra(
@@ -153,9 +153,9 @@ describe('resyncItemCdSequenceFromKra', () => {
       },
     );
 
-    expect(result.newCounter).toBe(25);
+    expect(result.newCounter).toBe(11);
     expect(syncStateRepo._store.get('item_cd_seq:P600004185A:SANDBOX')).toBe(
-      '25',
+      '11',
     );
   });
 

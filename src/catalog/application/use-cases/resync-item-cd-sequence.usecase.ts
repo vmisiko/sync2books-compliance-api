@@ -43,6 +43,60 @@ function isItemSearchPayload(
 }
 
 /**
+ * Queries `/itemInfo` and returns KRA's real item list plus the highest
+ * itemCd sequence any of them embeds -- the single source of truth for "what
+ * seq does KRA actually expect next" (`maxSeq + 1`). Shared by
+ * `resyncItemCdSequenceFromKra` (the on-demand full resync) and
+ * `sync-items.usecase.ts`'s per-batch drift correction, so both always agree
+ * with the same live answer instead of guessing independently.
+ */
+export async function fetchMaxItemCdSeqFromKra(
+  connection: {
+    kraPin: string;
+    kraBhfId: string;
+    cmcKey: string;
+    environment: 'SANDBOX' | 'PRODUCTION';
+    deviceId: string;
+  },
+  merchantId: string,
+  etimsAdapter: IEtimsAdapter,
+): Promise<{ maxSeq: number; rows: OscuItemSearchRow[] }> {
+  const envelope = await etimsAdapter.getItemInfo(
+    {
+      tin: connection.kraPin,
+      bhfId: connection.kraBhfId,
+      cmcKey: connection.cmcKey,
+      lastReqDt: EPOCH_LAST_REQ_DT,
+    },
+    {
+      merchantId,
+      branchId: connection.kraBhfId,
+      kraPin: connection.kraPin,
+      environment: connection.environment,
+      cmcKey: connection.cmcKey,
+      deviceId: connection.deviceId,
+    },
+  );
+
+  if (!envelope.success) {
+    throw new Error(envelope.error ?? 'Failed to fetch item list from OSCU');
+  }
+
+  const data = envelope.rawResponse?.['data'];
+  const rows = isItemSearchPayload(data) ? data.itemList : [];
+
+  let maxSeq = 0;
+  for (const row of rows) {
+    const seq = parseItemCdSeq(row.itemCd);
+    if (seq != null && seq > maxSeq) {
+      maxSeq = seq;
+    }
+  }
+
+  return { maxSeq, rows };
+}
+
+/**
  * Recovers the true itemCd sequence for a tin directly from KRA instead of
  * guessing -- built after a shared-tin drift incident (2026-08-31, PIN
  * P600004185A) where the local counter fell behind what KRA had already
@@ -50,9 +104,15 @@ function isItemSearchPayload(
  * sandbox pin), and the bounded self-heal in sync-items.usecase.ts couldn't
  * close the gap fast enough. Queries `/itemInfo` (KRA Go-Live "LOOK UP
  * PRODUCT LIST", confirmed live 2026-08-31 with real data), takes the
- * highest sequence any item embeds, and advances the local counter to match
- * -- never backward, since another allocation may have already moved past
- * where this run started.
+ * highest sequence any item embeds, and sets the local counter to exactly
+ * that -- KRA rejects any seq that isn't precisely last-accepted + 1 (no
+ * gaps tolerated forward either, confirmed live 2026-08-31: nine consecutive
+ * increasing values 508-516 were all rejected identically), so a local
+ * counter that has drifted *ahead* of KRA (e.g. from repeated failed
+ * self-heal retries each guessing forward) can never self-correct by
+ * incrementing further -- only an authoritative overwrite from KRA's own
+ * answer fixes it. This intentionally does NOT take Math.max(previous, kra):
+ * previous is exactly the value that's wrong when this needs to run at all.
  *
  * Also backfills any local item KRA already has but this database doesn't
  * know about (registrationStatus stuck non-REGISTERED with no etimsItemCode)
@@ -86,44 +146,24 @@ export async function resyncItemCdSequenceFromKra(
     );
   }
 
-  const envelope = await deps.etimsAdapter.getItemInfo(
+  const { maxSeq: maxSeqFromKra, rows } = await fetchMaxItemCdSeqFromKra(
     {
-      tin: connection.kraPin,
-      bhfId: connection.kraBhfId,
-      cmcKey: connection.cmcKey,
-      lastReqDt: EPOCH_LAST_REQ_DT,
-    },
-    {
-      merchantId: input.merchantId,
-      branchId: connection.kraBhfId,
       kraPin: connection.kraPin,
-      environment: connection.environment,
+      kraBhfId: connection.kraBhfId,
       cmcKey: connection.cmcKey,
+      environment: connection.environment,
       deviceId: connection.deviceId,
     },
+    input.merchantId,
+    deps.etimsAdapter,
   );
-
-  if (!envelope.success) {
-    throw new Error(envelope.error ?? 'Failed to fetch item list from OSCU');
-  }
-
-  const data = envelope.rawResponse?.['data'];
-  const rows = isItemSearchPayload(data) ? data.itemList : [];
-
-  let maxSeqFromKra = 0;
-  for (const row of rows) {
-    const seq = parseItemCdSeq(row.itemCd);
-    if (seq != null && seq > maxSeqFromKra) {
-      maxSeqFromKra = seq;
-    }
-  }
 
   const syncKey = `item_cd_seq:${connection.kraPin}:${connection.environment}`;
   const existing = await deps.syncStateRepo.findOne({ where: { syncKey } });
   const previousCounter = existing?.lastReqDt
     ? parseInt(existing.lastReqDt, 10)
     : 0;
-  const newCounter = Math.max(previousCounter, maxSeqFromKra);
+  const newCounter = maxSeqFromKra;
   if (newCounter !== previousCounter) {
     await deps.syncStateRepo.upsert(
       { syncKey, lastReqDt: String(newCounter) },
