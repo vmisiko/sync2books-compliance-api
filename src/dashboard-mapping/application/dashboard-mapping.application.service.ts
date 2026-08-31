@@ -839,17 +839,30 @@ export class DashboardMappingApplicationService {
       );
     }
 
-    const items = await this.fetchAllItems(connection.mainApiApiKey, connection.mainApiCompanyId);
-    return this.computeItemReadiness(merchantId, items, SOURCE_FILTER[pullSource]);
+    const items = await this.fetchAllItems(
+      connection.mainApiApiKey,
+      connection.mainApiCompanyId,
+    );
+    return this.computeItemReadiness(
+      merchantId,
+      items,
+      SOURCE_FILTER[pullSource],
+    );
   }
 
   /** Loops GET /items across every page — a merchant's full catalog, not just the first page's worth. Capped at 50 pages (5,000 items at the default page size) as a sanity limit against a runaway loop. */
-  private async fetchAllItems(apiKey: string, companyId: string): Promise<MainApiItem[]> {
+  private async fetchAllItems(
+    apiKey: string,
+    companyId: string,
+  ): Promise<MainApiItem[]> {
     const items: MainApiItem[] = [];
     let page = 1;
     const limit = 100;
     for (; page <= 50; page++) {
-      const response = await this.mainApiPull.getItems(apiKey, companyId, { page, limit });
+      const response = await this.mainApiPull.getItems(apiKey, companyId, {
+        page,
+        limit,
+      });
       items.push(...response.data);
       if (page >= response.totalPages || response.data.length === 0) break;
     }
@@ -1015,8 +1028,9 @@ export class DashboardMappingApplicationService {
   }
 
   /**
-   * unit_mappings has a unique (merchantId, internalUnit, active) index —
-   * mirrors upsertTaxSuggestion's approved-then-pending lookup order and
+   * unit_mappings has a unique (merchantId, activeInternalUnit) index (only
+   * ever unique while active) — mirrors upsertTaxSuggestion's
+   * approved-then-pending lookup order and
    * never resets a row a human has already resolved. Unlike tax's split
    * upsertTaxSuggestion/upsertUnmappedTaxRate pair, one method covers both
    * the confident and unconfident cases here: internalUnit is never null
@@ -1215,8 +1229,8 @@ export class DashboardMappingApplicationService {
    * an existing row with taxCode metadata is not itself a review decision.
    *
    * The tricky part: tax_mappings has a unique (merchantId,
-   * internalTaxCategory, active) index, so at most one row (and therefore
-   * one taxCodeId) can exist per category — but several distinct QuickBooks
+   * activeInternalTaxCategory) index, so at most one ACTIVE row (and
+   * therefore one taxCodeId) can exist per category at a time — but several distinct QuickBooks
    * TaxCodes legitimately share a category (e.g. "16.0% S", "16.0% S
    * Import", "16.0% S - RC Imported Services" are all VAT_STANDARD). A
    * naive last-write-wins upsert across a pull's TaxCode loop would let
@@ -1679,11 +1693,13 @@ export class DashboardMappingApplicationService {
   // ---------------------------------------------------------------------
 
   /**
-   * tax_mappings has a unique (merchantId, internalTaxCategory, active)
-   * index — at most one active row per merchant+category. Deactivates any
-   * other active row for this row's (merchantId, internalTaxCategory) inside
-   * a transaction before activating this one, so the constraint is never
-   * violated even momentarily.
+   * tax_mappings has a unique (merchantId, activeInternalTaxCategory)
+   * index — at most one active row per merchant+category (see that column's
+   * doc comment on TaxMappingOrmEntity for why it's a generated column
+   * rather than plain (merchantId, internalTaxCategory, active)). Deactivates
+   * any other active row for this row's (merchantId, internalTaxCategory)
+   * inside a transaction before activating this one, so the constraint is
+   * never violated even momentarily.
    */
   private async activateTaxRow(
     row: TaxMappingOrmEntity,

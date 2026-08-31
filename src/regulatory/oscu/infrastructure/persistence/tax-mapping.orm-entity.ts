@@ -10,7 +10,7 @@ import { SourceSystem } from '../../../../shared/domain/enums/source-system.enum
 import { MappingStatus } from '../../../../shared/domain/enums/mapping-status.enum';
 
 @Entity('tax_mappings')
-@Index(['merchantId', 'internalTaxCategory', 'active'], { unique: true })
+@Index(['merchantId', 'activeInternalTaxCategory'], { unique: true })
 export class TaxMappingOrmEntity {
   @PrimaryColumn('varchar')
   id!: string;
@@ -31,6 +31,28 @@ export class TaxMappingOrmEntity {
 
   @Column('boolean', { default: true })
   active!: boolean;
+
+  /**
+   * Generated column that exists only to make "at most one ACTIVE row per
+   * (merchantId, internalTaxCategory)" a real DB constraint. MySQL has no
+   * partial/filtered unique index, so this collapses to internalTaxCategory
+   * when active, else NULL — and NULLs never collide in a unique index.
+   * The index used to be a plain (merchantId, internalTaxCategory, active)
+   * unique index, which was wrong: it also capped INACTIVE rows at one per
+   * category, even though several ERP tax rates/TaxCodes legitimately share
+   * one KRA category (see the taxCodeId block comment below) and are
+   * expected to pile up as inactive/unchosen. That crashed activateTaxRow()
+   * with ER_DUP_ENTRY the moment a merchant had more than one such row.
+   */
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    insert: false,
+    update: false,
+    generatedType: 'STORED',
+    asExpression: 'CASE WHEN active = 1 THEN internalTaxCategory ELSE NULL END',
+  })
+  activeInternalTaxCategory!: string | null;
 
   // --- Mapping Center dashboard fields (additive; unused by
   // ClassificationResolverTypeOrm, which only reads the columns above) ---

@@ -32,7 +32,7 @@ import { MappingStatus } from '../../../../shared/domain/enums/mapping-status.en
  * field at all) are the fields that stay per-item.
  */
 @Entity('unit_mappings')
-@Index(['merchantId', 'internalUnit', 'active'], { unique: true })
+@Index(['merchantId', 'activeInternalUnit'], { unique: true })
 export class UnitMappingOrmEntity {
   @PrimaryColumn('varchar')
   id!: string;
@@ -53,6 +53,23 @@ export class UnitMappingOrmEntity {
 
   @Column('boolean', { default: true })
   active!: boolean;
+
+  /**
+   * Generated column making "at most one ACTIVE row per (merchantId,
+   * internalUnit)" a real DB constraint — see the equivalent field on
+   * TaxMappingOrmEntity for why a plain (merchantId, internalUnit, active)
+   * unique index is wrong (it also caps inactive rows at one per unit,
+   * which crashes activateUnitRow() once a merchant has more than one).
+   */
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    insert: false,
+    update: false,
+    generatedType: 'STORED',
+    asExpression: 'CASE WHEN active = 1 THEN internalUnit ELSE NULL END',
+  })
+  activeInternalUnit!: string | null;
 
   // --- Mapping Center dashboard fields (additive; see tax-mapping.orm-entity.ts for rationale) ---
 

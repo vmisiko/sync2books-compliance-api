@@ -10,7 +10,7 @@ import { SourceSystem } from '../../../../shared/domain/enums/source-system.enum
 import { MappingStatus } from '../../../../shared/domain/enums/mapping-status.enum';
 
 @Entity('payment_type_mappings')
-@Index(['merchantId', 'internalPaymentMethod', 'active'], { unique: true })
+@Index(['merchantId', 'activeInternalPaymentMethod'], { unique: true })
 export class PaymentTypeMappingOrmEntity {
   @PrimaryColumn('varchar')
   id!: string;
@@ -31,6 +31,25 @@ export class PaymentTypeMappingOrmEntity {
 
   @Column('boolean', { default: true })
   active!: boolean;
+
+  /**
+   * Generated column making "at most one ACTIVE row per (merchantId,
+   * internalPaymentMethod)" a real DB constraint — see the equivalent field
+   * on TaxMappingOrmEntity for why a plain (merchantId,
+   * internalPaymentMethod, active) unique index is wrong (it also caps
+   * inactive rows at one per method, which crashes activatePaymentRow()
+   * once a merchant has more than one).
+   */
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    insert: false,
+    update: false,
+    generatedType: 'STORED',
+    asExpression:
+      'CASE WHEN active = 1 THEN internalPaymentMethod ELSE NULL END',
+  })
+  activeInternalPaymentMethod!: string | null;
 
   // --- Mapping Center dashboard fields (additive; unused by
   // PaymentTypeResolverTypeOrm, which only reads the columns above) ---

@@ -1115,6 +1115,58 @@ describe('DashboardMappingApplicationService', () => {
       expect(firstRow?.active).toBe(false);
       expect(secondRow?.active).toBe(true);
     });
+
+    it('does not ER_DUP_ENTRY when a second inactive row already exists for the category (regression: tax_mappings unique index must only apply to active rows)', async () => {
+      // Reproduces the production crash: several ERP tax rates legitimately
+      // share one KRA category (e.g. SS-14, SS-16, SPetro-8 all VAT_STANDARD
+      // in the wild), so more than one row per (merchantId, category) is
+      // routinely inactive at once. activateTaxRow() deactivates the
+      // currently-active row whenever a new one is approved — with the old
+      // plain (merchantId, internalTaxCategory, active) unique index, that
+      // UPDATE collided with any row that was already inactive for the same
+      // category, throwing ER_DUP_ENTRY.
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null),
+        fakeMainApiPull([]),
+      );
+      const first = await service.createManual(
+        TENANT_ID,
+        {
+          type: 'tax',
+          internalTaxCategory: TaxCategory.VAT_STANDARD,
+          taxTyCd: 'B',
+        },
+        'creator@example.com',
+      );
+      const second = await service.createManual(
+        TENANT_ID,
+        {
+          type: 'tax',
+          internalTaxCategory: TaxCategory.VAT_STANDARD,
+          taxTyCd: 'B2',
+        },
+        'creator@example.com',
+      );
+      // first is now inactive (deactivated when second was created/activated).
+
+      const third = await service.createManual(
+        TENANT_ID,
+        {
+          type: 'tax',
+          internalTaxCategory: TaxCategory.VAT_STANDARD,
+          taxTyCd: 'B3',
+        },
+        'creator@example.com',
+      );
+
+      const firstRow = await taxRepo.findOne({ where: { id: first.id } });
+      const secondRow = await taxRepo.findOne({ where: { id: second.id } });
+      const thirdRow = await taxRepo.findOne({ where: { id: third.id } });
+      expect(firstRow?.active).toBe(false);
+      expect(secondRow?.active).toBe(false);
+      expect(thirdRow?.active).toBe(true);
+    });
   });
 
   describe('searchItemClassifications', () => {
