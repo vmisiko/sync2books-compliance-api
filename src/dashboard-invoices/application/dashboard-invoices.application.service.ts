@@ -229,11 +229,11 @@ export class DashboardInvoicesApplicationService {
     if (!branch) {
       throw new BadRequestException('No branch configured for this tenant');
     }
-    if (!branch.sync2booksBranchId) {
-      throw new BadRequestException(
-        `Branch ${branch.id} has no linked sync2books branch id — link an ERP branch before submitting to KRA`,
-      );
-    }
+    // Falls back to the branch's own internal id when it has no linked ERP
+    // branch — mirrors DashboardItemsApplicationService.resolveBranchId and
+    // the same fallback IComplianceConnectionRepository.findByMerchantAndBranch
+    // already applies on the lookup side.
+    const branchId = branch.sync2booksBranchId ?? branch.id;
 
     const lines = await Promise.all(
       pulled.lines.map(async (line) => {
@@ -278,7 +278,7 @@ export class DashboardInvoicesApplicationService {
     const createResult = await this.sales.createDocument(
       {
         merchantId,
-        branchId: branch.sync2booksBranchId,
+        branchId,
         // Prefer the real ERP provenance main API's standardization layer
         // resolved for this invoice (see enrich()); fall back to the generic
         // API tag only when that ERP isn't standardized yet, so this doesn't
@@ -498,7 +498,10 @@ export class DashboardInvoicesApplicationService {
       { force: true },
     );
 
-    return this.getReceiptAttachmentStatus(complianceTenantId, mainApiInvoiceId);
+    return this.getReceiptAttachmentStatus(
+      complianceTenantId,
+      mainApiInvoiceId,
+    );
   }
 
   /**
@@ -540,7 +543,9 @@ export class DashboardInvoicesApplicationService {
     await this.correlationPersistence.patchAttachmentSyncStatus(
       document.id,
       typeof status.status === 'string' ? status.status : null,
-      typeof status.syncErrorMessage === 'string' ? status.syncErrorMessage : null,
+      typeof status.syncErrorMessage === 'string'
+        ? status.syncErrorMessage
+        : null,
     );
 
     return {

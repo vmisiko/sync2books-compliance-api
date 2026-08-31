@@ -22,7 +22,10 @@ import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
  * `string | null`, matching the pre-existing hardcoded 'QUICKBOOKS' literal
  * this replaces.
  */
-const PULL_SOURCE_TO_SOURCE_SYSTEM: Record<SupportedIntegrationKey, SourceSystem> = {
+const PULL_SOURCE_TO_SOURCE_SYSTEM: Record<
+  SupportedIntegrationKey,
+  SourceSystem
+> = {
   quickbooks: SourceSystem.QUICKBOOKS,
   odoo: SourceSystem.ODOO,
   'microsoft-dynamics-365-business-central':
@@ -76,7 +79,9 @@ export type ReconcileResult = {
 
 @Injectable()
 export class DashboardInventoryApplicationService {
-  private readonly logger = new Logger(DashboardInventoryApplicationService.name);
+  private readonly logger = new Logger(
+    DashboardInventoryApplicationService.name,
+  );
 
   constructor(
     private readonly inventory: InventoryService,
@@ -267,11 +272,10 @@ export class DashboardInventoryApplicationService {
         `No branch configured for tenant ${complianceTenantId}`,
       );
     }
-    if (!branch.sync2booksBranchId) {
-      throw new BadRequestException(
-        `Branch ${branch.id} has no linked sync2books branch id — link an ERP branch before reconciling stock`,
-      );
-    }
-    return branch.sync2booksBranchId;
+    // Falls back to the branch's own internal id when it has no linked ERP
+    // branch — mirrors DashboardItemsApplicationService.resolveBranchId and
+    // the same fallback IComplianceConnectionRepository.findByMerchantAndBranch
+    // already applies on the lookup side.
+    return branch.sync2booksBranchId ?? branch.id;
   }
 }

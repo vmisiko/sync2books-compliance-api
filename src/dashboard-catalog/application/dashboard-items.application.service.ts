@@ -189,8 +189,9 @@ export class DashboardItemsApplicationService {
           // classification_mappings-backed lookup that used to run here --
           // see ClassificationMethod's doc comment for why it was removed.
           const taxCategory =
-            this.suggestions.suggestTaxCodeMapping(mainApiItem.defaultTaxCodeRef?.name ?? '')
-              ?.internalTaxCategory ?? TaxCategory.OTHER;
+            this.suggestions.suggestTaxCodeMapping(
+              mainApiItem.defaultTaxCodeRef?.name ?? '',
+            )?.internalTaxCategory ?? TaxCategory.OTHER;
           const input = {
             ...mapMainApiItemToRegisterItemInput({
               merchantId,
@@ -287,7 +288,8 @@ export class DashboardItemsApplicationService {
       throw new BadRequestException('taxTyCd is required');
     }
 
-    const taxCategory = TAX_CATEGORY_BY_TAX_TY_CD[dto.taxTyCd] ?? TaxCategory.OTHER;
+    const taxCategory =
+      TAX_CATEGORY_BY_TAX_TY_CD[dto.taxTyCd] ?? TaxCategory.OTHER;
 
     const result = await this.catalog.registerItem({
       merchantId,
@@ -398,7 +400,7 @@ export class DashboardItemsApplicationService {
     if (!existing.externalId) {
       const taxCategory =
         overrides.taxTyCd !== undefined
-          ? TAX_CATEGORY_BY_TAX_TY_CD[overrides.taxTyCd] ?? TaxCategory.OTHER
+          ? (TAX_CATEGORY_BY_TAX_TY_CD[overrides.taxTyCd] ?? TaxCategory.OTHER)
           : undefined;
 
       return this.catalog.updateManualItem({
@@ -424,10 +426,13 @@ export class DashboardItemsApplicationService {
       name: existing.name,
       sku: existing.sku,
       taxCategory: existing.taxCategory,
-      classificationCode: overrides.classificationCode ?? existing.classificationCode,
+      classificationCode:
+        overrides.classificationCode ?? existing.classificationCode,
       unitCode: overrides.unitCode ?? existing.unitCode,
-      packagingUnitCode: overrides.packagingUnitCode ?? existing.packagingUnitCode,
-      productTypeCode: overrides.productTypeCode ?? existing.productTypeCode ?? undefined,
+      packagingUnitCode:
+        overrides.packagingUnitCode ?? existing.packagingUnitCode,
+      productTypeCode:
+        overrides.productTypeCode ?? existing.productTypeCode ?? undefined,
       unitPrice: existing.unitPrice,
       originCountry: existing.originCountry,
     });
@@ -466,7 +471,9 @@ export class DashboardItemsApplicationService {
     const skipped: string[] = [];
     for (const itemId of itemIds) {
       try {
-        updated.push(await this.updateItem(complianceTenantId, itemId, overrides));
+        updated.push(
+          await this.updateItem(complianceTenantId, itemId, overrides),
+        );
       } catch {
         skipped.push(itemId);
       }
@@ -484,8 +491,12 @@ export class DashboardItemsApplicationService {
    * internally — fine for the common single-branch case this UI targets.
    * `syncItemsToEtims` looks connections up by `sync2booksBranchId`
    * (`IComplianceConnectionRepository.findByMerchantAndBranch`), which is
-   * null for branches provisioned only from the dashboard, so that case is
-   * surfaced as a clear error rather than a confusing lookup failure.
+   * null for branches provisioned only from the dashboard (no eTIMS
+   * provisioning has run for this tenant) — but that lookup already falls
+   * back to matching on the branch's own internal id when
+   * sync2booksBranchId doesn't match anything, so falling back to it here
+   * too keeps items syncable without requiring an ERP link that may not
+   * exist yet.
    */
   private async resolveBranchId(complianceTenantId: string): Promise<string> {
     const branches = await this.organization.listBranches(complianceTenantId);
@@ -495,11 +506,6 @@ export class DashboardItemsApplicationService {
         `No branch configured for tenant ${complianceTenantId}`,
       );
     }
-    if (!branch.sync2booksBranchId) {
-      throw new BadRequestException(
-        `Branch ${branch.id} has no linked sync2books branch id — link an ERP branch before syncing items to KRA`,
-      );
-    }
-    return branch.sync2booksBranchId;
+    return branch.sync2booksBranchId ?? branch.id;
   }
 }

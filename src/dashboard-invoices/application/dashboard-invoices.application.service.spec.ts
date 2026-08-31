@@ -44,9 +44,7 @@ function makeInvoice(): MainApiInvoice {
   };
 }
 
-function makeConnection(
-  autoUploadReceiptToSource: boolean,
-): MainApiConnection {
+function makeConnection(autoUploadReceiptToSource: boolean): MainApiConnection {
   return {
     id: 'conn-1',
     complianceTenantId: 'tenant-1',
@@ -87,7 +85,9 @@ type Deps = {
   oscuCallback: Pick<PlatformOscuCallbackService, 'postOutcomeWithCorrelation'>;
   correlationPersistence: Pick<
     Sync2BooksCorrelationPersistenceService,
-    'patchComplianceDocument' | 'patchMainApiSyncRef' | 'patchAttachmentSyncStatus'
+    | 'patchComplianceDocument'
+    | 'patchMainApiSyncRef'
+    | 'patchAttachmentSyncStatus'
   >;
   mainApiOscuClient: Pick<Sync2BooksMainApiOscuClient, 'postInvoiceReceipt'>;
   paymentTypeResolver: IPaymentTypeResolver;
@@ -140,7 +140,11 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
     },
     organization: {
       getTenantById: async (id: string) =>
-        ({ id, sync2booksCompanyId: 'merchant-1', displayName: 'Tenant' }) as Awaited<
+        ({
+          id,
+          sync2booksCompanyId: 'merchant-1',
+          displayName: 'Tenant',
+        }) as Awaited<
           ReturnType<ComplianceOrganizationApplicationService['getTenantById']>
         >,
       listBranches: async () =>
@@ -255,6 +259,33 @@ describe('DashboardInvoicesApplicationService — receipt push-back toggle', () 
       service.uploadReceiptToSource('tenant-1', 'invoice-1'),
     ).rejects.toThrow('No sale has been created from this invoice yet');
     expect(deps.postInvoiceReceipt).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the branch's own internal id instead of throwing when it has no linked ERP branch", async () => {
+    const deps = defaultDeps(false);
+    deps.organization.listBranches = async () =>
+      [{ id: 'branch-1', sync2booksBranchId: null }] as Awaited<
+        ReturnType<ComplianceOrganizationApplicationService['listBranches']>
+      >;
+    const createDocument = jest
+      .fn<
+        ReturnType<SalesService['createDocument']>,
+        Parameters<SalesService['createDocument']>
+      >()
+      .mockResolvedValue({
+        created: true,
+        document: { id: 'doc-1' },
+      } as Awaited<ReturnType<SalesService['createDocument']>>);
+    deps.sales.createDocument = createDocument;
+    const service = makeService(deps);
+
+    await expect(
+      service.createSaleFromInvoice('tenant-1', 'invoice-1'),
+    ).resolves.toBeDefined();
+
+    expect(createDocument.mock.calls[0][0]).toMatchObject({
+      branchId: 'branch-1',
+    });
   });
 });
 
