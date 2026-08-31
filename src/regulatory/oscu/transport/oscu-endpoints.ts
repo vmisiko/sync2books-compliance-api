@@ -33,7 +33,12 @@ export const OSCU_ENDPOINTS = {
     getPurchaseTransactionInfo: 'getPurchaseTransactionInfo',
     sendPurchaseTransactionInfo: 'sendPurchaseTransactionInfo',
     selectInvoiceDetail: 'selectInvoiceDetail',
-    selectSalesTransactions: 'selectSalesTransactions',
+    // Not `/selectSalesTransactions` -- that string was never confirmed against
+    // real KRA/Apigee and isn't documented anywhere in the OSCU v2.0 spec.
+    // `/selectTrnsSalesList` is the one KRA Go-Live actually tested and passed
+    // (test #21 "LOOK UP TRANSACTION SALES LIST", resultCd 000 -- see
+    // .docs/go-live-evidence/README.md).
+    selectSalesTransactions: 'selectTrnsSalesList',
     selectCustomerList: 'selectCustomerList',
   },
   integrator: {
@@ -70,7 +75,8 @@ export const OSCU_ENDPOINTS = {
     getPurchaseTransactionInfo: 'getPurchaseTransactionInfo',
     sendPurchaseTransactionInfo: 'sendPurchaseTransactionInfo',
     selectInvoiceDetail: 'selectInvoiceDetail',
-    selectSalesTransactions: 'selectSalesTransactions',
+    // Same correction as the legacy entry above -- see its comment.
+    selectSalesTransactions: 'selectTrnsSalesList',
     // Confirmed live 2026-08-11 against the Apigee integrator gateway: same name as
     // legacy, resultCd 000 with a real custList.
     selectCustomerList: 'selectCustomerList',
