@@ -58,6 +58,47 @@ describe('OscuSalesRequestBuilder', () => {
     expect(req.prchrAcptcYn).toBe('N');
   });
 
+  it('sends pkg: 1 for pkgUnitCd "NT" regardless of quantity', () => {
+    // KRA's pkg field is a package COUNT, independent of qty -- confirmed live
+    // 2026-09-01: a qty: 2 line with pkgUnitCd "NT" sending pkg: 2 was rejected
+    // with "Invalid pkg for ItemList 1. Expected: 1, Found: 2".
+    const req = OscuSalesRequestBuilder.build({
+      tin: 'A123456789Z',
+      bhfId: '00',
+      cmcKey: 'cmc',
+      now: new Date('2026-02-20T10:20:30Z'),
+      payload: {
+        documentNumber: 'INV-124',
+        documentType: 'SALE_INVOICE',
+        invoiceSequence: 1,
+        branchId: '00',
+        deviceId: 'dev',
+        currency: 'KES',
+        exchangeRate: 1,
+        subtotalAmount: 200,
+        taxAmount: 32,
+        totalAmount: 232,
+        lines: [
+          {
+            itemCode: 'ITEM-1',
+            description: 'Line 1',
+            quantity: 2,
+            unitPrice: 100,
+            taxAmount: 32,
+            classificationCode: '14111400',
+            unitCode: 'U',
+            packagingUnitCode: 'NT',
+            taxTyCd: 'B',
+            productTypeCode: '2',
+          },
+        ],
+      },
+    });
+
+    expect(req.itemList[0].qty).toBe(2);
+    expect(req.itemList[0].pkg).toBe(1);
+  });
+
   it('uses R receipt type for credit note', () => {
     const req = OscuSalesRequestBuilder.build({
       tin: 'A123456789Z',

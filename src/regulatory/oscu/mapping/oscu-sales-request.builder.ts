@@ -38,9 +38,14 @@ export class OscuSalesRequestBuilder {
         itemNm: l.description,
         bcd: null,
         pkgUnitCd: l.packagingUnitCode,
-        // KRA rejects pkg: 0 with "Invalid pkg for ItemList N. Expected: <qty>, Found: 0"
-        // (confirmed live 2026-08-11) -- it wants a real package count, not a placeholder.
-        pkg: l.quantity,
+        // KRA rejects pkg: 0 with "Invalid pkg for ItemList N. Expected: 1, Found: 0"
+        // (confirmed live 2026-08-11). It's tempting to read that "Expected: 1" as
+        // "expected == qty" (qty was 1 in that test), but it isn't: pkg is a package
+        // COUNT, independent of qty. With pkgUnitCd "NT" (no packaging modeled) KRA
+        // always expects exactly 1 package regardless of qty -- confirmed live
+        // 2026-09-01 with qty: 2, rejected as "Invalid pkg for ItemList 1. Expected:
+        // 1, Found: 2" when pkg was sent as qty.
+        pkg: l.packagingUnitCode === 'NT' ? 1 : l.quantity,
         qtyUnitCd: l.unitCode,
         qty: l.quantity,
         prc: l.unitPrice,

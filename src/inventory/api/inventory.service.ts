@@ -268,7 +268,11 @@ export class InventoryService {
               bcd: item.sku ?? null,
               pkgUnitCd: item.packagingUnitCode,
               // KRA rejects pkg: 0 ("Invalid pkg for ItemList N") -- see
-              // oscu-sales-request.builder.ts for the same rule on sales.
+              // oscu-sales-request.builder.ts for the same rule on sales. NOTE:
+              // unlike sendSalesTransaction, insertStockIO has a confirmed-live
+              // success with pkg == qty (pkg: 10, qty: 10, see oscu-payload-gotchas.md),
+              // so do NOT force pkg to 1 here without live-testing insertStockIO
+              // specifically -- KRA validates these endpoints inconsistently.
               pkg: qty,
               qtyUnitCd: item.unitCode,
               qty,

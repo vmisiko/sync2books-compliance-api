@@ -201,7 +201,15 @@ Confirmed working end-to-end 2026-08-11 (real `ACCEPTED` response with a live `r
 `etimsUrl`) after fixing four separate bugs, all present in the "obvious" version of this request:
 
 1. **`pkg` must be a real package count, not `0`.** `400 "Invalid pkg for ItemList 1. Expected: 1, Found: 0"`.
-   Use `pkg: quantity` (matches the pattern used elsewhere when packaging isn't separately modeled).
+   It's tempting to fix this with `pkg: quantity` (matches the pattern used for `insertStockIO`, below) --
+   don't. That single test happened to use `qty: 1`, so `pkg: 1` satisfied both "not 0" and "equals qty" at
+   once and looked confirmed. **Confirmed live 2026-09-01 with `qty: 2`: sending `pkg: 2` (== qty) was
+   rejected with `400 "Invalid pkg for ItemList 1. Expected: 1, Found: 2"`.** For `sendSalesTransaction`,
+   `pkg` is a package *count*, independent of `qty` -- with `pkgUnitCd: "NT"` (no packaging modeled) KRA
+   always expects exactly `pkg: 1`, regardless of `qty`. See `oscu-sales-request.builder.ts`.
+   This does **not** necessarily hold for `insertStockIO`, which has its own confirmed-live success with
+   `pkg: 10, qty: 10` (below) -- KRA validates `pkg` inconsistently across endpoints, so don't generalize
+   this rule to other calls without live-testing them individually.
 2. **`splyAmt` (qty × unitPrice) is tax-INCLUSIVE**, same rule as `insertStockIO` — `taxblAmt`/`taxAmt` must
    be *derived* from it (`taxblAmt = splyAmt / (1 + rate/100)`), not computed by adding a separately-supplied
    tax amount on top. `400 "Invalid taxblAmt on item: 1. Expected: 86.21, But Found: 100.00"` if you get this
