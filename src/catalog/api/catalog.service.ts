@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
@@ -47,6 +47,7 @@ import {
 import type { IComplianceConnectionRepository } from '../../shared/ports/repository.port';
 import type { IEtimsAdapter } from '../../regulatory/oscu/ports/etims-adapter.port';
 import type { IStockRepository } from '../../inventory/domain/ports/stock-repository.port';
+import { InventoryService } from '../../inventory/api/inventory.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { OscuItemClassificationOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-item-classification.orm-entity';
 import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
@@ -68,6 +69,8 @@ export class CatalogService {
     private readonly etimsAdapter: IEtimsAdapter,
     @Inject(STOCK_REPO)
     private readonly stockRepo: IStockRepository,
+    @Inject(forwardRef(() => InventoryService))
+    private readonly inventory: InventoryService,
     private readonly organization: ComplianceOrganizationApplicationService,
     @InjectRepository(OscuItemClassificationOrmEntity)
     private readonly itemClassificationRepo: Repository<OscuItemClassificationOrmEntity>,
@@ -170,12 +173,36 @@ export class CatalogService {
     onlyPending?: boolean;
     force?: boolean;
   }) {
-    return syncItemsToEtims(params, {
+    const result = await syncItemsToEtims(params, {
       itemRepo: this.itemRepo,
       connectionRepo: this.connectionRepo,
       etimsAdapter: this.etimsAdapter,
       syncStateRepo: this.oscuSyncStateRepo,
     });
+
+    // Catches KRA up on any stock this item already had recorded locally
+    // (e.g. from "Pull from QuickBooks", which reconciles qtyOnHand
+    // immediately on pull -- before this registration step ever runs) --
+    // see InventoryService.pushStockMasterCatchUp's doc comment for why
+    // that stock never reached KRA on its own. Best-effort: a failure here
+    // must not affect the registration result just reported to the caller.
+    for (const item of result.results) {
+      if (!item.success) continue;
+      try {
+        await this.inventory.pushStockMasterCatchUp(
+          item.itemId,
+          params.branchId,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Stock master catch-up failed for item ${item.itemId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    return result;
   }
 
   async resyncItemCdSequenceFromKra(

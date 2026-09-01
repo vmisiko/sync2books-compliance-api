@@ -372,6 +372,32 @@ export class InventoryService {
     }
   }
 
+  /**
+   * Catches up KRA on an item's already-recorded local stock, right after
+   * that item successfully registers (saveItem) -- confirmed live
+   * 2026-09-01: any stock reconciled while an item was still PENDING (e.g.
+   * during "Pull from QuickBooks", which reconciles qtyOnHand immediately
+   * on pull, before the separate manual Item Sync step registers the item
+   * with KRA) has its saveStockMaster/insertStockIO push silently no-op'd
+   * by syncStockMasterToEtims/syncStockMovementToEtims's own etimsItemCode
+   * gate -- and nothing re-sends it once registration completes, since
+   * item-sync (sync-items.usecase.ts) has no knowledge of inventory at all.
+   * The result: local stock shows a real quantity, but KRA never learns
+   * about it unless someone happens to trigger another RECONCILE movement
+   * afterward. Call this from the item-sync success path to close that gap.
+   * A no-op if this item/branch has no stock row yet, or if
+   * ETIMS_STOCK_MASTER_SYNC isn't enabled (same env-flag gate
+   * syncStockMasterToEtims itself already applies).
+   */
+  async pushStockMasterCatchUp(
+    itemId: string,
+    branchId: string,
+  ): Promise<void> {
+    const stock = await this.stockRepo.getStock(itemId, branchId);
+    if (!stock) return;
+    await this.syncStockMasterToEtims(stock);
+  }
+
   async recordMovement(params: {
     itemId: string;
     branchId: string;
@@ -415,7 +441,10 @@ export class InventoryService {
     referenceId?: string;
     unitPrice?: number;
   }) {
-    const current = await this.stockRepo.getStock(params.itemId, params.branchId);
+    const current = await this.stockRepo.getStock(
+      params.itemId,
+      params.branchId,
+    );
     const delta = params.externalQtyOnHand - (current?.quantityOnHand ?? 0);
     return this.recordMovement({
       itemId: params.itemId,

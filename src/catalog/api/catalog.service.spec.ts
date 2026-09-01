@@ -79,6 +79,7 @@ function makeService(params: {
     connectionRepo as unknown as IComplianceConnectionRepository,
     etimsAdapter as unknown as IEtimsAdapter,
     undefined as any, // stockRepo
+    undefined as any, // inventory — unused by syncReferenceDataFromOscu
     undefined as any, // organization
     fakeRepo() as any, // itemClassificationRepo
     fakeRepo() as any, // oscuSyncStateRepo
@@ -207,5 +208,171 @@ describe('CatalogService.syncReferenceDataFromOscu', () => {
     expect(syncItemClassificationsSpy).toHaveBeenCalledWith(
       expect.objectContaining({ full: true }),
     );
+  });
+});
+
+describe('CatalogService.syncItems -- stock master catch-up', () => {
+  /**
+   * Regression (2026-09-01): stock reconciled while an item was still
+   * PENDING (e.g. from "Pull from QuickBooks", which reconciles qtyOnHand
+   * immediately on pull) never reached KRA -- syncStockMasterToEtims gates
+   * on etimsItemCode being set, and item-sync (sync-items.usecase.ts) had
+   * no knowledge of inventory at all, so nothing re-sent it once
+   * registration completed. CatalogService.syncItems must now call
+   * InventoryService.pushStockMasterCatchUp for every item that just
+   * registered successfully, so KRA gets caught up in the same request
+   * that completed registration.
+   */
+  it('pushes a stock master catch-up for every item that just registered successfully', async () => {
+    const item = {
+      id: 'item-1',
+      merchantId: 'merchant-1',
+      externalId: 'ext-1',
+      name: 'Widget',
+      sku: null,
+      taxCategory: 'OTHER',
+      classificationCode: '1010150000',
+      classificationMethod: 'EXTERNAL_ID',
+      needsClassificationReview: false,
+      unitCode: 'NO',
+      packagingUnitCode: 'NT',
+      needsClassificationMapping: false,
+      taxTyCd: 'B',
+      productTypeCode: '2',
+      needsProductType: false,
+      unitPrice: null,
+      originCountry: null,
+      sourceSystem: null,
+      isStockItem: true,
+      registrationStatus: 'PENDING',
+      etimsItemCode: null,
+      lastSyncResultCd: null,
+      lastSyncResultMsg: null,
+      lastSyncAttemptAt: null,
+      version: 1,
+      lastSyncedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const itemRepo = {
+      findByMerchant: jest.fn().mockResolvedValue([item]),
+      save: jest.fn().mockImplementation((i) => Promise.resolve(i)),
+    };
+    const connectionRepo = {
+      findByMerchantAndBranch: jest.fn().mockResolvedValue({
+        kraPin: 'P000000000A',
+        kraBhfId: '00',
+        cmcKey: 'cmc-key',
+        deviceId: 'device-1',
+        environment: 'SANDBOX',
+      }),
+    };
+    const etimsAdapter = {
+      saveItem: jest.fn().mockResolvedValue({
+        success: true,
+        rawResponse: { resultCd: '000', resultMsg: 'OK' },
+      }),
+    };
+    const syncStateRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockResolvedValue(undefined),
+    };
+    const pushStockMasterCatchUp = jest.fn().mockResolvedValue(undefined);
+    const inventory = { pushStockMasterCatchUp };
+
+    const service = new CatalogService(
+      itemRepo as any,
+      undefined as any, // classificationResolver
+      connectionRepo as any,
+      etimsAdapter as any,
+      undefined as any, // stockRepo
+      inventory as any,
+      undefined as any, // organization
+      undefined as any, // itemClassificationRepo
+      syncStateRepo as any, // oscuSyncStateRepo
+      undefined as any, // codeClassRepo
+      undefined as any, // codeRepo
+    );
+
+    await service.syncItems({ merchantId: 'merchant-1', branchId: 'branch-1' });
+
+    expect(pushStockMasterCatchUp).toHaveBeenCalledWith('item-1', 'branch-1');
+  });
+
+  it('does not push a catch-up for an item that failed to register', async () => {
+    const item = {
+      id: 'item-1',
+      merchantId: 'merchant-1',
+      externalId: 'ext-1',
+      name: 'Widget',
+      sku: null,
+      taxCategory: 'OTHER',
+      classificationCode: '1010150000',
+      classificationMethod: 'EXTERNAL_ID',
+      needsClassificationReview: false,
+      unitCode: 'NO',
+      packagingUnitCode: 'NT',
+      needsClassificationMapping: false,
+      taxTyCd: 'B',
+      productTypeCode: '2',
+      needsProductType: false,
+      unitPrice: null,
+      originCountry: null,
+      sourceSystem: null,
+      isStockItem: true,
+      registrationStatus: 'PENDING',
+      etimsItemCode: null,
+      lastSyncResultCd: null,
+      lastSyncResultMsg: null,
+      lastSyncAttemptAt: null,
+      version: 1,
+      lastSyncedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const itemRepo = {
+      findByMerchant: jest.fn().mockResolvedValue([item]),
+      save: jest.fn().mockImplementation((i) => Promise.resolve(i)),
+    };
+    const connectionRepo = {
+      findByMerchantAndBranch: jest.fn().mockResolvedValue({
+        kraPin: 'P000000000A',
+        kraBhfId: '00',
+        cmcKey: 'cmc-key',
+        deviceId: 'device-1',
+        environment: 'SANDBOX',
+      }),
+    };
+    const etimsAdapter = {
+      saveItem: jest.fn().mockResolvedValue({
+        success: false,
+        error: 'OSCU 800 rejected',
+        rawResponse: { resultCd: '800', resultMsg: 'rejected' },
+      }),
+    };
+    const syncStateRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockResolvedValue(undefined),
+    };
+    const pushStockMasterCatchUp = jest.fn().mockResolvedValue(undefined);
+    const inventory = { pushStockMasterCatchUp };
+
+    const service = new CatalogService(
+      itemRepo as any,
+      undefined as any,
+      connectionRepo as any,
+      etimsAdapter as any,
+      undefined as any,
+      inventory as any,
+      undefined as any,
+      undefined as any,
+      syncStateRepo as any,
+      undefined as any,
+      undefined as any,
+    );
+
+    await service.syncItems({ merchantId: 'merchant-1', branchId: 'branch-1' });
+
+    expect(pushStockMasterCatchUp).not.toHaveBeenCalled();
   });
 });
