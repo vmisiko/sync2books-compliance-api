@@ -4,8 +4,8 @@ import type {
   ValidationResult,
 } from '../value-objects/validation-result.vo';
 
-/** KRA PIN format: P (company) or A (individual) plus 10 digits */
-const KRA_PIN_PATTERN = /^[PA]\d{10}$/;
+/** KRA PIN format: P (company) or A (individual), 9 digits, then a checksum letter */
+const KRA_PIN_PATTERN = /^[PA]\d{9}[A-Z]$/;
 
 export type PinValidationContext = {
   customerPin: string | null;
@@ -34,7 +34,8 @@ export function runPinRules(context: PinValidationContext): ValidationResult {
   if (!KRA_PIN_PATTERN.test(trimmed)) {
     errors.push({
       code: 'PIN_MALFORMED',
-      message: 'customerPin must match KRA format: P or A followed by 10 digits',
+      message:
+        'customerPin must match KRA format: P or A, 9 digits, then a checksum letter',
       field: 'customerPin',
     });
   }
