@@ -1,7 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { dashboardJwtSecret } from '../dashboard-jwt.secret';
+import { DASHBOARD_USER_REPO } from '../../../shared/tokens';
+import type { IDashboardUserRepository } from '../../application/ports/dashboard-user.repository.port';
 
 export interface DashboardJwtPayload {
   sub: string;
@@ -27,7 +29,10 @@ export class DashboardJwtStrategy extends PassportStrategy(
   Strategy,
   'dashboard-jwt',
 ) {
-  constructor() {
+  constructor(
+    @Inject(DASHBOARD_USER_REPO)
+    private readonly users: IDashboardUserRepository,
+  ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
@@ -35,7 +40,17 @@ export class DashboardJwtStrategy extends PassportStrategy(
     });
   }
 
-  validate(payload: DashboardJwtPayload): DashboardRequestUser {
+  /**
+   * Re-checks the user's current status on every request rather than
+   * trusting the token's claims -- otherwise deactivating someone wouldn't
+   * take effect until their up-to-1h access token happened to expire.
+   */
+  async validate(payload: DashboardJwtPayload): Promise<DashboardRequestUser> {
+    const user = await this.users.findById(payload.sub);
+    if (!user || user.status === 'deactivated') {
+      throw new UnauthorizedException('This account has been deactivated');
+    }
+
     return {
       userId: payload.sub,
       email: payload.email,

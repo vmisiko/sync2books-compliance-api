@@ -32,6 +32,13 @@ const OAUTH_TICKET_TYPE = 'oauth_ticket';
  */
 const INVITE_TICKET_TTL = '7d';
 const INVITE_TICKET_TYPE = 'member_invite';
+/**
+ * Shorter than the invite ticket -- this one overwrites an *existing*
+ * account's credential rather than creating a brand-new one, so a stale
+ * link left lying around is a bigger deal than a stale invite.
+ */
+const PASSWORD_RESET_TICKET_TTL = '24h';
+const PASSWORD_RESET_TICKET_TYPE = 'password_reset';
 
 export type DashboardAuthTokens = {
   accessToken: string;
@@ -110,6 +117,25 @@ type InviteTicketPayload = {
   email: string;
   displayName: string | null;
   role: DashboardRole;
+  organizationId: string;
+};
+
+export type CreatePasswordResetResult = {
+  resetToken: string;
+  resetUrl: string;
+  email: string;
+};
+
+export type PasswordResetPreview = {
+  email: string;
+  displayName: string | null;
+  organizationName: string;
+};
+
+type PasswordResetTicketPayload = {
+  type: typeof PASSWORD_RESET_TICKET_TYPE;
+  userId: string;
+  email: string;
   organizationId: string;
 };
 
@@ -287,12 +313,12 @@ export class DashboardAuthApplicationService {
     try {
       payload = this.jwt.verify<OAuthTicketPayload>(ticket);
     } catch {
-      throw new UnauthorizedException(
+      throw new NotFoundException(
         'This sign-up link has expired -- please try again',
       );
     }
     if (payload.type !== OAUTH_TICKET_TYPE) {
-      throw new UnauthorizedException('Invalid sign-up ticket');
+      throw new NotFoundException('Invalid sign-up ticket');
     }
 
     // Re-check for a race: two tabs completing the same ticket, or the
@@ -471,15 +497,159 @@ export class DashboardAuthApplicationService {
     return payload;
   }
 
-  /** Role/status edits, scoped to the caller's own organization -- a member from a different org 404s, never a silent no-op or cross-org leak. */
+  /**
+   * Generates a shareable link that lets an existing member set a brand-new
+   * password -- same "no email delivery, relay it yourself" model as
+   * createInvite, just for a member who already has an account instead of
+   * a brand-new one. Doesn't touch the member's row until the link is used.
+   */
+  async createPasswordReset(
+    organizationId: string,
+    memberId: string,
+  ): Promise<CreatePasswordResetResult> {
+    const member = await this.users.findById(memberId);
+    if (!member || member.organizationId !== organizationId) {
+      throw new NotFoundException(`Member ${memberId} not found`);
+    }
+    if (member.status === 'deactivated') {
+      throw new ConflictException(
+        'This member is deactivated -- reactivate them before resetting their password',
+      );
+    }
+
+    const payload: PasswordResetTicketPayload = {
+      type: PASSWORD_RESET_TICKET_TYPE,
+      userId: member.id,
+      email: member.email,
+      organizationId: member.organizationId,
+    };
+    const resetToken = this.jwt.sign(payload, {
+      expiresIn: PASSWORD_RESET_TICKET_TTL,
+    });
+
+    return {
+      resetToken,
+      resetUrl: `${dashboardAppUrl()}/reset-password#token=${resetToken}`,
+      email: member.email,
+    };
+  }
+
+  /**
+   * Lets the reset-password page show "Set a new password for {email}"
+   * before asking for one, without consuming the link. Public (no auth) --
+   * same reasoning as getInvitePreview.
+   */
+  async getPasswordResetPreview(token: string): Promise<PasswordResetPreview> {
+    const payload = this.verifyPasswordResetTicket(token);
+    const member = await this.resolveResetTarget(payload);
+
+    const organization = await this.organizations.getById(
+      payload.organizationId,
+    );
+    return {
+      email: member.email,
+      displayName: member.displayName,
+      organizationName: organization.displayName,
+    };
+  }
+
+  /** Second half of the reset flow -- sets a new password and logs the member straight in, same UX as acceptInvite(). */
+  async resetPassword(
+    token: string,
+    password: string,
+  ): Promise<DashboardAuthResult> {
+    const payload = this.verifyPasswordResetTicket(token);
+    const member = await this.resolveResetTarget(payload);
+
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const updated = await this.users.save({
+      ...member,
+      passwordHash,
+      updatedAt: new Date(),
+    });
+
+    return this.buildAuthResult(updated);
+  }
+
+  /**
+   * The account this ticket was issued for may have been deactivated, or
+   * had its email changed via a different reset, since the link was
+   * generated -- re-check both before trusting the ticket, same "don't let
+   * a stale link do something the current state wouldn't allow" reasoning
+   * as getInvitePreview's re-check.
+   */
+  private async resolveResetTarget(
+    payload: PasswordResetTicketPayload,
+  ): Promise<DashboardUser> {
+    const member = await this.users.findById(payload.userId);
+    if (!member || member.email !== payload.email) {
+      throw new NotFoundException(
+        'This reset link is no longer valid -- ask for a new one',
+      );
+    }
+    if (member.status === 'deactivated') {
+      throw new ConflictException(
+        'This member has been deactivated -- reactivate them before resetting their password',
+      );
+    }
+    return member;
+  }
+
+  /** Same 404-not-401 reasoning as verifyInviteTicket -- this endpoint is public and the dashboard's axios client would otherwise hijack the page on a 401. */
+  private verifyPasswordResetTicket(token: string): PasswordResetTicketPayload {
+    let payload: PasswordResetTicketPayload;
+    try {
+      payload = this.jwt.verify<PasswordResetTicketPayload>(token);
+    } catch {
+      throw new NotFoundException(
+        'This reset link has expired or is invalid -- ask for a new one',
+      );
+    }
+    if (payload.type !== PASSWORD_RESET_TICKET_TYPE) {
+      throw new NotFoundException('Invalid reset link');
+    }
+    return payload;
+  }
+
+  /**
+   * Role/status edits, scoped to the caller's own organization -- a member
+   * from a different org 404s, never a silent no-op or cross-org leak.
+   * Deactivation carries two guard rails so an admin can't lock the
+   * organization (or themselves) out: no self-deactivation, and no
+   * deactivating the last active admin.
+   */
   async updateMember(
     organizationId: string,
+    callerId: string,
     memberId: string,
     input: { role?: DashboardRole; status?: DashboardUserStatus },
   ): Promise<DashboardAuthResult['user']> {
     const member = await this.users.findById(memberId);
     if (!member || member.organizationId !== organizationId) {
       throw new NotFoundException(`Member ${memberId} not found`);
+    }
+
+    if (input.status === 'deactivated' && member.status !== 'deactivated') {
+      if (memberId === callerId) {
+        throw new ConflictException('You cannot deactivate your own account');
+      }
+
+      if (member.role === DashboardRole.ADMIN) {
+        const orgMembers = await this.users.listByOrganizationId(
+          organizationId,
+        );
+        const otherActiveAdmins = orgMembers.filter(
+          (u) =>
+            u.id !== memberId &&
+            u.role === DashboardRole.ADMIN &&
+            u.status === 'active',
+        );
+        if (otherActiveAdmins.length === 0) {
+          throw new ConflictException(
+            'Cannot deactivate the last active admin in this organisation',
+          );
+        }
+      }
     }
 
     const updated = await this.users.save({

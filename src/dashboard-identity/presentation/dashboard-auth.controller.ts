@@ -34,6 +34,7 @@ import { DashboardSignUpDto } from './dto/dashboard-signup.dto';
 import { CompleteOAuthSignUpDto } from './dto/complete-oauth-signup.dto';
 import { CreateMemberDto } from './dto/create-member.dto';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
+import { AcceptPasswordResetDto } from './dto/accept-password-reset.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
 import { DashboardAuthResponseDto } from './dto/dashboard-auth-response.dto';
 
@@ -260,7 +261,7 @@ export class DashboardAuthController {
   @ApiBearerAuth()
   @ApiOperation({
     summary:
-      "Change a teammate's role or active/deactivated status. Scoped to the caller's organisation.",
+      "Change a teammate's role or active/deactivated status. Scoped to the caller's organisation. Deactivating rejects self-deactivation and deactivating the org's last active admin.",
   })
   async updateMember(
     @Req() req: Request,
@@ -270,9 +271,60 @@ export class DashboardAuthController {
     const requestUser = req.user as DashboardRequestUser;
     const user = await this.auth.updateMember(
       requestUser.organizationId,
+      requestUser.userId,
       id,
       body,
     );
     return { success: true, message: 'Member updated', data: { user } };
+  }
+
+  @Post('members/:id/reset-password')
+  @UseGuards(DashboardJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      "Generate a shareable link that lets an existing teammate set a brand-new password. No email is sent (v1 has no email delivery) — copy the returned link and share it yourself. Nothing changes for them until the link is used.",
+  })
+  async resetMemberPassword(@Req() req: Request, @Param('id') id: string) {
+    const requestUser = req.user as DashboardRequestUser;
+    const reset = await this.auth.createPasswordReset(
+      requestUser.organizationId,
+      id,
+    );
+    return {
+      success: true,
+      message: 'Password reset link created',
+      data: reset,
+    };
+  }
+
+  @Get('reset-password/:token')
+  @ApiOperation({
+    summary:
+      "Preview a password reset link (whose it is, which org) without consuming it. Public — the member hasn't authenticated with the new password yet.",
+  })
+  async getPasswordReset(@Param('token') token: string) {
+    const preview = await this.auth.getPasswordResetPreview(token);
+    return { success: true, message: 'OK', data: preview };
+  }
+
+  @Post('reset-password/accept')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Accept a password reset link by setting a new password. Logs the member straight in, same as invite acceptance. Public — the member has no valid session for this yet.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset',
+    type: DashboardAuthResponseDto,
+  })
+  async acceptPasswordReset(@Body() body: AcceptPasswordResetDto) {
+    const result = await this.auth.resetPassword(body.token, body.password);
+    return {
+      success: true,
+      message: 'Password reset successfully',
+      data: result,
+    };
   }
 }
