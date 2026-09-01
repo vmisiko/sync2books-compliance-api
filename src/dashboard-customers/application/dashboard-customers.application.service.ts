@@ -276,8 +276,16 @@ export class DashboardCustomersApplicationService {
               .join(' ') ||
             'Unnamed customer';
 
+          // mainApiCustomer.id is main API's own record id (returned as its
+          // customerCode, prefixed per ERP -- "QB_13") -- NOT what a pulled
+          // invoice's customerRef.id carries (the raw, unprefixed ERP id).
+          // bookId is that raw id; storing it here is what lets
+          // DashboardInvoicesApplicationService.enrich() match a pulled
+          // invoice's customer back to this row later. See MainApiCustomer's
+          // doc comment.
+          const externalId = mainApiCustomer.bookId ?? mainApiCustomer.id;
           const existing = await this.customerRepo.findOne({
-            where: { merchantId, externalId: mainApiCustomer.id },
+            where: { merchantId, externalId },
           });
 
           const sourceSystem =
@@ -303,7 +311,7 @@ export class DashboardCustomersApplicationService {
             const entity = this.customerRepo.create({
               id: randomUUID(),
               merchantId,
-              externalId: mainApiCustomer.id,
+              externalId,
               name,
               tin: mainApiCustomer.taxId ?? null,
               phoneNumber: mainApiCustomer.phone ?? null,

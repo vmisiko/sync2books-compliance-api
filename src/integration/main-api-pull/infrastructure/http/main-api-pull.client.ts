@@ -21,7 +21,11 @@ export interface MainApiStandardizedAddress {
  * GOODS/SERVICE bucket there (see standardized-item.mapper.ts#collapseItemType, which does that
  * collapse in this repo instead, since it's a KRA-specific simplification).
  */
-export type MainApiStandardizedItemType = 'Unknown' | 'Inventory' | 'NonInventory' | 'Service';
+export type MainApiStandardizedItemType =
+  | 'Unknown'
+  | 'Inventory'
+  | 'NonInventory'
+  | 'Service';
 
 /**
  * Additive, computed-at-response-time normalization main API now attaches to every Item row (or
@@ -318,6 +322,16 @@ export interface MainApiCreateBillResponse {
 }
 
 export interface MainApiCustomer {
+  /**
+   * Main API's own record id, returned as its `customerCode` -- prefixed
+   * per source ERP (e.g. `QB_13`, `ODOO_14`), NOT the same value an ERP
+   * puts on other objects that reference this customer. A pulled invoice's
+   * `customerRef.id` (see MainApiInvoice) is the raw, unprefixed ERP id
+   * instead (nest-sync-2-books-api's CustomerEntity.toCustomerListItemDto:
+   * `id: this.customerCode` vs invoice.service.ts's
+   * `customerRef.id: bookInvoice.CustomerRef?.value`) -- use `bookId` below
+   * to correlate the two, not this field.
+   */
   id: string;
   name: string;
   companyName?: string | null;
@@ -327,6 +341,13 @@ export interface MainApiCustomer {
   bookType?: string | null;
   email?: string | null;
   phone?: string | null;
+  /**
+   * The *ERP's own* customer id (QuickBooks Customer Id / Odoo `res.partner`
+   * id), unprefixed -- distinct from `id` above. This is what matches a
+   * pulled invoice's `customerRef.id`, same distinction
+   * MainApiSupplier.bookId already documents for supplierRef.id.
+   */
+  bookId?: string | null;
   /** Pre-resolved provenance/address data from main API's standardization layer — null if this row's source ERP isn't supported by it yet. Optional (unlike MainApiItem's) since nothing in this repo constructs/consumes it yet — see getCustomers' doc comment — kept `| null`-typed rather than fully required so existing fixtures/call sites aren't forced to supply it. */
   standardized?: MainApiStandardizedParty | null;
 }
@@ -391,11 +412,10 @@ export class MainApiPullClient {
       endDate?: string;
     } = {},
   ): Promise<MainApiListResponse<MainApiInvoice>> {
-    return this.get<MainApiListResponse<MainApiInvoice>>(
-      apiKey,
-      '/invoices',
-      { companyId, ...params },
-    );
+    return this.get<MainApiListResponse<MainApiInvoice>>(apiKey, '/invoices', {
+      companyId,
+      ...params,
+    });
   }
 
   async getInvoiceById(
