@@ -8,6 +8,7 @@ import type { Request } from 'express';
 import { randomUUID } from 'crypto';
 import { CatalogService } from '../../catalog/api/catalog.service';
 import { DashboardCustomersApplicationService } from '../../dashboard-customers/application/dashboard-customers.application.service';
+import { InsufficientStockError } from '../../inventory/domain/errors/insufficient-stock.error';
 import { PAYMENT_TYPE_RESOLVER } from '../../shared/tokens';
 import type { IPaymentTypeResolver } from '../../regulatory/oscu/domain/ports/payment-type-resolver.port';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
@@ -361,6 +362,44 @@ export class DashboardInvoicesApplicationService {
     const documentId = (createResult.document as { id: string }).id;
     const shouldSubmit = options.submit ?? true;
 
+    // InsufficientStockError (thrown deep inside SalesService.
+    // applyInventoryMovements -> InventoryService.recordMovement, for a
+    // stock item this merchant hasn't recorded any stock for yet) was
+    // reaching the controller uncaught, surfacing as a bare "Internal
+    // server error" 500 instead of a clear, actionable message -- confirmed
+    // live 2026-09-01. There's no global exception filter in this service
+    // to convert it centrally, so catch it at this call site, the same way
+    // the unclassified-items case above already gets a clear 400 instead of
+    // letting the underlying failure leak out raw.
+    try {
+      await this.submitAndNotify(
+        createResult,
+        documentId,
+        shouldSubmit,
+        pulled,
+        complianceTenantId,
+        req,
+      );
+    } catch (error) {
+      if (error instanceof InsufficientStockError) {
+        throw new BadRequestException(
+          `Cannot submit this sale: ${error.message} -- add stock for this item (Inventory > Adjust Stock) before selling it, or confirm it should be tracked as a stock item at all.`,
+        );
+      }
+      throw error;
+    }
+
+    return this.sales.getNormalizedSaleReport(documentId);
+  }
+
+  private async submitAndNotify(
+    createResult: { created: boolean; document: unknown },
+    documentId: string,
+    shouldSubmit: boolean,
+    pulled: PulledInvoice,
+    complianceTenantId: string,
+    req: Request | undefined,
+  ): Promise<void> {
     if (createResult.created && shouldSubmit) {
       await this.sales.submitDraftDocument(documentId);
 
@@ -453,8 +492,6 @@ export class DashboardInvoicesApplicationService {
         );
       }
     }
-
-    return this.sales.getNormalizedSaleReport(documentId);
   }
 
   /**

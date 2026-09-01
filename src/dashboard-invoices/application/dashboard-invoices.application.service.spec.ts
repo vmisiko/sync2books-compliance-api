@@ -15,6 +15,8 @@ import type { SalesService } from '../../sales/application/sales.service';
 import type { IPaymentTypeResolver } from '../../regulatory/oscu/domain/ports/payment-type-resolver.port';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
+import { InsufficientStockError } from '../../inventory/domain/errors/insufficient-stock.error';
+import { BadRequestException } from '@nestjs/common';
 
 /**
  * Minimal fakes covering only what `createSaleFromInvoice` (fresh-document,
@@ -474,6 +476,33 @@ describe('DashboardInvoicesApplicationService — receipt push-back toggle', () 
       customerPhoneNumber: '0712345678',
       customerEmail: 'attach-test-qb@example.com',
     });
+  });
+
+  /**
+   * Regression (2026-09-01): InsufficientStockError, thrown deep inside
+   * SalesService.applyInventoryMovements for a stock item this merchant
+   * has 0 recorded stock for, was reaching DashboardInvoicesController
+   * uncaught -- there's no global exception filter in this service, so it
+   * surfaced as a bare "Internal server error" 500 with no indication of
+   * what actually went wrong. createSaleFromInvoice must convert it to a
+   * clear, actionable 400 instead, the same way the unclassified-items case
+   * already does.
+   */
+  it('converts an InsufficientStockError from submitDraftDocument into a clear BadRequestException instead of letting it bubble up as a 500', async () => {
+    const deps = defaultDeps(false);
+    deps.submitDraftDocument.mockRejectedValue(
+      new InsufficientStockError(
+        'Insufficient stock: item-1 at branch-1. Have 0, tried to apply -1',
+      ),
+    );
+    const service = makeService(deps);
+
+    await expect(
+      service.createSaleFromInvoice('tenant-1', 'invoice-1'),
+    ).rejects.toThrow(BadRequestException);
+    await expect(
+      service.createSaleFromInvoice('tenant-1', 'invoice-1'),
+    ).rejects.toThrow(/insufficient stock/i);
   });
 });
 
