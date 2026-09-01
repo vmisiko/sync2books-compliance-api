@@ -140,9 +140,10 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
           taxCategory: TaxCategory.VAT_STANDARD,
         }) as Awaited<ReturnType<CatalogService['getItemById']>>,
       findByExternalId: async (_merchantId, externalId) =>
-        ({ id: `catalog-${externalId}` }) as Awaited<
-          ReturnType<CatalogService['findByExternalId']>
-        >,
+        ({
+          id: `catalog-${externalId}`,
+          registrationStatus: 'REGISTERED',
+        }) as Awaited<ReturnType<CatalogService['findByExternalId']>>,
     },
     customers: {
       // No matching pulled customer by default -- tests that need one
@@ -395,6 +396,53 @@ describe('DashboardInvoicesApplicationService — receipt push-back toggle', () 
 
     expect(invoice.lines[0].classified).toBe(false);
     expect(invoice.readyForSale).toBe(false);
+  });
+
+  /**
+   * A line can be fully classified (classificationCode/unitCode/
+   * productTypeCode all resolved) and still never have been pushed to KRA --
+   * registrationStatus only becomes 'REGISTERED' once sync-items.usecase.ts's
+   * saveItem call actually succeeds. Selling it anyway would submit a sale
+   * referencing an itemCd KRA has never seen. classified and registered must
+   * both gate readyForSale/createSaleFromInvoice independently.
+   */
+  it('does not mark a line "registered" (or readyForSale) when its matched catalog item is classified but not yet synced to KRA', async () => {
+    const deps = defaultDeps(false);
+    deps.catalog.findByExternalId = async () =>
+      ({
+        id: 'catalog-ext-item-1',
+        needsClassificationMapping: false,
+        needsProductType: false,
+        registrationStatus: 'PENDING',
+      }) as Awaited<ReturnType<CatalogService['findByExternalId']>>;
+    const service = makeService(deps);
+
+    const invoice = await service.getInvoiceById('tenant-1', 'invoice-1');
+
+    expect(invoice.lines[0].classified).toBe(true);
+    expect(invoice.lines[0].registered).toBe(false);
+    expect(invoice.readyForSale).toBe(false);
+  });
+
+  it('blocks createSaleFromInvoice with unregisteredItems (not unclassifiedItems) for a classified-but-unregistered item', async () => {
+    const deps = defaultDeps(false);
+    deps.catalog.findByExternalId = async () =>
+      ({
+        id: 'catalog-ext-item-1',
+        needsClassificationMapping: false,
+        needsProductType: false,
+        registrationStatus: 'FAILED',
+      }) as Awaited<ReturnType<CatalogService['findByExternalId']>>;
+    const service = makeService(deps);
+
+    await expect(
+      service.createSaleFromInvoice('tenant-1', 'invoice-1'),
+    ).rejects.toMatchObject({
+      response: {
+        unclassifiedItems: [],
+        unregisteredItems: ['Widget'],
+      },
+    });
   });
 
   it("reuses an already-pulled customer's PIN/phone/email, matched via customerRef.id", async () => {

@@ -65,7 +65,11 @@ export class DashboardInvoicesController {
       startDate,
       endDate,
     });
-    return { success: true, message: 'Invoices pulled', data: result };
+    const { summary } = result;
+    const message = summary.blocked
+      ? `Invoices pulled — ${summary.readyForSale} ready for sale, ${summary.blocked} blocked (unclassified or unregistered items)`
+      : 'Invoices pulled';
+    return { success: true, message, data: result };
   }
 
   @Get()

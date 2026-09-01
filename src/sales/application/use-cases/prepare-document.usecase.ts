@@ -2,6 +2,7 @@ import { ComplianceDocument } from '../../domain/entities/compliance-document.en
 import { assertValidTransition as _assertValidTransition } from '../../domain/state-machine/compliance-state-machine';
 import { ComplianceStatus } from '../../../shared/domain/enums/compliance-status.enum';
 import { deriveLineSnapshot } from '../../domain/utils/line-snapshot.util';
+import { ItemNotReadyForEtimsError } from '../../domain/errors/item-not-ready-for-etims.error';
 import type { ComplianceItem } from '../../../shared/domain/entities/compliance-item.entity';
 import type {
   IComplianceDocumentRepository,
@@ -52,7 +53,7 @@ export async function prepareDocument(
           ? item.etimsItemCode
           : null;
     if (!itemCd) {
-      throw new Error(
+      throw new ItemNotReadyForEtimsError(
         `Item ${l.itemId} has not been synced to eTIMS (missing etimsItemCode)`,
       );
     }
@@ -67,7 +68,7 @@ export async function prepareDocument(
     // checked above) without one -- but assert explicitly rather than
     // silently coercing null to a string if that invariant is ever violated.
     if (l.productTypeCodeSnapshot == null && item.productTypeCode == null) {
-      throw new Error(
+      throw new ItemNotReadyForEtimsError(
         `Item ${l.itemId} has no product type set (Raw Material / Finished Product / Service) -- cannot prepare this document`,
       );
     }

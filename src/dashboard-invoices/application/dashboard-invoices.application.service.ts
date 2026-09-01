@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import { CatalogService } from '../../catalog/api/catalog.service';
 import { DashboardCustomersApplicationService } from '../../dashboard-customers/application/dashboard-customers.application.service';
 import { InsufficientStockError } from '../../inventory/domain/errors/insufficient-stock.error';
+import { ItemNotReadyForEtimsError } from '../../sales/domain/errors/item-not-ready-for-etims.error';
 import { PAYMENT_TYPE_RESOLVER } from '../../shared/tokens';
 import type { IPaymentTypeResolver } from '../../regulatory/oscu/domain/ports/payment-type-resolver.port';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
@@ -41,6 +42,8 @@ export type PulledInvoiceLine = {
   itemName?: string;
   catalogItemId: string | null;
   classified: boolean;
+  /** True only once the matched catalog item has actually been synced to KRA via saveItem (registrationStatus === 'REGISTERED') -- a classified item can still be PENDING/FAILED here, since classification and KRA registration are separate steps (see sync-items.usecase.ts). */
+  registered: boolean;
 };
 
 export type PulledInvoice = {
@@ -60,7 +63,7 @@ export type PulledInvoice = {
   customerPhoneNumber?: string | null;
   customerEmail?: string | null;
   lines: PulledInvoiceLine[];
-  /** false if any line's item hasn't been registered/classified in the catalog yet. */
+  /** false if any line's item hasn't been classified or registered (synced to KRA) in the catalog yet. */
   readyForSale: boolean;
   sourceSystem: SourceSystem | null;
 };
@@ -156,12 +159,62 @@ export class DashboardInvoicesApplicationService {
     // query string sent to main API, which 400s ("property source should
     // not exist") since its DTO doesn't whitelist it.
     const { page, limit, startDate, endDate } = params;
-    return this.listInvoices(complianceTenantId, {
+    const result = await this.listInvoices(complianceTenantId, {
       page,
       limit,
       startDate,
       endDate,
     });
+
+    // Surface the classification/registration gate right here, at pull time,
+    // instead of only when a user opens each invoice individually and hits
+    // create-sale's 400 (see createSaleFromInvoice below, which throws the
+    // same unclassifiedItems/unregisteredItems shape one invoice at a time).
+    // Invoices themselves are still pulled and listed either way -- this is
+    // a summary on top, not a filter -- so nothing here blocks the pull.
+    const blockedInvoices = result.data
+      .filter((invoice) => !invoice.readyForSale)
+      .map((invoice) => {
+        const { unclassifiedItems, unregisteredItems } =
+          this.getBlockingItems(invoice);
+        return {
+          mainApiInvoiceId: invoice.mainApiInvoiceId,
+          invoiceCode: invoice.invoiceCode,
+          unclassifiedItems,
+          unregisteredItems,
+        };
+      });
+
+    return {
+      ...result,
+      summary: {
+        pulled: result.data.length,
+        readyForSale: result.data.length - blockedInvoices.length,
+        blocked: blockedInvoices.length,
+        blockedInvoices,
+      },
+    };
+  }
+
+  /**
+   * Extracts the human-readable item names blocking one pulled invoice from
+   * being sold, split by reason (unclassified vs. classified-but-not-yet-
+   * registered-with-KRA -- see the doc comment on the equivalent check in
+   * createSaleFromInvoice for why these two must stay separate). Shared by
+   * that method's 400 response and pullInvoices' batch summary so the two
+   * surfaces can never drift on what counts as "blocked".
+   */
+  private getBlockingItems(pulled: PulledInvoice): {
+    unclassifiedItems: string[];
+    unregisteredItems: string[];
+  } {
+    const unclassifiedItems = pulled.lines
+      .filter((l) => !l.classified)
+      .map((l) => l.itemName ?? l.itemExternalId ?? 'unknown item');
+    const unregisteredItems = pulled.lines
+      .filter((l) => l.classified && !l.registered)
+      .map((l) => l.itemName ?? l.itemExternalId ?? 'unknown item');
+    return { unclassifiedItems, unregisteredItems };
   }
 
   async listInvoices(
@@ -255,13 +308,23 @@ export class DashboardInvoicesApplicationService {
     );
 
     if (!pulled.readyForSale) {
-      const unclassified = pulled.lines
-        .filter((l) => !l.classified)
-        .map((l) => l.itemName ?? l.itemExternalId ?? 'unknown item');
+      const { unclassifiedItems: unclassified, unregisteredItems: unregistered } =
+        this.getBlockingItems(pulled);
+      const reasons: string[] = [];
+      if (unclassified.length) {
+        reasons.push(
+          `unclassified items (classify them via POST /dashboard-api/items/pull, then PATCH classification): ${unclassified.join(', ')}`,
+        );
+      }
+      if (unregistered.length) {
+        reasons.push(
+          `items not yet registered with KRA (sync them from Item Sync first): ${unregistered.join(', ')}`,
+        );
+      }
       throw new BadRequestException({
-        message:
-          'This invoice has unclassified items — classify them (POST /dashboard-api/items/pull, then PATCH classification) before creating a sale',
+        message: `This invoice cannot be sold yet — ${reasons.join('; ')}`,
         unclassifiedItems: unclassified,
+        unregisteredItems: unregistered,
       });
     }
 
@@ -384,6 +447,18 @@ export class DashboardInvoicesApplicationService {
       if (error instanceof InsufficientStockError) {
         throw new BadRequestException(
           `Cannot submit this sale: ${error.message} -- add stock for this item (Inventory > Adjust Stock) before selling it, or confirm it should be tracked as a stock item at all.`,
+        );
+      }
+      // Mirrors the InsufficientStockError case above: the readyForSale check
+      // earlier in this method only reflects the catalog item's state at the
+      // time of THIS request. It can't protect the idempotency-resume branch
+      // below (existing DRAFT/VALIDATED document from an interrupted prior
+      // attempt calling prepareDocument directly), so an item that still
+      // isn't actually eTIMS-ready reaches prepareDocument uncaught and used
+      // to surface as a bare 500 instead of an actionable message.
+      if (error instanceof ItemNotReadyForEtimsError) {
+        throw new BadRequestException(
+          `Cannot submit this sale: ${error.message} -- sync this item to KRA (Item Sync) before selling it.`,
         );
       }
       throw error;
@@ -719,6 +794,7 @@ export class DashboardInvoicesApplicationService {
             !catalogItem.needsClassificationMapping &&
             !catalogItem.needsProductType,
           ),
+          registered: catalogItem?.registrationStatus === 'REGISTERED',
         };
       }),
     );
@@ -752,7 +828,8 @@ export class DashboardInvoicesApplicationService {
       customerPhoneNumber: matchedCustomer?.phoneNumber ?? null,
       customerEmail: matchedCustomer?.email ?? null,
       lines,
-      readyForSale: lines.length > 0 && lines.every((l) => l.classified),
+      readyForSale:
+        lines.length > 0 && lines.every((l) => l.classified && l.registered),
       sourceSystem: invoice.standardized?.sourceSystem ?? null,
     };
   }

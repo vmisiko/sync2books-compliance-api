@@ -35,6 +35,7 @@ import { ComplianceServiceAuthGuard } from '../../integration/compliance-service
 import { PlatformOscuCallbackService } from '../../integration/platform-outbound/platform-oscu-callback.service';
 import { Sync2BooksCorrelationPersistenceService } from '../../integration/platform-outbound/sync2books-correlation-persistence.service';
 import { parseSync2BooksCorrelation } from '../../integration/platform-outbound/sync2books-request-headers.util';
+import { ItemNotReadyForEtimsError } from '../domain/errors/item-not-ready-for-etims.error';
 
 @Controller('api/sales')
 @ApiTags('API Sales')
@@ -275,8 +276,17 @@ export class ApiSalesController {
         });
       }
 
-      await this.salesService.prepareDocument(documentId);
-      await this.salesService.submitDocument(documentId);
+      try {
+        await this.salesService.prepareDocument(documentId);
+        await this.salesService.submitDocument(documentId);
+      } catch (error) {
+        if (error instanceof ItemNotReadyForEtimsError) {
+          throw new BadRequestException(
+            `Cannot submit this credit note: ${error.message} -- sync this item to KRA (Item Sync) before selling it.`,
+          );
+        }
+        throw error;
+      }
 
       const corr = parseSync2BooksCorrelation(req);
       if (corr) {

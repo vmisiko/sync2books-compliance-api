@@ -36,6 +36,7 @@ import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/g
 import { MailerService } from '../../mailer/mailer.service';
 import { EmailReceiptDto } from './dto/email-receipt.dto';
 import { renderReceiptEmailHtml } from '../application/receipt/receipt-email.renderer';
+import { ItemNotReadyForEtimsError } from '../domain/errors/item-not-ready-for-etims.error';
 
 /**
  * Guarded (previously open to any caller). Still trusts merchantId/branchId
@@ -256,8 +257,17 @@ export class DashboardSalesController {
         });
       }
 
-      await this.salesService.prepareDocument(documentId);
-      await this.salesService.submitDocument(documentId);
+      try {
+        await this.salesService.prepareDocument(documentId);
+        await this.salesService.submitDocument(documentId);
+      } catch (error) {
+        if (error instanceof ItemNotReadyForEtimsError) {
+          throw new BadRequestException(
+            `Cannot submit this credit note: ${error.message} -- sync this item to KRA (Item Sync) before selling it.`,
+          );
+        }
+        throw error;
+      }
     }
 
     const data = await this.salesService.getNormalizedSaleReport(documentId);
