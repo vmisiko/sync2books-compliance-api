@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { CatalogModule } from '../catalog/catalog.module';
 import { ComplianceOrganizationModule } from '../compliance-organization/compliance-organization.module';
+import { DashboardCustomersModule } from '../dashboard-customers/dashboard-customers.module';
 import { DashboardIdentityModule } from '../dashboard-identity/dashboard-identity.module';
 import { MainApiPullModule } from '../integration/main-api-pull/main-api-pull.module';
 import { PlatformCorrelationModule } from '../integration/platform-correlation.module';
@@ -13,6 +14,7 @@ import { DashboardInvoicesController } from './presentation/dashboard-invoices.c
   imports: [
     CatalogModule,
     ComplianceOrganizationModule,
+    DashboardCustomersModule,
     DashboardIdentityModule,
     MainApiPullModule,
     PlatformCorrelationModule,

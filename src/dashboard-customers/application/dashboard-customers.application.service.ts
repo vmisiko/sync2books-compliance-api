@@ -75,7 +75,9 @@ function resolveCustomerPullSource(
 
 @Injectable()
 export class DashboardCustomersApplicationService {
-  private readonly logger = new Logger(DashboardCustomersApplicationService.name);
+  private readonly logger = new Logger(
+    DashboardCustomersApplicationService.name,
+  );
 
   constructor(
     @InjectRepository(CustomerOrmEntity)
@@ -86,7 +88,10 @@ export class DashboardCustomersApplicationService {
     private readonly mainApiPull: MainApiPullClient,
   ) {}
 
-  async list(merchantId: string, search?: string): Promise<CustomerOrmEntity[]> {
+  async list(
+    merchantId: string,
+    search?: string,
+  ): Promise<CustomerOrmEntity[]> {
     const qb = this.customerRepo
       .createQueryBuilder('c')
       .where('c.merchantId = :merchantId', { merchantId })
@@ -99,6 +104,29 @@ export class DashboardCustomersApplicationService {
     }
 
     return qb.getMany();
+  }
+
+  /**
+   * Matches a pulled invoice's `customerRef.id` back to the customer this
+   * merchant already pulled/stored (mirrors ICatalogItemRepository
+   * .findByMerchantAndExternalId for line items) -- lets a pulled invoice
+   * reuse the customer's already-known PIN/phone/email instead of asking
+   * the user to retype a PIN they already entered on the Customers page.
+   * sourceSystem-scoped for the same reason items are: two ERPs can share
+   * the same small numeric externalId for this merchant.
+   */
+  async findByExternalId(
+    merchantId: string,
+    externalId: string,
+    sourceSystem?: string | null,
+  ): Promise<CustomerOrmEntity | null> {
+    return this.customerRepo.findOne({
+      where: {
+        merchantId,
+        externalId,
+        ...(sourceSystem ? { sourceSystem } : {}),
+      },
+    });
   }
 
   async create(input: CreateCustomerDto): Promise<CustomerOrmEntity> {
@@ -260,7 +288,8 @@ export class DashboardCustomersApplicationService {
           if (existing) {
             existing.name = name;
             existing.tin = mainApiCustomer.taxId ?? existing.tin;
-            existing.phoneNumber = mainApiCustomer.phone ?? existing.phoneNumber;
+            existing.phoneNumber =
+              mainApiCustomer.phone ?? existing.phoneNumber;
             existing.email = mainApiCustomer.email ?? existing.email;
             existing.sourceSystem = sourceSystem ?? existing.sourceSystem;
             const saved = await this.customerRepo.save(existing);

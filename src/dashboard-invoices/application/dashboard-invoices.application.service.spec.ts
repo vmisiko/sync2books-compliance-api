@@ -1,5 +1,6 @@
 import { DashboardInvoicesApplicationService } from './dashboard-invoices.application.service';
 import type { CatalogService } from '../../catalog/api/catalog.service';
+import type { DashboardCustomersApplicationService } from '../../dashboard-customers/application/dashboard-customers.application.service';
 import type { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import type { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import type { MainApiConnection } from '../../integration/main-api-pull/domain/entities/main-api-connection.entity';
@@ -21,7 +22,7 @@ import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
  * on these services is stubbed out and never expected to be called by the
  * scenarios below.
  */
-function makeInvoice(): MainApiInvoice {
+function makeInvoice(overrides: Partial<MainApiInvoice> = {}): MainApiInvoice {
   return {
     id: 'invoice-1',
     invoiceCode: 'INV-001',
@@ -41,6 +42,7 @@ function makeInvoice(): MainApiInvoice {
       },
     ],
     standardized: null,
+    ...overrides,
   };
 }
 
@@ -63,6 +65,7 @@ function makeConnection(autoUploadReceiptToSource: boolean): MainApiConnection {
 
 type Deps = {
   catalog: Pick<CatalogService, 'getItemById' | 'findByExternalId'>;
+  customers: Pick<DashboardCustomersApplicationService, 'findByExternalId'>;
   organization: Pick<
     ComplianceOrganizationApplicationService,
     'getTenantById' | 'listBranches' | 'resolveDashboardBranchId'
@@ -96,6 +99,7 @@ type Deps = {
 function makeService(deps: Deps): DashboardInvoicesApplicationService {
   return new DashboardInvoicesApplicationService(
     deps.catalog as CatalogService,
+    deps.customers as DashboardCustomersApplicationService,
     deps.organization as ComplianceOrganizationApplicationService,
     deps.mainApiConnections as MainApiConnectionApplicationService,
     deps.mainApiPull as MainApiPullClient,
@@ -137,6 +141,11 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
         ({ id: `catalog-${externalId}` }) as Awaited<
           ReturnType<CatalogService['findByExternalId']>
         >,
+    },
+    customers: {
+      // No matching pulled customer by default -- tests that need one
+      // override this per-case.
+      findByExternalId: async () => null,
     },
     organization: {
       getTenantById: async (id: string) =>
@@ -384,6 +393,87 @@ describe('DashboardInvoicesApplicationService — receipt push-back toggle', () 
 
     expect(invoice.lines[0].classified).toBe(false);
     expect(invoice.readyForSale).toBe(false);
+  });
+
+  it("reuses an already-pulled customer's PIN/phone/email, matched via customerRef.id", async () => {
+    const deps = defaultDeps(false);
+    deps.mainApiPull.getInvoiceById = async () =>
+      makeInvoice({
+        customerRef: { id: 'ext-cust-1', companyName: 'Ignored QB Name' },
+      });
+    deps.customers.findByExternalId = async () =>
+      ({
+        id: 'cust-1',
+        name: 'Attachment Flow Test Ltd',
+        tin: 'P012345678A',
+        phoneNumber: '0712345678',
+        email: 'attach-test-qb@example.com',
+      }) as Awaited<
+        ReturnType<DashboardCustomersApplicationService['findByExternalId']>
+      >;
+    const service = makeService(deps);
+
+    const invoice = await service.getInvoiceById('tenant-1', 'invoice-1');
+
+    expect(invoice.customerId).toBe('cust-1');
+    expect(invoice.customerName).toBe('Attachment Flow Test Ltd');
+    expect(invoice.customerPin).toBe('P012345678A');
+    expect(invoice.customerPhoneNumber).toBe('0712345678');
+    expect(invoice.customerEmail).toBe('attach-test-qb@example.com');
+  });
+
+  it("falls back to the pulled companyName and no PIN/phone/email when the customer hasn't been pulled/stored here yet", async () => {
+    const deps = defaultDeps(false);
+    deps.mainApiPull.getInvoiceById = async () =>
+      makeInvoice({
+        customerRef: { id: 'ext-cust-unknown', companyName: 'Some QB Name' },
+      });
+    const service = makeService(deps);
+
+    const invoice = await service.getInvoiceById('tenant-1', 'invoice-1');
+
+    expect(invoice.customerId).toBeNull();
+    expect(invoice.customerName).toBe('Some QB Name');
+    expect(invoice.customerPin).toBeNull();
+  });
+
+  it("uses the matched customer's PIN as the createSaleFromInvoice default when no explicit override is supplied", async () => {
+    const deps = defaultDeps(false);
+    deps.mainApiPull.getInvoiceById = async () =>
+      makeInvoice({
+        customerRef: { id: 'ext-cust-1', companyName: 'Ignored QB Name' },
+      });
+    deps.customers.findByExternalId = async () =>
+      ({
+        id: 'cust-1',
+        name: 'Attachment Flow Test Ltd',
+        tin: 'P012345678A',
+        phoneNumber: '0712345678',
+        email: 'attach-test-qb@example.com',
+      }) as Awaited<
+        ReturnType<DashboardCustomersApplicationService['findByExternalId']>
+      >;
+    const createDocument = jest
+      .fn<
+        ReturnType<SalesService['createDocument']>,
+        Parameters<SalesService['createDocument']>
+      >()
+      .mockResolvedValue({
+        created: true,
+        document: { id: 'doc-1' },
+      } as Awaited<ReturnType<SalesService['createDocument']>>);
+    deps.sales.createDocument = createDocument;
+    const service = makeService(deps);
+
+    await expect(
+      service.createSaleFromInvoice('tenant-1', 'invoice-1'),
+    ).resolves.toBeDefined();
+
+    expect(createDocument.mock.calls[0][0]).toMatchObject({
+      customerPin: 'P012345678A',
+      customerPhoneNumber: '0712345678',
+      customerEmail: 'attach-test-qb@example.com',
+    });
   });
 });
 

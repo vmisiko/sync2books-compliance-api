@@ -7,6 +7,7 @@ import {
 import type { Request } from 'express';
 import { randomUUID } from 'crypto';
 import { CatalogService } from '../../catalog/api/catalog.service';
+import { DashboardCustomersApplicationService } from '../../dashboard-customers/application/dashboard-customers.application.service';
 import { PAYMENT_TYPE_RESOLVER } from '../../shared/tokens';
 import type { IPaymentTypeResolver } from '../../regulatory/oscu/domain/ports/payment-type-resolver.port';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
@@ -52,6 +53,11 @@ export type PulledInvoice = {
   taxAmount: number;
   totalAmount: number;
   customerName?: string;
+  /** Matched by customerRef.id against this merchant's already-pulled customers -- null if this ERP customer hasn't been pulled/stored here yet. */
+  customerId?: string | null;
+  customerPin?: string | null;
+  customerPhoneNumber?: string | null;
+  customerEmail?: string | null;
   lines: PulledInvoiceLine[];
   /** false if any line's item hasn't been registered/classified in the catalog yet. */
   readyForSale: boolean;
@@ -96,6 +102,7 @@ export class DashboardInvoicesApplicationService {
 
   constructor(
     private readonly catalog: CatalogService,
+    private readonly customers: DashboardCustomersApplicationService,
     private readonly organization: ComplianceOrganizationApplicationService,
     private readonly mainApiConnections: MainApiConnectionApplicationService,
     private readonly mainApiPull: MainApiPullClient,
@@ -341,10 +348,11 @@ export class DashboardInvoicesApplicationService {
           (sum, l) => sum + l.quantity * l.unitPrice + l.taxAmount,
           0,
         ),
-        customerPin: options.customerPin ?? null,
+        customerPin: options.customerPin ?? pulled.customerPin ?? null,
         customerName: options.customerName ?? pulled.customerName ?? null,
-        customerPhoneNumber: options.customerPhoneNumber ?? null,
-        customerEmail: options.customerEmail ?? null,
+        customerPhoneNumber:
+          options.customerPhoneNumber ?? pulled.customerPhoneNumber ?? null,
+        customerEmail: options.customerEmail ?? pulled.customerEmail ?? null,
         lines,
       },
       { enqueueProcessing: false },
@@ -678,6 +686,19 @@ export class DashboardInvoicesApplicationService {
       }),
     );
 
+    // Matches this invoice's customer back to whatever this merchant already
+    // pulled/stored on the Customers page (same externalId-matching pattern
+    // as the line items above) -- lets Review Pulled Invoice reuse a PIN the
+    // user already entered there instead of asking them to retype it.
+    const customerExternalId = invoice.customerRef?.id ?? null;
+    const matchedCustomer = customerExternalId
+      ? await this.customers.findByExternalId(
+          merchantId,
+          customerExternalId,
+          invoiceSourceSystem,
+        )
+      : null;
+
     return {
       mainApiInvoiceId: invoice.id,
       invoiceCode: invoice.invoiceCode,
@@ -688,7 +709,11 @@ export class DashboardInvoicesApplicationService {
       subTotal: invoice.subTotal,
       taxAmount: invoice.taxAmount,
       totalAmount: invoice.totalAmount,
-      customerName: invoice.customerRef?.companyName,
+      customerName: matchedCustomer?.name ?? invoice.customerRef?.companyName,
+      customerId: matchedCustomer?.id ?? null,
+      customerPin: matchedCustomer?.tin ?? null,
+      customerPhoneNumber: matchedCustomer?.phoneNumber ?? null,
+      customerEmail: matchedCustomer?.email ?? null,
       lines,
       readyForSale: lines.length > 0 && lines.every((l) => l.classified),
       sourceSystem: invoice.standardized?.sourceSystem ?? null,
