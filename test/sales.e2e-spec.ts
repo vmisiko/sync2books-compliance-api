@@ -41,11 +41,6 @@ type KraRequestSnapshot = {
   rfdRsnCd: string | null;
 };
 
-type SaleValidationErrorBody = {
-  message: string;
-  errors: Array<{ code: string }>;
-};
-
 describe('Sales API (e2e)', () => {
   let app: INestApplication<App> | null = null;
   let moduleFixture: TestingModule | null = null;
@@ -572,7 +567,14 @@ describe('Sales API (e2e)', () => {
     expect(getBody.data.receiptNumber).toBeNull();
   });
 
-  it('POST /api/sales returns 400 when validation fails (VAT_STANDARD tax mismatch)', async () => {
+  it('POST /api/sales accepts a VAT_STANDARD line whose taxAmount does not match the 16% formula', async () => {
+    // runTaxRules deliberately has no taxAmount-matches-formula check for
+    // VAT_STANDARD/VAT_8: manual dashboard sales compute taxAmount as
+    // tax-inclusive (matching OSCU/KRA), QuickBooks/Odoo-pulled invoices
+    // compute it as tax-exclusive (matching those ERPs' own line pricing),
+    // and a single formula can't validate both without rejecting one --
+    // see tax-rule.engine.ts. Reconciling the actual amount submitted is
+    // deferred to a separate ledger, not a creation-time block.
     const { app } = await createTestApp();
     const httpServer: App = app.getHttpServer();
     const { merchantId, itemId } = await seedCatalogItem(httpServer);
@@ -585,7 +587,7 @@ describe('Sales API (e2e)', () => {
         merchantId,
         branchId: 'branch-1',
         saleDate: '2026-02-20',
-        traderInvoiceNumber: `INV-BAD-${Date.now()}`,
+        traderInvoiceNumber: `INV-${Date.now()}`,
         receiptTypeCode: 'S',
         paymentTypeCode: '01',
         invoiceStatusCode: '02',
@@ -599,15 +601,11 @@ describe('Sales API (e2e)', () => {
           },
         ],
       })
-      .expect(400);
+      .expect(201);
 
-    const body = res.body as SaleValidationErrorBody;
-    expect(body.message).toBe('Sale validation failed');
-    expect(body.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: 'TAX_VAT_STANDARD_RATE' }),
-      ]),
-    );
+    const body = res.body as SalesReportDetailResponseBody;
+    expect(body.data.id).toBeDefined();
+    expect(body.data.status).toBe('completed');
   });
 
   it('POST /api/sales is idempotent by traderInvoiceNumber (same id returned)', async () => {

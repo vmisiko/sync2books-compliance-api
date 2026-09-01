@@ -18,12 +18,20 @@ import { DashboardRole } from '../../shared/domain/enums/dashboard-role.enum';
 import { DashboardOrganizationApplicationService } from '../../dashboard-organization/application/dashboard-organization.application.service';
 import type { DashboardOrganization } from '../../dashboard-organization/domain/entities/dashboard-organization.entity';
 import type { OAuthProfile } from '../infrastructure/oauth/oauth-profile.type';
+import { dashboardAppUrl } from '../infrastructure/oauth/dashboard-app-url';
 
 const BCRYPT_ROUNDS = 10;
 const ACCESS_TOKEN_TTL_SECONDS = 3600;
 /** Short-lived -- just long enough for the "what's your company name?" hop between the OAuth callback redirect and /auth/oauth/complete. */
 const OAUTH_TICKET_TTL = '15m';
 const OAUTH_TICKET_TYPE = 'oauth_ticket';
+/**
+ * A week is generous for a link that has to be relayed by hand (Slack,
+ * WhatsApp, in person) since there's no email delivery -- see
+ * createInvite's doc comment.
+ */
+const INVITE_TICKET_TTL = '7d';
+const INVITE_TICKET_TYPE = 'member_invite';
 
 export type DashboardAuthTokens = {
   accessToken: string;
@@ -75,6 +83,34 @@ export type PendingOAuthSignUp = {
   email: string;
   firstName: string;
   lastName: string;
+};
+
+export type CreateInviteInput = {
+  email: string;
+  displayName: string;
+  role: DashboardRole;
+  organizationId: string;
+};
+
+export type CreateInviteResult = {
+  inviteToken: string;
+  inviteUrl: string;
+  email: string;
+};
+
+export type InvitePreview = {
+  email: string;
+  displayName: string | null;
+  role: DashboardRole;
+  organizationName: string;
+};
+
+type InviteTicketPayload = {
+  type: typeof INVITE_TICKET_TYPE;
+  email: string;
+  displayName: string | null;
+  role: DashboardRole;
+  organizationId: string;
 };
 
 @Injectable()
@@ -309,6 +345,130 @@ export class DashboardAuthApplicationService {
   ): Promise<Array<DashboardAuthResult['user']>> {
     const users = await this.users.listByOrganizationId(organizationId);
     return users.map((u) => this.toSafeUser(u));
+  }
+
+  /**
+   * Generates a shareable invite link instead of creating the user (or a
+   * password) right away -- there's no email delivery in v1, so the admin
+   * has to relay this link themselves (Slack, WhatsApp, in person). No
+   * DB row is created here; nothing exists until the invitee actually
+   * visits the link and sets their own password via acceptInvite(). This
+   * mirrors loginOrSignUpWithOAuth's ticket pattern (a signed, short-lived
+   * JWT carries everything needed) rather than adding an "invited" user
+   * status + a persisted token column -- there is no "pending invite" to
+   * list, resend, or revoke in this v1; re-inviting the same email before
+   * the old link expires simply issues a second, independent link.
+   */
+  async createInvite(input: CreateInviteInput): Promise<CreateInviteResult> {
+    const normalizedEmail = input.email.trim().toLowerCase();
+    const existing = await this.users.findByEmail(normalizedEmail);
+    if (existing) {
+      throw new ConflictException(
+        'An account with this email already exists',
+      );
+    }
+
+    const payload: InviteTicketPayload = {
+      type: INVITE_TICKET_TYPE,
+      email: normalizedEmail,
+      displayName: input.displayName?.trim() || null,
+      role: input.role,
+      organizationId: input.organizationId,
+    };
+    const inviteToken = this.jwt.sign(payload, {
+      expiresIn: INVITE_TICKET_TTL,
+    });
+
+    // Fragment, not query string -- same reasoning as the OAuth ticket
+    // redirect in handleOAuthCallback: this token must never land in a
+    // server access log or a Referer header.
+    return {
+      inviteToken,
+      inviteUrl: `${dashboardAppUrl()}/invite#token=${inviteToken}`,
+      email: normalizedEmail,
+    };
+  }
+
+  /**
+   * Lets the accept-invite page show "You're invited to join {org} as
+   * {role}" before asking for a password, without consuming the invite.
+   * Public (no auth) -- the invitee has no account/session yet.
+   */
+  async getInvitePreview(token: string): Promise<InvitePreview> {
+    const payload = this.verifyInviteTicket(token);
+
+    // The email may have been claimed (signup, OAuth, or a different
+    // invite) after this ticket was issued -- surface that now rather than
+    // letting the invitee fill in a password only to have acceptInvite
+    // reject it.
+    const existing = await this.users.findByEmail(payload.email);
+    if (existing) {
+      throw new ConflictException(
+        'An account with this email already exists -- sign in instead',
+      );
+    }
+
+    const organization = await this.organizations.getById(
+      payload.organizationId,
+    );
+    return {
+      email: payload.email,
+      displayName: payload.displayName,
+      role: payload.role,
+      organizationName: organization.displayName,
+    };
+  }
+
+  /** Second half of the invite flow -- the invitee sets their own password and is logged straight in, same UX as signUp()/completeOAuthSignUp(). */
+  async acceptInvite(
+    token: string,
+    password: string,
+  ): Promise<DashboardAuthResult> {
+    const payload = this.verifyInviteTicket(token);
+
+    // Re-check for a race: two tabs accepting the same invite, or the
+    // email signed up/was invited another way in between.
+    const existing = await this.users.findByEmail(payload.email);
+    if (existing) {
+      throw new ConflictException(
+        'An account with this email already exists',
+      );
+    }
+
+    const user = await this.createUser({
+      email: payload.email,
+      password,
+      displayName: payload.displayName,
+      role: payload.role,
+      organizationId: payload.organizationId,
+    });
+
+    return this.buildAuthResult(user);
+  }
+
+  /**
+   * Deliberately 404 (NotFoundException), not 401 -- this endpoint is
+   * public and unauthenticated by design (the invitee has no session), but
+   * the dashboard's own axios client globally intercepts any 401 response
+   * and redirects to /login, which would hijack the accept-invite page's
+   * own "this link has expired" messaging before it ever renders. 401 in
+   * this app's convention means "your access token is invalid"; an invite
+   * link doesn't have one, so reusing that status here would be a category
+   * mismatch on top of the redirect collision.
+   */
+  private verifyInviteTicket(token: string): InviteTicketPayload {
+    let payload: InviteTicketPayload;
+    try {
+      payload = this.jwt.verify<InviteTicketPayload>(token);
+    } catch {
+      throw new NotFoundException(
+        'This invite link has expired or is invalid -- ask for a new one',
+      );
+    }
+    if (payload.type !== INVITE_TICKET_TYPE) {
+      throw new NotFoundException('Invalid invite link');
+    }
+    return payload;
   }
 
   /** Role/status edits, scoped to the caller's own organization -- a member from a different org 404s, never a silent no-op or cross-org leak. */

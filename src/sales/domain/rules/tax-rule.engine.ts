@@ -45,19 +45,6 @@ export function runTaxRules(lines: ComplianceLine[]): ValidationResult {
     const lineRef = `lines[${i}]`;
 
     switch (line.taxCategory) {
-      case TaxCategory.VAT_STANDARD: {
-        const expectedTax = line.quantity * line.unitPrice * VAT_STANDARD_RATE;
-        const tolerance = 0.01;
-        if (Math.abs(line.taxAmount - expectedTax) > tolerance) {
-          errors.push({
-            code: 'TAX_VAT_STANDARD_RATE',
-            message: `VAT_STANDARD must use 16% rate. Expected tax: ${expectedTax.toFixed(2)}, got: ${line.taxAmount}`,
-            field: `${lineRef}.taxAmount`,
-          });
-        }
-        break;
-      }
-
       case TaxCategory.VAT_ZERO:
         if (line.taxAmount > 0) {
           errors.push({
@@ -78,19 +65,20 @@ export function runTaxRules(lines: ComplianceLine[]): ValidationResult {
         }
         break;
 
-      case TaxCategory.VAT_8: {
-        const expectedTax = line.quantity * line.unitPrice * VAT_EIGHT_RATE;
-        const tolerance = 0.01;
-        if (Math.abs(line.taxAmount - expectedTax) > tolerance) {
-          errors.push({
-            code: 'TAX_VAT_8_RATE',
-            message: `VAT_8 must use 8% rate. Expected tax: ${expectedTax.toFixed(2)}, got: ${line.taxAmount}`,
-            field: `${lineRef}.taxAmount`,
-          });
-        }
-        break;
-      }
-
+      // No taxAmount-matches-formula check for VAT_STANDARD/VAT_8: two
+      // contradictory tax conventions coexist across sources (manual
+      // dashboard entry computes taxAmount as tax-INCLUSIVE, matching what
+      // OscuSalesRequestBuilder/KRA actually expect; QuickBooks/Odoo-pulled
+      // invoices compute it as tax-EXCLUSIVE via expectedTaxAmount() above,
+      // matching those ERPs' own per-line pricing) and a single formula here
+      // can't validate both without rejecting one of them. Reconciling which
+      // convention was used, and whether the submitted amount was correct,
+      // is deferred to a separate ledger built after the sale registers --
+      // see the tax-convention-mismatch project memory for the full
+      // investigation. Don't re-add a blocking formula check here without
+      // resolving that first.
+      case TaxCategory.VAT_STANDARD:
+      case TaxCategory.VAT_8:
       case TaxCategory.OTHER:
         break;
     }

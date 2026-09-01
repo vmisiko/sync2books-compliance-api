@@ -43,14 +43,25 @@ export interface SyncItemsResult {
 
 /**
  * itemCd's qtyUnitCd(2)/pkgUnitCd(2) slots are a fixed-width identifier
- * component, not the canonical unit value -- the real unit still goes out
- * unmodified in the payload's separate qtyUnitCd/pkgUnitCd fields. Confirmed
- * empirically against the sandbox (2026-08-10, PIN P600004123A): a real,
- * valid business code like "U" (Pieces/item, 1 char) is accepted fine as
- * the separate field but rejected with `400 "Incorrect QtyUnitCd Prefix"`
- * when embedded here. So when a merchant's real code isn't exactly 2 chars
- * (many legitimate KRA codes aren't -- "U", "BLL", etc.), substitute one of
- * KRA's own 2-char codes for the slot instead of failing the whole sync.
+ * component. Many legitimate KRA codes aren't exactly 2 chars ("U", "L",
+ * "BLL", "CTN", ...; KRA's live /selectCodeList has no 2-char code for
+ * Litre at all -- only "L" and "LTR"), so when a merchant's real code
+ * doesn't fit the slot, substitute one of KRA's own 2-char codes instead of
+ * failing the whole sync.
+ *
+ * That substitution MUST be mirrored into the request's separate
+ * qtyUnitCd/pkgUnitCd fields too -- they can't diverge from what's embedded
+ * in itemCd. An earlier version of this code sent the real (unsubstituted)
+ * value in those flat fields while itemCd carried the fallback, on the
+ * theory (confirmed once, 2026-08-10, PIN P600004123A) that KRA only
+ * validates the two independently. That's since proven wrong: confirmed
+ * live 2026-09-01 against two different merchants/items whose real codes
+ * were on opposite sides of 2 chars (unitCode "L", 1 char, and unitCode
+ * "BLL", 3 chars) -- both were rejected with the identical `400 "The
+ * ItemCd isn't made up of correct QtyUnitCd"`, which only makes sense if
+ * KRA cross-checks itemCd's embedded component against the flat field and
+ * rejects any mismatch. Keeping both in lockstep (same fallback value in
+ * both places whenever the real code doesn't fit) is what fixes it.
  */
 const QTY_UNIT_CD_SLICE_FALLBACK = 'NO'; // "Number" (cdCls 10) -- generic, always valid
 const PKG_UNIT_CD_SLICE_FALLBACK = 'NT'; // "Not applicable" (cdCls 17) -- generic, always valid
@@ -83,21 +94,20 @@ function itemCdSlice(code: string, fallback: string): string {
  * seq MUST be 7 digits, not 8, and must be the next unused value for this tin
  * (KRA rejected an out-of-order 7-digit seq with
  * `400 "Invalid itemCd Sequence. Expected sequence ending with: ********1"`).
+ *
+ * Takes the already-substituted pkgUnitCd/qtyUnitCd slices (see the doc
+ * comment above itemCdSlice/QTY_UNIT_CD_SLICE_FALLBACK) rather than the raw
+ * item codes, so the caller can pass the exact same two values into the
+ * request's flat pkgUnitCd/qtyUnitCd fields -- itemCd and those fields must
+ * never disagree.
  */
 function generateEtimsItemCd(
-  item: {
-    productTypeCode: string;
-    packagingUnitCode: string;
-    unitCode: string;
-  },
+  item: { productTypeCode: string },
+  pkgUnitCdSlice: string,
+  qtyUnitCdSlice: string,
   seq: number,
 ): string {
   const orgnNatCd = 'KE';
-  const pkgUnitCdSlice = itemCdSlice(
-    item.packagingUnitCode,
-    PKG_UNIT_CD_SLICE_FALLBACK,
-  );
-  const qtyUnitCdSlice = itemCdSlice(item.unitCode, QTY_UNIT_CD_SLICE_FALLBACK);
   const seqStr = seq.toString().padStart(7, '0');
   if (seqStr.length > 7) {
     throw new Error(`itemCd sequence overflowed 7 digits: ${seq}`);
@@ -209,16 +219,6 @@ export async function syncItemsToEtims(
     input.merchantId,
     input.branchId,
   );
-  if (!connection) {
-    throw new Error(
-      `No active eTIMS connection for merchant=${input.merchantId} branch=${input.branchId}`,
-    );
-  }
-  if (!connection.kraBhfId) {
-    throw new Error(
-      `Branch ${input.branchId} has no KRA branch office id (kraBhfId) set`,
-    );
-  }
 
   const all = await deps.itemRepo.findByMerchant(input.merchantId);
   const picked = input.itemIds?.length
@@ -228,6 +228,48 @@ export async function syncItemsToEtims(
   const toSync = onlyPending
     ? picked.filter((i) => i.registrationStatus !== 'REGISTERED')
     : picked;
+
+  // A missing connection/kraBhfId used to throw here uncaught -- unlike every
+  // other failure mode below, which the per-item try/catch turns into a clean
+  // FAILED result, this one skipped straight past the whole function and hit
+  // NestJS's default handler as a bare 500 (there's no global exception
+  // filter in this app). New/not-yet-connected businesses hit this on their
+  // very first sync attempt. Report it the same way as any other sync
+  // failure instead: a real 200 with every requested item marked FAILED and
+  // a reason a user can act on, persisted so the item drawer shows it too.
+  if (!connection || !connection.kraBhfId) {
+    const reason = !connection
+      ? 'No active eTIMS connection for this branch -- connect eTIMS in ERP Connections before syncing items.'
+      : `Branch ${input.branchId} has no KRA branch office id (kraBhfId) set -- reconnect eTIMS for this branch.`;
+    const now = new Date();
+    const results: SyncItemResult[] = [];
+    for (const item of toSync) {
+      await deps.itemRepo.save({
+        ...item,
+        registrationStatus: 'FAILED',
+        lastSyncAttemptAt: now,
+        lastSyncResultCd: null,
+        lastSyncResultMsg: reason,
+        updatedAt: now,
+      });
+      results.push({
+        itemId: item.id,
+        itemCd: item.etimsItemCode ?? '',
+        success: false,
+        resultCd: null,
+        resultMsg: null,
+        error: reason,
+      });
+    }
+    return {
+      merchantId: input.merchantId,
+      branchId: input.branchId,
+      attempted: results.length,
+      synced: 0,
+      failed: results.length,
+      results,
+    };
+  }
 
   const results: SyncItemResult[] = [];
   // Scoped to the whole batch, not per item -- the itemCd sequence is a
@@ -291,6 +333,19 @@ export async function syncItemsToEtims(
     try {
       let itemCd = normalizeNonEmptyString(item.etimsItemCode);
 
+      // Computed once per item, outside the retry loop, and reused for both
+      // itemCd generation and the request's flat fields below -- see
+      // generateEtimsItemCd's doc comment for why these two must never
+      // diverge from each other.
+      const pkgUnitCdSlice = itemCdSlice(
+        item.packagingUnitCode,
+        PKG_UNIT_CD_SLICE_FALLBACK,
+      );
+      const qtyUnitCdSlice = itemCdSlice(
+        item.unitCode,
+        QTY_UNIT_CD_SLICE_FALLBACK,
+      );
+
       let res: Awaited<ReturnType<IEtimsAdapter['saveItem']>>;
       let resultCd: string | null;
       let resultMsg: string | null;
@@ -304,7 +359,12 @@ export async function syncItemsToEtims(
             connection.kraPin,
             connection.environment,
           );
-          itemCd = generateEtimsItemCd({ ...item, productTypeCode }, seq);
+          itemCd = generateEtimsItemCd(
+            { productTypeCode },
+            pkgUnitCdSlice,
+            qtyUnitCdSlice,
+            seq,
+          );
         }
 
         const request: OscuItemSaveReq = {
@@ -317,8 +377,8 @@ export async function syncItemsToEtims(
           itemNm: item.name,
           itemStdNm: null,
           orgnNatCd: item.originCountry ?? 'KE',
-          pkgUnitCd: item.packagingUnitCode,
-          qtyUnitCd: item.unitCode,
+          pkgUnitCd: pkgUnitCdSlice,
+          qtyUnitCd: qtyUnitCdSlice,
           taxTyCd: item.taxTyCd,
           btchNo: null,
           bcd: item.sku ?? null,

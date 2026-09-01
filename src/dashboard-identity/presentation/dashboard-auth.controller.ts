@@ -1,4 +1,3 @@
-import { randomBytes } from 'crypto';
 import {
   Body,
   Controller,
@@ -34,6 +33,7 @@ import { DashboardLoginDto } from './dto/dashboard-login.dto';
 import { DashboardSignUpDto } from './dto/dashboard-signup.dto';
 import { CompleteOAuthSignUpDto } from './dto/complete-oauth-signup.dto';
 import { CreateMemberDto } from './dto/create-member.dto';
+import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
 import { DashboardAuthResponseDto } from './dto/dashboard-auth-response.dto';
 
@@ -208,23 +208,50 @@ export class DashboardAuthController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary:
-      'Directly add a teammate to the organisation with a generated temporary password (v1 has no email-invite flow — the password is returned once, here).',
+      "Generate a shareable invite link for a teammate to join the caller's organisation and set their own password. No email is sent (v1 has no email delivery) — copy the returned link and share it yourself. Nothing is created for them until they actually accept it.",
   })
-  async createMember(@Req() req: Request, @Body() body: CreateMemberDto) {
+  async inviteMember(@Req() req: Request, @Body() body: CreateMemberDto) {
     const requestUser = req.user as DashboardRequestUser;
-    const temporaryPassword = randomBytes(9).toString('base64url');
-    const user = await this.auth.createUser({
+    const invite = await this.auth.createInvite({
       email: body.email,
-      password: temporaryPassword,
       displayName: body.displayName,
       role: body.role,
       organizationId: requestUser.organizationId,
     });
-    const { passwordHash: _passwordHash, ...safeUser } = user;
     return {
       success: true,
-      message: 'Member created',
-      data: { user: safeUser, temporaryPassword },
+      message: 'Invite created',
+      data: invite,
+    };
+  }
+
+  @Get('invite/:token')
+  @ApiOperation({
+    summary:
+      "Preview an invite before accepting it (who's inviting them, to which org, as what role) without consuming it. Public — the invitee has no account/session yet.",
+  })
+  async getInvite(@Param('token') token: string) {
+    const preview = await this.auth.getInvitePreview(token);
+    return { success: true, message: 'OK', data: preview };
+  }
+
+  @Post('invite/accept')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary:
+      "Accept an invite by setting a password. Creates the account and logs them straight in, same as signup. Public — the invitee has no account/session yet.",
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Account created',
+    type: DashboardAuthResponseDto,
+  })
+  async acceptInvite(@Body() body: AcceptInviteDto) {
+    const result = await this.auth.acceptInvite(body.token, body.password);
+    return {
+      success: true,
+      message: 'Account created successfully',
+      data: result,
     };
   }
 

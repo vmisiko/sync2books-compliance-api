@@ -60,6 +60,86 @@ function makeSyncStateRepo() {
 }
 
 describe('syncItemsToEtims', () => {
+  it('reports a clean per-item failure instead of throwing when there is no active eTIMS connection', async () => {
+    // A new/not-yet-connected business's first sync attempt used to throw an
+    // uncaught Error here, which the dashboard surfaced as a bare 500
+    // "Internal server error" instead of an actionable message.
+    const item = makeItem();
+    const itemRepo = {
+      findByMerchant: jest.fn().mockResolvedValue([item]),
+      save: jest.fn().mockImplementation((i) => Promise.resolve(i)),
+    };
+    const connectionRepo = {
+      findByMerchantAndBranch: jest.fn().mockResolvedValue(null),
+    };
+    const etimsAdapter = { saveItem: jest.fn() };
+    const syncStateRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await syncItemsToEtims(
+      { merchantId: 'merchant-1', branchId: 'branch-1' },
+      {
+        itemRepo: itemRepo as any,
+        connectionRepo: connectionRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+      },
+    );
+
+    expect(result.attempted).toBe(1);
+    expect(result.synced).toBe(0);
+    expect(result.failed).toBe(1);
+    expect(result.results[0].success).toBe(false);
+    expect(result.results[0].error).toMatch(/no active etims connection/i);
+    expect(etimsAdapter.saveItem).not.toHaveBeenCalled();
+    // Persists the reason so the item detail drawer shows it, same as any
+    // other sync failure.
+    expect(itemRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registrationStatus: 'FAILED',
+        lastSyncResultMsg: expect.stringMatching(/no active etims connection/i),
+      }),
+    );
+  });
+
+  it('reports a clean per-item failure when the connection has no kraBhfId set', async () => {
+    const item = makeItem();
+    const itemRepo = {
+      findByMerchant: jest.fn().mockResolvedValue([item]),
+      save: jest.fn().mockImplementation((i) => Promise.resolve(i)),
+    };
+    const connectionRepo = {
+      findByMerchantAndBranch: jest.fn().mockResolvedValue({
+        kraPin: 'P000000000A',
+        kraBhfId: null,
+        cmcKey: 'cmc-key',
+        deviceId: 'device-1',
+        environment: 'SANDBOX',
+      }),
+    };
+    const etimsAdapter = { saveItem: jest.fn() };
+    const syncStateRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await syncItemsToEtims(
+      { merchantId: 'merchant-1', branchId: 'branch-1' },
+      {
+        itemRepo: itemRepo as any,
+        connectionRepo: connectionRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+      },
+    );
+
+    expect(result.failed).toBe(1);
+    expect(result.results[0].error).toMatch(/kraBhfId/);
+    expect(etimsAdapter.saveItem).not.toHaveBeenCalled();
+  });
+
   it("sends the item's own unitPrice/originCountry as dftPrc/orgnNatCd instead of hardcoded 0/KE", async () => {
     const item = makeItem({ unitPrice: 1999.5, originCountry: 'CN' });
     let capturedRequest: any = null;
@@ -149,6 +229,58 @@ describe('syncItemsToEtims', () => {
 
     expect(capturedRequest.dftPrc).toBe(0);
     expect(capturedRequest.orgnNatCd).toBe('KE');
+  });
+
+  it("substitutes the itemCd fallback into the request's own qtyUnitCd/pkgUnitCd fields too, instead of sending the real non-2-char codes -- KRA rejects saveItem with 400 'The ItemCd isn't made up of correct QtyUnitCd' when itemCd's embedded slot and the flat field disagree (confirmed live 2026-09-01)", async () => {
+    // "L" (Litre) and "BLL" (Barrel) are both real KRA cdCls=10 codes, on
+    // opposite sides of the 2-char slot -- neither fits, so itemCd must
+    // substitute "NO" for the slot, and the flat qtyUnitCd field must match
+    // that substitution rather than carry the real "L"/"BLL" value.
+    const item = makeItem({ unitCode: 'L', packagingUnitCode: 'BLL' });
+    let capturedRequest: any = null;
+
+    const itemRepo = {
+      findByMerchant: jest.fn().mockResolvedValue([item]),
+      save: jest.fn().mockImplementation((i) => Promise.resolve(i)),
+    };
+    const connectionRepo = {
+      findByMerchantAndBranch: jest.fn().mockResolvedValue({
+        kraPin: 'P000000000A',
+        kraBhfId: '00',
+        cmcKey: 'cmc-key',
+        deviceId: 'device-1',
+        environment: 'SANDBOX',
+      }),
+    };
+    const etimsAdapter = {
+      saveItem: jest.fn().mockImplementation((request) => {
+        capturedRequest = request;
+        return Promise.resolve({
+          success: true,
+          rawResponse: { resultCd: '000', resultMsg: 'OK' },
+        });
+      }),
+    };
+    const syncStateRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockResolvedValue(undefined),
+    };
+
+    await syncItemsToEtims(
+      { merchantId: 'merchant-1', branchId: 'branch-1' },
+      {
+        itemRepo: itemRepo as any,
+        connectionRepo: connectionRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+      },
+    );
+
+    expect(capturedRequest.qtyUnitCd).toBe('NO');
+    expect(capturedRequest.pkgUnitCd).toBe('NT');
+    // itemCd's embedded slots must match those same substituted values, not
+    // the real "L"/"BLL" codes.
+    expect(capturedRequest.itemCd).toContain('NT' + 'NO');
   });
 
   it('releases the itemCd sequence and clears etimsItemCode on a permanent (non-retryable) rejection', async () => {
