@@ -99,6 +99,49 @@ describe('OscuSalesRequestBuilder', () => {
     expect(req.itemList[0].pkg).toBe(1);
   });
 
+  it('sends pkg: 1 for a non-"NT" pkgUnitCd too, regardless of quantity', () => {
+    // Confirmed live 2026-09-01: pkgUnitCd "CT" (Carton), qty: 56, pkg: 56 was
+    // rejected the same way ("Invalid pkg for ItemList 1. Expected: 1, Found: 56"),
+    // disproving the earlier "only NT needs pkg: 1" theory -- KRA expects pkg: 1
+    // unconditionally for sendSalesTransaction.
+    const req = OscuSalesRequestBuilder.build({
+      tin: 'A123456789Z',
+      bhfId: '00',
+      cmcKey: 'cmc',
+      now: new Date('2026-02-20T10:20:30Z'),
+      payload: {
+        documentNumber: 'INV-125',
+        documentType: 'SALE_INVOICE',
+        invoiceSequence: 1,
+        branchId: '00',
+        deviceId: 'dev',
+        currency: 'KES',
+        exchangeRate: 1,
+        subtotalAmount: 56000,
+        taxAmount: 0,
+        totalAmount: 56000,
+        lines: [
+          {
+            itemCode: 'ITEM-1',
+            description: 'Attachment Flow Test Service',
+            quantity: 56,
+            unitPrice: 1000,
+            taxAmount: 0,
+            classificationCode: '1000000000',
+            unitCode: 'NO',
+            packagingUnitCode: 'CT',
+            taxTyCd: 'D',
+            productTypeCode: '3',
+          },
+        ],
+      },
+    });
+
+    expect(req.itemList[0].qty).toBe(56);
+    expect(req.itemList[0].pkgUnitCd).toBe('CT');
+    expect(req.itemList[0].pkg).toBe(1);
+  });
+
   it('uses R receipt type for credit note', () => {
     const req = OscuSalesRequestBuilder.build({
       tin: 'A123456789Z',

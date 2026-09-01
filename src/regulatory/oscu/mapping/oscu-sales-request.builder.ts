@@ -38,14 +38,16 @@ export class OscuSalesRequestBuilder {
         itemNm: l.description,
         bcd: null,
         pkgUnitCd: l.packagingUnitCode,
-        // KRA rejects pkg: 0 with "Invalid pkg for ItemList N. Expected: 1, Found: 0"
-        // (confirmed live 2026-08-11). It's tempting to read that "Expected: 1" as
-        // "expected == qty" (qty was 1 in that test), but it isn't: pkg is a package
-        // COUNT, independent of qty. With pkgUnitCd "NT" (no packaging modeled) KRA
-        // always expects exactly 1 package regardless of qty -- confirmed live
-        // 2026-09-01 with qty: 2, rejected as "Invalid pkg for ItemList 1. Expected:
-        // 1, Found: 2" when pkg was sent as qty.
-        pkg: l.packagingUnitCode === 'NT' ? 1 : l.quantity,
+        // pkg is a package COUNT, independent of qty -- KRA always expects exactly 1
+        // for sendSalesTransaction, regardless of pkgUnitCd or qty. Confirmed live
+        // 2026-09-01 for pkgUnitCd "NT" (qty: 2, pkg: 2 rejected: "Invalid pkg for
+        // ItemList 1. Expected: 1, Found: 2"), and again the same day for pkgUnitCd
+        // "CT" (qty: 56, pkg: 56 rejected: "...Expected: 1, Found: 56") -- ruling out
+        // the earlier theory that this only applied to "NT" (no packaging modeled).
+        // Also rejects pkg: 0 ("...Expected: 1, Found: 0", confirmed live 2026-08-11).
+        // Don't generalize to insertStockIO, which has its own confirmed-live success
+        // with pkg: 10, qty: 10 -- KRA validates pkg inconsistently across endpoints.
+        pkg: 1,
         qtyUnitCd: l.unitCode,
         qty: l.quantity,
         prc: l.unitPrice,

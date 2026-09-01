@@ -200,13 +200,16 @@ coincidental with other fixes happening in the same session, not causal. If you 
 Confirmed working end-to-end 2026-08-11 (real `ACCEPTED` response with a live `receiptSignature` and
 `etimsUrl`) after fixing four separate bugs, all present in the "obvious" version of this request:
 
-1. **`pkg` must be a real package count, not `0`.** `400 "Invalid pkg for ItemList 1. Expected: 1, Found: 0"`.
-   It's tempting to fix this with `pkg: quantity` (matches the pattern used for `insertStockIO`, below) --
-   don't. That single test happened to use `qty: 1`, so `pkg: 1` satisfied both "not 0" and "equals qty" at
-   once and looked confirmed. **Confirmed live 2026-09-01 with `qty: 2`: sending `pkg: 2` (== qty) was
-   rejected with `400 "Invalid pkg for ItemList 1. Expected: 1, Found: 2"`.** For `sendSalesTransaction`,
-   `pkg` is a package *count*, independent of `qty` -- with `pkgUnitCd: "NT"` (no packaging modeled) KRA
-   always expects exactly `pkg: 1`, regardless of `qty`. See `oscu-sales-request.builder.ts`.
+1. **`pkg` must always be `1` for `sendSalesTransaction` — not a real package count, and never `quantity`.**
+   Sending `pkg: 0` fails with `400 "Invalid pkg for ItemList 1. Expected: 1, Found: 0"`. It's tempting to
+   fix this with `pkg: quantity` (matches the pattern used for `insertStockIO`, below) -- don't. An early test
+   happened to use `qty: 1`, so `pkg: 1` satisfied both "not 0" and "equals qty" at once and looked confirmed.
+   **Confirmed live 2026-09-01 with `pkgUnitCd: "NT"`, `qty: 2`: sending `pkg: 2` (== qty) was rejected with
+   `400 "Invalid pkg for ItemList 1. Expected: 1, Found: 2"`.** A first fix narrowed this to "`pkg: 1` only
+   when `pkgUnitCd` is `"NT"` (no packaging modeled), else `pkg: quantity`" -- **also wrong, disproven the
+   same day**: a real production case with `pkgUnitCd: "CT"` (Carton), `qty: 56` was rejected identically
+   (`"...Expected: 1, Found: 56"`). `pkg` is a package *count*, independent of both `qty` and `pkgUnitCd` --
+   for `sendSalesTransaction` it is unconditionally `1`. See `oscu-sales-request.builder.ts`.
    This does **not** necessarily hold for `insertStockIO`, which has its own confirmed-live success with
    `pkg: 10, qty: 10` (below) -- KRA validates `pkg` inconsistently across endpoints, so don't generalize
    this rule to other calls without live-testing them individually.
