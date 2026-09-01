@@ -1,6 +1,7 @@
 import { ComplianceDocument } from '../../domain/entities/compliance-document.entity';
 import { assertValidTransition as _assertValidTransition } from '../../domain/state-machine/compliance-state-machine';
 import { ComplianceStatus } from '../../../shared/domain/enums/compliance-status.enum';
+import { deriveLineSnapshot } from '../../domain/utils/line-snapshot.util';
 import type { ComplianceItem } from '../../../shared/domain/entities/compliance-item.entity';
 import type {
   IComplianceDocumentRepository,
@@ -76,12 +77,7 @@ export async function prepareDocument(
     return {
       ...l,
       etimsItemCodeSnapshot: itemCd,
-      classificationCodeSnapshot:
-        l.classificationCodeSnapshot?.trim() !== ''
-          ? l.classificationCodeSnapshot
-          : item.classificationCode,
-      unitCodeSnapshot:
-        l.unitCodeSnapshot?.trim() !== '' ? l.unitCodeSnapshot : item.unitCode,
+      ...deriveLineSnapshot(l, item),
       packagingUnitCodeSnapshot,
       taxTyCdSnapshot,
       productTypeCodeSnapshot,

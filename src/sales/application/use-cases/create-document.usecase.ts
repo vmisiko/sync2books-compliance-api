@@ -1,6 +1,7 @@
 import { ComplianceLine } from '../../domain/entities/compliance-line.entity';
 import { ComplianceDocument } from '../../domain/entities/compliance-document.entity';
 import { generateIdempotencyKey } from '../../domain/utils/idempotency.util';
+import { deriveLineSnapshot } from '../../domain/utils/line-snapshot.util';
 import { ComplianceStatus } from '../../../shared/domain/enums/compliance-status.enum';
 import { DocumentType } from '../../../shared/domain/enums/document-type.enum';
 import { SourceSystem } from '../../../shared/domain/enums/source-system.enum';
@@ -106,15 +107,7 @@ export async function createDocument(
       unitPrice: l.unitPrice,
       taxCategory: l.taxCategory as ComplianceLine['taxCategory'],
       taxAmount: l.taxAmount,
-      classificationCodeSnapshot:
-        l.classificationCodeSnapshot &&
-        l.classificationCodeSnapshot.trim() !== ''
-          ? l.classificationCodeSnapshot
-          : item.classificationCode,
-      unitCodeSnapshot:
-        l.unitCodeSnapshot && l.unitCodeSnapshot.trim() !== ''
-          ? l.unitCodeSnapshot
-          : item.unitCode,
+      ...deriveLineSnapshot(l, item),
       packagingUnitCodeSnapshot:
         l.packagingUnitCodeSnapshot ?? item.packagingUnitCode,
       taxTyCdSnapshot: l.taxTyCdSnapshot ?? item.taxTyCd,

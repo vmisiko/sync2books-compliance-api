@@ -2,6 +2,7 @@ import { ComplianceDocument } from '../../domain/entities/compliance-document.en
 import { assertValidTransition } from '../../domain/state-machine/compliance-state-machine';
 import type { ValidationResult } from '../../domain/value-objects/validation-result.vo';
 import { runComplianceRules } from '../../domain/rules/compliance-rules.engine';
+import { deriveLineSnapshot } from '../../domain/utils/line-snapshot.util';
 import { ComplianceStatus } from '../../../shared/domain/enums/compliance-status.enum';
 import type {
   IComplianceDocumentRepository,
@@ -44,16 +45,33 @@ export async function validateDocument(
   const items = await itemRepo.findByIds(itemIds);
   const itemsById = new Map(items.map((i) => [i.id, i]));
 
-  const validation = runComplianceRules({ document, itemsById });
+  // Lines aren't frozen until VALIDATED (see ComplianceLine's doc comment),
+  // so re-derive classification/unit snapshots from the current catalog
+  // item on every DRAFT validation attempt -- otherwise a document created
+  // before an item's codes were filled in stays permanently stuck re-using
+  // its original empty snapshot, even after the item is fixed.
+  const reDerivedDocument: ComplianceDocument = {
+    ...document,
+    lines: document.lines.map((l) => {
+      const item = itemsById.get(l.itemId);
+      return item ? { ...l, ...deriveLineSnapshot(l, item) } : l;
+    }),
+  };
+
+  const validation = runComplianceRules({
+    document: reDerivedDocument,
+    itemsById,
+  });
 
   if (!validation.isValid) {
-    return { document, validation, transitioned: false };
+    await documentRepo.save(reDerivedDocument);
+    return { document: reDerivedDocument, validation, transitioned: false };
   }
 
   assertValidTransition(ComplianceStatus.DRAFT, ComplianceStatus.VALIDATED);
 
   const updated: ComplianceDocument = {
-    ...document,
+    ...reDerivedDocument,
     complianceStatus: ComplianceStatus.VALIDATED,
   };
   await documentRepo.save(updated);
