@@ -111,7 +111,13 @@ export class DashboardSalesController {
       {
         merchantId: body.merchantId,
         branchId: body.branchId,
-        sourceSystem: SourceSystem.API,
+        // A human created this through the dashboard's own Add Sale/express
+        // credit-note UI -- SourceSystem.API means "arrived via the main-API
+        // pull integration" (see SourceSystem.MANUAL's doc comment), which
+        // this isn't. Previously mislabeled API here, which made these sales
+        // indistinguishable in reporting/filtering from ones a merchant's own
+        // integration actually posted through api-sales.controller.ts.
+        sourceSystem: SourceSystem.MANUAL,
         sourceDocumentId: body.traderInvoiceNumber,
         documentType: docType,
         documentNumber: body.traderInvoiceNumber,
@@ -210,7 +216,13 @@ export class DashboardSalesController {
       {
         merchantId: body.merchantId,
         branchId: body.branchId,
-        sourceSystem: SourceSystem.API,
+        // A human created this through the dashboard's own Add Sale/express
+        // credit-note UI -- SourceSystem.API means "arrived via the main-API
+        // pull integration" (see SourceSystem.MANUAL's doc comment), which
+        // this isn't. Previously mislabeled API here, which made these sales
+        // indistinguishable in reporting/filtering from ones a merchant's own
+        // integration actually posted through api-sales.controller.ts.
+        sourceSystem: SourceSystem.MANUAL,
         sourceDocumentId: body.traderInvoiceNumber,
         documentType: DocumentType.CREDIT_NOTE,
         documentNumber: body.traderInvoiceNumber,

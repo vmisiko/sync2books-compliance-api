@@ -165,6 +165,24 @@ describe('Express credit note controllers', () => {
     expect(salesService.submitDocument).toHaveBeenCalledWith('cn-1');
   });
 
+  it('tags a dashboard-created express credit note as MANUAL, not API -- a human made this in the dashboard, not a merchant integration (previously mislabeled API, indistinguishable from a real API-sourced document in reporting)', async () => {
+    await dashboardController.createExpressCreditNote(
+      {
+        merchantId: 'merchant-1',
+        branchId: 'branch-1',
+        saleId: 'sale-1',
+        traderInvoiceNumber: 'CN-4',
+        returnDate: '2026-02-21',
+      },
+      'false',
+    )
+
+    expect(salesService.createDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceSystem: SourceSystem.MANUAL }),
+      { enqueueProcessing: false },
+    )
+  })
+
   it('rejects non-ACCEPTED sale', async () => {
     salesService.getDocument.mockResolvedValueOnce({
       document: { ...acceptedSale, complianceStatus: ComplianceStatus.DRAFT },
@@ -184,4 +202,33 @@ describe('Express credit note controllers', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it('tags a plain dashboard-created sale as MANUAL, not API', async () => {
+    await dashboardController.createSale(
+      {
+        merchantId: 'merchant-1',
+        branchId: 'branch-1',
+        saleDate: '2026-02-20',
+        traderInvoiceNumber: 'INV-99',
+        receiptTypeCode: 'S',
+        paymentTypeCode: '01',
+        invoiceStatusCode: '02',
+        items: [
+          {
+            id: 'item-1',
+            quantity: 1,
+            unitPrice: 100,
+            taxCategory: 'VAT_STANDARD',
+            taxAmount: 16,
+          },
+        ],
+      },
+      'false',
+    )
+
+    expect(salesService.createDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceSystem: SourceSystem.MANUAL }),
+      { enqueueProcessing: false },
+    )
+  })
 });
