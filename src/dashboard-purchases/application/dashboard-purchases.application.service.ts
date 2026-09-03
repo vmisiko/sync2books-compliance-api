@@ -135,17 +135,19 @@ export class DashboardPurchasesApplicationService {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const branches = (
       await this.organization.listBranches(complianceTenantId)
-    ).filter(
-      (b) =>
-        !!b.sync2booksBranchId &&
-        (!options.branchId || b.id === options.branchId),
-    );
+    ).filter((b) => !options.branchId || b.id === options.branchId);
 
     for (const branch of branches) {
       try {
+        // `sync2booksBranchId ?? branch.id` -- same fallback
+        // ComplianceOrganizationConnectionTypeOrmRepository.findByMerchantAndBranch
+        // already applies: a branch whose eTIMS connection was provisioned
+        // directly against Compliance (no main-api link) still resolves by
+        // its own compliance-side id, so it must not be skipped here just
+        // because sync2booksBranchId is null.
         const envelope = await this.oscuOperations.purchaseTransactionInfo(
           merchantId,
-          branch.sync2booksBranchId as string,
+          branch.sync2booksBranchId ?? branch.id,
           EPOCH_LAST_REQ_DT,
         );
         const data = (envelope as { rawResponse?: Record<string, unknown> })
@@ -248,7 +250,7 @@ export class DashboardPurchasesApplicationService {
       }
 
       const branch = branches.find((b) => b.id === row.branchId);
-      if (!branch?.sync2booksBranchId) {
+      if (!branch) {
         await fail(row, 'Branch has no active eTIMS connection.');
         continue;
       }
@@ -313,7 +315,7 @@ export class DashboardPurchasesApplicationService {
       try {
         envelope = await this.oscuOperations.sendPurchaseTransaction(
           merchantId,
-          branch.sync2booksBranchId,
+          branch.sync2booksBranchId ?? branch.id,
           payload,
         );
       } catch (error) {
