@@ -149,9 +149,9 @@ export class DashboardPurchasesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      "Register a purchase line item as a catalog item, using classification/unit/tax codes straight from the supplier's own KRA filing -- only productTypeCode must be supplied, since that's never inferable. Once synced to KRA (Item Sync), a subsequent confirm() on this invoice will find it by name and stop reporting it as missing.",
+      "Register a purchase line item as a catalog item, using classification/unit/tax codes straight from the supplier's own KRA filing -- only productTypeCode must be supplied, since that's never inferable. Also immediately submits the item to KRA (same saveItem call Item Sync makes), so a subsequent confirm() on this invoice finds it by name and stops reporting it as missing without a separate manual sync step.",
   })
-  @ApiResponse({ status: 200, description: 'Registered (or updated) catalog item' })
+  @ApiResponse({ status: 200, description: 'Registered (or updated) catalog item, with its KRA submission outcome' })
   async registerLineItem(
     @ActiveTenant() tenantId: string,
     @Param('id') id: string,
@@ -164,10 +164,16 @@ export class DashboardPurchasesController {
       lineItemId,
       body.productTypeCode,
     );
+    const verb = result.created ? 'registered' : 'updated';
+    const message = result.submittedToKra
+      ? `Item ${verb} and submitted to KRA`
+      : `Item ${verb} locally, but KRA submission failed: ${result.kraError}`;
     return {
       success: true,
-      message: result.created ? 'Item registered' : 'Item updated',
+      message,
       data: result.item,
+      submittedToKra: result.submittedToKra,
+      kraError: result.kraError,
     };
   }
 

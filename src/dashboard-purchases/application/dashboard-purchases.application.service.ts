@@ -628,7 +628,12 @@ export class DashboardPurchasesApplicationService {
     purchaseInvoiceId: string,
     lineItemId: string,
     productTypeCode: string,
-  ): Promise<{ item: CatalogItem; created: boolean }> {
+  ): Promise<{
+    item: CatalogItem;
+    created: boolean;
+    submittedToKra: boolean;
+    kraError: string | null;
+  }> {
     if (!(PRODUCT_TYPE_CODES as readonly string[]).includes(productTypeCode)) {
       throw new BadRequestException(
         "productTypeCode must be '1' (Raw Material), '2' (Finished Product) or '3' (Service)",
@@ -674,7 +679,7 @@ export class DashboardPurchasesApplicationService {
       toRawNumber(raw.totAmt ?? raw.splyAmt, 0),
     );
 
-    return this.catalog.registerItem({
+    const registration = await this.catalog.registerItem({
       merchantId,
       externalId,
       name,
@@ -688,6 +693,48 @@ export class DashboardPurchasesApplicationService {
       originCountry: 'KE',
       sourceSystem: 'ETIMS',
     });
+
+    // Registering locally isn't enough for confirm() to accept this item --
+    // it only matches on registrationStatus === 'REGISTERED', which is set
+    // by a successful eTIMS saveItem call (see sync-items.usecase.ts), not
+    // by registerItem() itself. Immediately submit to KRA here too, so a
+    // single "Register in Catalog" click is enough instead of requiring a
+    // separate manual Item Sync pass first.
+    if (registration.item.registrationStatus === 'REGISTERED') {
+      return { ...registration, submittedToKra: true, kraError: null };
+    }
+    if (!row.branchId) {
+      return {
+        ...registration,
+        submittedToKra: false,
+        kraError:
+          'This purchase invoice has no branch set -- sync this item from Item Sync once a branch is linked.',
+      };
+    }
+
+    const syncResult = await this.catalog.syncItems({
+      merchantId,
+      branchId: row.branchId,
+      itemIds: [registration.item.id],
+    });
+    const itemSyncResult = syncResult.results[0];
+    const submittedToKra = itemSyncResult?.success ?? false;
+    // syncItems persists its outcome (REGISTERED/FAILED, lastSyncResultMsg,
+    // etimsItemCode) regardless of success -- re-fetch either way so the
+    // response reflects that, instead of the pre-sync (still PENDING) object
+    // registerItem() returned above.
+    const item =
+      (await this.catalog.getItemById(registration.item.id)) ??
+      registration.item;
+
+    return {
+      item,
+      created: registration.created,
+      submittedToKra,
+      kraError: submittedToKra
+        ? null
+        : (itemSyncResult?.error ?? 'Item did not sync to KRA'),
+    };
   }
 
   private findRawLineItem(
