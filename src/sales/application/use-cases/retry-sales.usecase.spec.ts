@@ -80,16 +80,20 @@ function makeDocumentRepo(initial: ComplianceDocument[]) {
       store.set(d.id, d);
       return Promise.resolve(d);
     }),
-    findById: jest.fn().mockImplementation((id: string) =>
-      Promise.resolve(store.get(id) ?? null),
-    ),
+    findById: jest
+      .fn()
+      .mockImplementation((id: string) =>
+        Promise.resolve(store.get(id) ?? null),
+      ),
     findByIdempotencyKey: jest.fn().mockResolvedValue(null),
     findBySourceInvoiceId: jest.fn().mockResolvedValue(null),
-    findByMerchant: jest.fn().mockImplementation((merchantId: string) =>
-      Promise.resolve(
-        [...store.values()].filter((d) => d.merchantId === merchantId),
+    findByMerchant: jest
+      .fn()
+      .mockImplementation((merchantId: string) =>
+        Promise.resolve(
+          [...store.values()].filter((d) => d.merchantId === merchantId),
+        ),
       ),
-    ),
     _store: store,
   };
 }
@@ -119,11 +123,15 @@ function makeEventRepo() {
 function makeSyncStateRepo() {
   const store = new Map<string, string>();
   return {
-    findOne: jest.fn().mockImplementation(({ where: { syncKey } }) =>
-      Promise.resolve(
-        store.has(syncKey) ? { syncKey, lastReqDt: store.get(syncKey) } : null,
+    findOne: jest
+      .fn()
+      .mockImplementation(({ where: { syncKey } }) =>
+        Promise.resolve(
+          store.has(syncKey)
+            ? { syncKey, lastReqDt: store.get(syncKey) }
+            : null,
+        ),
       ),
-    ),
     upsert: jest.fn().mockImplementation(({ syncKey, lastReqDt }) => {
       store.set(syncKey, lastReqDt);
       return Promise.resolve(undefined);
@@ -131,8 +139,32 @@ function makeSyncStateRepo() {
   };
 }
 
+/**
+ * Stands in for the SalesService methods retrySalesToEtims now delegates the
+ * DRAFT -> VALIDATED -> READY_FOR_SUBMISSION walk to. Advances status in the
+ * same in-memory store the document repo reads from, so the use case observes
+ * a real status change between steps exactly as it does in production.
+ */
+function makePipeline(documentRepo: ReturnType<typeof makeDocumentRepo>) {
+  const advance = (id: string, to: ComplianceStatus) => {
+    const doc = documentRepo._store.get(id)!;
+    documentRepo._store.set(id, { ...doc, complianceStatus: to });
+  };
+  return {
+    applyInventoryMovements: jest.fn().mockResolvedValue(undefined),
+    validateDocument: jest.fn().mockImplementation((id: string) => {
+      advance(id, ComplianceStatus.VALIDATED);
+      return Promise.resolve({ validation: { isValid: true, errors: [] } });
+    }),
+    prepareDocument: jest.fn().mockImplementation((id: string) => {
+      advance(id, ComplianceStatus.READY_FOR_SUBMISSION);
+      return Promise.resolve(undefined);
+    }),
+  };
+}
+
 describe('retrySalesToEtims', () => {
-  it('retries only documents in a retryable status (REJECTED/FAILED/RETRYING/READY_FOR_SUBMISSION)', async () => {
+  it('retries every status the dashboard shows as actionable, DRAFT and VALIDATED included', async () => {
     const rejected = makeDocument({
       id: 'doc-rejected',
       complianceStatus: ComplianceStatus.REJECTED,
@@ -155,6 +187,7 @@ describe('retrySalesToEtims', () => {
         .mockResolvedValue({ success: true, receiptNumber: 'RCPT-1' }),
     };
     const syncStateRepo = makeSyncStateRepo();
+    const pipeline = makePipeline(documentRepo);
 
     const result = await retrySalesToEtims(
       { merchantId: 'merchant-1' },
@@ -164,17 +197,119 @@ describe('retrySalesToEtims', () => {
         eventRepo: eventRepo as any,
         etimsAdapter: etimsAdapter as any,
         syncStateRepo: syncStateRepo as any,
+        ...pipeline,
+      },
+    );
+
+    expect(result.attempted).toBe(3);
+    expect(result.succeeded).toBe(3);
+    expect(etimsAdapter.submitInvoice).toHaveBeenCalledTimes(3);
+
+    // DRAFT took the full walk; VALIDATED skipped straight to prepare.
+    expect(pipeline.validateDocument).toHaveBeenCalledTimes(1);
+    expect(pipeline.validateDocument).toHaveBeenCalledWith('doc-draft');
+    expect(pipeline.prepareDocument).toHaveBeenCalledTimes(2);
+    expect(pipeline.applyInventoryMovements).toHaveBeenCalledTimes(1);
+    expect(pipeline.applyInventoryMovements).toHaveBeenCalledWith('doc-draft');
+  });
+
+  // The live symptom this endpoint was reported for: the dashboard renders a
+  // DRAFT sale as "ready_to_submit" and offers "Submit to KRA", so a retry
+  // targeting it by id must actually submit -- not answer
+  // `{attempted: 0, results: []}` with nothing sent and nothing logged.
+  it('submits a DRAFT sale targeted by id instead of silently returning attempted=0', async () => {
+    const draft = makeDocument({
+      id: 'doc-draft',
+      complianceStatus: ComplianceStatus.DRAFT,
+    });
+
+    const documentRepo = makeDocumentRepo([draft]);
+    const connectionRepo = makeConnectionRepo();
+    const eventRepo = makeEventRepo();
+    const etimsAdapter = {
+      submitInvoice: jest
+        .fn()
+        .mockResolvedValue({ success: true, receiptNumber: 'RCPT-7' }),
+    };
+    const syncStateRepo = makeSyncStateRepo();
+    const pipeline = makePipeline(documentRepo);
+
+    const result = await retrySalesToEtims(
+      { merchantId: 'merchant-1', documentIds: ['doc-draft'] },
+      {
+        documentRepo: documentRepo as any,
+        connectionRepo: connectionRepo as any,
+        eventRepo: eventRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+        ...pipeline,
       },
     );
 
     expect(result.attempted).toBe(1);
+    expect(result.succeeded).toBe(1);
+    expect(result.results[0].receiptNumber).toBe('RCPT-7');
     expect(etimsAdapter.submitInvoice).toHaveBeenCalledTimes(1);
     expect(documentRepo._store.get('doc-draft')!.complianceStatus).toBe(
-      ComplianceStatus.DRAFT,
+      ComplianceStatus.ACCEPTED,
     );
-    expect(documentRepo._store.get('doc-validated')!.complianceStatus).toBe(
-      ComplianceStatus.VALIDATED,
+  });
+
+  it('reports a requested document that is not retryable rather than omitting it', async () => {
+    const accepted = makeDocument({
+      id: 'doc-accepted',
+      complianceStatus: ComplianceStatus.ACCEPTED,
+    });
+
+    const documentRepo = makeDocumentRepo([accepted]);
+    const connectionRepo = makeConnectionRepo();
+    const eventRepo = makeEventRepo();
+    const etimsAdapter = { submitInvoice: jest.fn() };
+    const syncStateRepo = makeSyncStateRepo();
+    const pipeline = makePipeline(documentRepo);
+
+    const result = await retrySalesToEtims(
+      { merchantId: 'merchant-1', documentIds: ['doc-accepted'] },
+      {
+        documentRepo: documentRepo as any,
+        connectionRepo: connectionRepo as any,
+        eventRepo: eventRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+        ...pipeline,
+      },
     );
+
+    expect(result.attempted).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(result.results[0].error).toContain('ACCEPTED');
+    expect(etimsAdapter.submitInvoice).not.toHaveBeenCalled();
+  });
+
+  it('reports a requested document that does not belong to the merchant', async () => {
+    const documentRepo = makeDocumentRepo([]);
+    const connectionRepo = makeConnectionRepo();
+    const eventRepo = makeEventRepo();
+    const etimsAdapter = { submitInvoice: jest.fn() };
+    const syncStateRepo = makeSyncStateRepo();
+    const pipeline = makePipeline(documentRepo);
+
+    const result = await retrySalesToEtims(
+      { merchantId: 'merchant-1', documentIds: ['doc-missing'] },
+      {
+        documentRepo: documentRepo as any,
+        connectionRepo: connectionRepo as any,
+        eventRepo: eventRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+        ...pipeline,
+      },
+    );
+
+    expect(result.attempted).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(result.results[0].error).toContain('was not found');
+    expect(etimsAdapter.submitInvoice).not.toHaveBeenCalled();
   });
 
   it('skips already-ACCEPTED/SUBMITTED documents', async () => {
@@ -192,6 +327,7 @@ describe('retrySalesToEtims', () => {
     const eventRepo = makeEventRepo();
     const etimsAdapter = { submitInvoice: jest.fn() };
     const syncStateRepo = makeSyncStateRepo();
+    const pipeline = makePipeline(documentRepo);
 
     const result = await retrySalesToEtims(
       { merchantId: 'merchant-1' },
@@ -201,6 +337,7 @@ describe('retrySalesToEtims', () => {
         eventRepo: eventRepo as any,
         etimsAdapter: etimsAdapter as any,
         syncStateRepo: syncStateRepo as any,
+        ...pipeline,
       },
     );
 
@@ -234,6 +371,7 @@ describe('retrySalesToEtims', () => {
       }),
     };
     const syncStateRepo = makeSyncStateRepo();
+    const pipeline = makePipeline(documentRepo);
 
     const result = await retrySalesToEtims(
       { merchantId: 'merchant-1' },
@@ -243,6 +381,7 @@ describe('retrySalesToEtims', () => {
         eventRepo: eventRepo as any,
         etimsAdapter: etimsAdapter as any,
         syncStateRepo: syncStateRepo as any,
+        ...pipeline,
       },
     );
 
@@ -255,9 +394,7 @@ describe('retrySalesToEtims', () => {
     expect(okResult.status).toBe(ComplianceStatus.ACCEPTED);
     expect(okResult.receiptNumber).toBe('RCPT-9');
 
-    const failResult = result.results.find(
-      (r) => r.documentId === 'doc-fail',
-    )!;
+    const failResult = result.results.find((r) => r.documentId === 'doc-fail')!;
     expect(failResult.success).toBe(false);
     expect(failResult.status).toBe(ComplianceStatus.REJECTED);
     expect(failResult.error).toContain('invalid TIN');
@@ -290,6 +427,7 @@ describe('retrySalesToEtims', () => {
         .mockResolvedValue({ success: true, receiptNumber: 'RCPT-1' }),
     };
     const syncStateRepo = makeSyncStateRepo();
+    const pipeline = makePipeline(documentRepo);
 
     const result = await retrySalesToEtims(
       { merchantId: 'merchant-1', documentIds: ['doc-targeted'] },
@@ -299,6 +437,7 @@ describe('retrySalesToEtims', () => {
         eventRepo: eventRepo as any,
         etimsAdapter: etimsAdapter as any,
         syncStateRepo: syncStateRepo as any,
+        ...pipeline,
       },
     );
 

@@ -61,13 +61,26 @@ export class StockMovementRepositoryStub implements IStockMovementRepository {
     return Promise.resolve(movement);
   }
 
+  findByReference(
+    referenceType: string,
+    referenceId: string,
+  ): Promise<StockMovement[]> {
+    return Promise.resolve(
+      movements.filter(
+        (m) =>
+          m.referenceType === referenceType && m.referenceId === referenceId,
+      ),
+    );
+  }
+
   list(params: {
     itemId?: string;
     branchId?: string;
     limit?: number;
   }): Promise<StockMovement[]> {
     let result = movements.slice().reverse();
-    if (params.itemId) result = result.filter((m) => m.itemId === params.itemId);
+    if (params.itemId)
+      result = result.filter((m) => m.itemId === params.itemId);
     if (params.branchId)
       result = result.filter((m) => m.branchId === params.branchId);
     if (params.limit) result = result.slice(0, params.limit);

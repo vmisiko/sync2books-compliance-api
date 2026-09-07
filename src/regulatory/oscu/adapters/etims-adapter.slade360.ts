@@ -376,7 +376,8 @@ export class EtimsAdapterSlade360 implements IEtimsAdapter {
     if (body !== undefined) headers['Content-Type'] = 'application/json';
 
     const logCtx = `${method} ${path} merchant=${ctx.merchantId} branch=${ctx.branchId} env=${ctx.environment}`;
-    this.logger.debug(
+    // log(), not debug() -- see the same note in etims-adapter.http.ts.
+    this.logger.log(
       `-> ${logCtx}${body !== undefined ? ` body=${JSON.stringify(body)}` : ''}`,
     );
 
@@ -398,7 +399,7 @@ export class EtimsAdapterSlade360 implements IEtimsAdapter {
           `<- ${logCtx} status=${res.status} rejected: ${JSON.stringify(raw)}`,
         );
       } else {
-        this.logger.debug(`<- ${logCtx} status=${res.status} ok`);
+        this.logger.log(`<- ${logCtx} status=${res.status} ok`);
       }
       return { ok: res.ok, status: res.status, raw };
     } catch (e) {

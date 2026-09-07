@@ -9,7 +9,11 @@ export interface IStockRepository {
    * go negative -- this is the only way stock levels change, per
    * 05-inventory-and-multi-branch-spec.md's concurrency guard.
    */
-  applyDelta(itemId: string, branchId: string, delta: number): Promise<InventoryStock>;
+  applyDelta(
+    itemId: string,
+    branchId: string,
+    delta: number,
+  ): Promise<InventoryStock>;
   listByBranch(branchId?: string): Promise<InventoryStock[]>;
 }
 
@@ -20,4 +24,16 @@ export interface IStockMovementRepository {
     branchId?: string;
     limit?: number;
   }): Promise<StockMovement[]>;
+  /**
+   * Every movement already recorded against one source document, so a caller
+   * that may run twice for the same document (SalesService.
+   * applyInventoryMovements, reached both from the original submit and from a
+   * retry of a document still sitting in DRAFT) can tell what it already
+   * applied instead of double-counting stock. Unbounded on purpose -- a single
+   * document's movement count is bounded by its line count.
+   */
+  findByReference(
+    referenceType: string,
+    referenceId: string,
+  ): Promise<StockMovement[]>;
 }

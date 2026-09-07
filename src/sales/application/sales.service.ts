@@ -1,4 +1,9 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
 import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
@@ -63,6 +68,8 @@ import {
  */
 @Injectable()
 export class SalesService {
+  private readonly logger = new Logger(SalesService.name);
+
   constructor(
     @Inject(DOCUMENT_REPO)
     private readonly documentRepo: IComplianceDocumentRepository,
@@ -199,6 +206,12 @@ export class SalesService {
       eventRepo: this.eventRepo,
       etimsAdapter: this.etimsAdapter,
       syncStateRepo: this.syncStateRepo,
+      // Same three steps submitDraftDocument() runs, handed over so a retry
+      // of a DRAFT/VALIDATED sale advances through the real state machine
+      // rather than being silently skipped.
+      applyInventoryMovements: (id) => this.applyInventoryMovements(id),
+      validateDocument: (id) => this.validateDocument(id),
+      prepareDocument: (id) => this.prepareDocument(id),
     });
   }
 
@@ -252,12 +265,43 @@ export class SalesService {
     const items: ComplianceItem[] = await this.itemRepo.findByIds(itemIds);
     const itemsById = new Map(items.map((i) => [i.id, i]));
 
+    // Re-run safety. This is no longer reached only once per document:
+    // retry-sales.usecase.ts now walks a document still sitting in DRAFT
+    // through the same applyInventory -> validate -> prepare -> submit
+    // pipeline the original submit used, so a sale whose first attempt died
+    // after inventory but before KRA would double-decrement stock on retry.
+    // recordMovement() is an append-only ledger with no natural key, so
+    // dedupe here on what's already recorded against this document: count
+    // per itemId rather than merely checking "any movement exists", so a
+    // first attempt that applied line 1 and then threw InsufficientStockError
+    // on line 2 still gets line 2 applied on retry, exactly once.
+    const alreadyApplied = await this.inventoryService.listMovementsByReference(
+      'COMPLIANCE_DOCUMENT',
+      document.id,
+    );
+    const remainingByItemId = new Map<string, number>();
+    for (const m of alreadyApplied) {
+      remainingByItemId.set(
+        m.itemId,
+        (remainingByItemId.get(m.itemId) ?? 0) + 1,
+      );
+    }
+
     for (const line of document.lines) {
       const item = itemsById.get(line.itemId);
       const isStockable = item
         ? deriveItemType(item.productTypeCode) === ItemType.GOODS
         : false;
       if (!isStockable) continue;
+
+      const alreadyCount = remainingByItemId.get(line.itemId) ?? 0;
+      if (alreadyCount > 0) {
+        remainingByItemId.set(line.itemId, alreadyCount - 1);
+        this.logger.log(
+          `applyInventoryMovements document=${document.id} item=${line.itemId} skipped -- already recorded for this document`,
+        );
+        continue;
+      }
 
       await this.inventoryService.recordMovement({
         itemId: line.itemId,

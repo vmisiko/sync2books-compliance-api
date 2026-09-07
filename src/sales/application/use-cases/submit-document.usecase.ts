@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 import { ComplianceDocument } from '../../domain/entities/compliance-document.entity';
 import { assertSubmissionAttemptsIncremented } from '../../domain/invariants/document-invariants';
@@ -64,6 +65,8 @@ async function releaseInvoiceSequence(
  * Submit document use case.
  * Transitions READY_FOR_SUBMISSION → SUBMITTED → ACCEPTED | REJECTED.
  */
+const logger = new Logger('SubmitDocument');
+
 export async function submitDocument(
   documentId: string,
   documentRepo: IComplianceDocumentRepository,
@@ -85,26 +88,46 @@ export async function submitDocument(
     );
   }
 
+  // Everything from here to the adapter call is a place a submission can die
+  // without KRA ever being contacted. Each of these used to throw into
+  // retry-sales.usecase.ts's per-document catch and vanish into a JSON field
+  // nobody rendered -- log the decision points so the service's own logs say
+  // how far a submission actually got.
   const connection = await connectionRepo.findByMerchantAndBranch(
     document.merchantId,
     document.branchId,
   );
   if (!connection) {
+    logger.error(
+      `document=${documentId} number=${document.documentNumber} -- no compliance connection for merchant=${document.merchantId} branch=${document.branchId}`,
+    );
     throw new Error(
       `No compliance connection for merchant ${document.merchantId} branch ${document.branchId}`,
     );
   }
 
   if (connection.status !== ConnectionStatus.ACTIVE) {
+    logger.error(
+      `document=${documentId} -- connection ${connection.id} status=${connection.status}, not ACTIVE`,
+    );
     throw new Error(
       `Compliance connection is not ACTIVE (status: ${connection.status})`,
     );
   }
   if (!connection.kraBhfId) {
+    logger.error(
+      `document=${documentId} -- branch ${document.branchId} has no kraBhfId`,
+    );
     throw new Error(
       `Branch ${document.branchId} has no KRA branch office id (kraBhfId) set`,
     );
   }
+
+  // cmcKey is deliberately absent: it's an OSCU secret, and this line is the
+  // one most likely to be pasted into a ticket.
+  logger.log(
+    `document=${documentId} number=${document.documentNumber} status=${document.complianceStatus} -- connection resolved kraPin=${connection.kraPin} bhfId=${connection.kraBhfId} deviceId=${connection.deviceId} env=${connection.environment}`,
+  );
 
   if (document.oscuInvcNo == null) {
     const invcNo = await allocateInvoiceSequence(
@@ -113,6 +136,11 @@ export async function submitDocument(
       connection.environment,
     );
     document = await documentRepo.save({ ...document, oscuInvcNo: invcNo });
+    logger.log(`document=${documentId} allocated oscuInvcNo=${invcNo}`);
+  } else {
+    logger.log(
+      `document=${documentId} reusing oscuInvcNo=${document.oscuInvcNo}`,
+    );
   }
 
   const payload = EtimsPayloadBuilder.buildFromDocument(document);
@@ -128,6 +156,9 @@ export async function submitDocument(
     }
   }
 
+  logger.log(
+    `document=${documentId} invcNo=${document.oscuInvcNo} -- submitting to eTIMS`,
+  );
   const result = await etimsAdapter.submitInvoice(payload, {
     merchantId: document.merchantId,
     branchId: connection.kraBhfId,
@@ -136,6 +167,11 @@ export async function submitDocument(
     cmcKey: connection.cmcKey,
     deviceId: connection.deviceId,
   });
+  logger.log(
+    `document=${documentId} -- eTIMS replied success=${result.success} receipt=${result.receiptNumber ?? '-'}${
+      result.error ? ` error=${result.error}` : ''
+    }`,
+  );
 
   const prevAttempts = document.submissionAttempts;
   assertSubmissionAttemptsIncremented(prevAttempts, prevAttempts + 1);

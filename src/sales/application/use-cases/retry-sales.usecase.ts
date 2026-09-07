@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 import type { ComplianceDocument } from '../../domain/entities/compliance-document.entity';
 import { ComplianceStatus } from '../../../shared/domain/enums/compliance-status.enum';
@@ -12,17 +13,30 @@ import type { IEtimsAdapter } from '../../../regulatory/oscu/ports/etims-adapter
 import { OscuSyncStateOrmEntity } from '../../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
 
 /**
- * Document statuses a bulk/single "retry" can act on. Mirrors the dashboard's
- * "Pending"/"Failed" rows (see `mapComplianceStatusToDigitax` in
- * `sales.service.ts`, which maps both REJECTED and FAILED to "failed").
+ * Document statuses a bulk/single "retry" can act on. This set must stay a
+ * superset of every internal status the dashboard renders with an actionable
+ * button, which is what `mapComplianceStatusToDigitax` in `sales.service.ts`
+ * decides: it collapses REJECTED/FAILED into "failed", and DRAFT, VALIDATED
+ * *and* READY_FOR_SUBMISSION all into "ready_to_submit".
  *
- * REJECTED and FAILED aren't submit-ready by themselves --
- * `submitDocument.usecase.ts` only accepts READY_FOR_SUBMISSION/RETRYING --
- * so this use case first walks them through the state machine's
- * REJECTED/FAILED -> RETRYING transition before calling submit, exactly like
- * a manual REJECTED -> RETRYING -> SUBMITTED retry would.
+ * DRAFT and VALIDATED were missing here, and that was a silent dead end --
+ * confirmed live 2026-09-07. The dashboard offered "Submit to KRA" on a DRAFT
+ * sale (because it reads "ready_to_submit"), this filter dropped it, and
+ * `POST /dashboard-api/sales/sync` answered `200 {attempted: 0, results: []}`:
+ * no submission, no error, no log line, nothing for the detail panel to show.
+ *
+ * None of these are submit-ready by themselves -- `submit-document.usecase.ts`
+ * only accepts READY_FOR_SUBMISSION/RETRYING -- so this use case walks each
+ * one forward to that point first, always through the real state machine,
+ * never by jumping states:
+ *   - DRAFT      -> applyInventory -> validate -> prepare -> submit
+ *   - VALIDATED  -> prepare -> submit
+ *   - REJECTED / FAILED -> RETRYING -> submit
+ *   - READY_FOR_SUBMISSION / RETRYING -> submit
  */
 export const RETRYABLE_SALE_STATUSES: ComplianceStatus[] = [
+  ComplianceStatus.DRAFT,
+  ComplianceStatus.VALIDATED,
   ComplianceStatus.READY_FOR_SUBMISSION,
   ComplianceStatus.RETRYING,
   ComplianceStatus.REJECTED,
@@ -55,6 +69,8 @@ export interface RetrySalesResult {
   results: RetrySaleResult[];
 }
 
+const logger = new Logger('RetrySalesToEtims');
+
 export async function retrySalesToEtims(
   input: RetrySalesInput,
   deps: {
@@ -63,18 +79,76 @@ export async function retrySalesToEtims(
     eventRepo: IComplianceEventRepository;
     etimsAdapter: IEtimsAdapter;
     syncStateRepo: Repository<OscuSyncStateOrmEntity>;
+    /**
+     * The DRAFT -> VALIDATED -> READY_FOR_SUBMISSION half of the pipeline,
+     * passed in rather than re-implemented so a retry and an original submit
+     * take literally the same path. `applyInventoryMovements` is re-run safe
+     * (see SalesService.applyInventoryMovements) -- a DRAFT document reaching
+     * here has usually already had its movements recorded by the attempt that
+     * left it in DRAFT, and must not be decremented twice.
+     */
+    applyInventoryMovements: (documentId: string) => Promise<void>;
+    validateDocument: (
+      documentId: string,
+    ) => Promise<{ validation: { isValid: boolean; errors: unknown[] } }>;
+    prepareDocument: (documentId: string) => Promise<unknown>;
   },
 ): Promise<RetrySalesResult> {
   const all = await deps.documentRepo.findByMerchant(input.merchantId);
-  const picked = input.documentIds?.length
-    ? all.filter((d) => input.documentIds!.includes(d.id))
+  const requestedIds = input.documentIds?.length ? input.documentIds : null;
+  const picked = requestedIds
+    ? all.filter((d) => requestedIds.includes(d.id))
     : all;
 
   const toRetry = picked.filter((d) =>
     RETRYABLE_SALE_STATUSES.includes(d.complianceStatus),
   );
 
+  logger.log(
+    `retry merchant=${input.merchantId} requested=${
+      requestedIds ? requestedIds.join(',') : 'ALL'
+    } merchantDocuments=${all.length} matched=${picked.length} retryable=${toRetry.length}`,
+  );
+
   const results: RetrySaleResult[] = [];
+
+  // An explicitly requested document that this endpoint won't act on has to
+  // say so. Silently omitting it is what produced the unexplained
+  // `{attempted: 0, results: []}` -- the caller asked about a specific sale
+  // and got an answer that looked like success.
+  if (requestedIds) {
+    const byId = new Map(all.map((d) => [d.id, d]));
+    for (const id of requestedIds) {
+      const doc = byId.get(id);
+      if (!doc) {
+        logger.warn(
+          `retry merchant=${input.merchantId} document=${id} not found for this merchant`,
+        );
+        results.push({
+          documentId: id,
+          documentNumber: '',
+          success: false,
+          status: ComplianceStatus.DRAFT,
+          receiptNumber: null,
+          error: `Document ${id} was not found for merchant ${input.merchantId}`,
+        });
+        continue;
+      }
+      if (!RETRYABLE_SALE_STATUSES.includes(doc.complianceStatus)) {
+        logger.warn(
+          `retry merchant=${input.merchantId} document=${id} status=${doc.complianceStatus} not retryable`,
+        );
+        results.push({
+          documentId: doc.id,
+          documentNumber: doc.documentNumber,
+          success: false,
+          status: doc.complianceStatus,
+          receiptNumber: null,
+          error: `Document ${doc.documentNumber} is ${doc.complianceStatus} — nothing to submit. Retryable statuses: ${RETRYABLE_SALE_STATUSES.join(', ')}`,
+        });
+      }
+    }
+  }
 
   for (const doc of toRetry) {
     // Everything -- including the RETRYING hand-off -- stays inside the try
@@ -83,6 +157,29 @@ export async function retrySalesToEtims(
     // sync-items.usecase.ts's per-item isolation.
     try {
       let current: ComplianceDocument = doc;
+      logger.log(
+        `retry document=${current.id} number=${current.documentNumber} status=${current.complianceStatus} branch=${current.branchId} -- starting`,
+      );
+
+      if (current.complianceStatus === ComplianceStatus.DRAFT) {
+        await deps.applyInventoryMovements(current.id);
+        const validation = await deps.validateDocument(current.id);
+        if (!validation.validation.isValid) {
+          throw new Error(
+            `Sale validation failed: ${JSON.stringify(validation.validation.errors)}`,
+          );
+        }
+        logger.log(`retry document=${current.id} DRAFT -> VALIDATED`);
+        current = await refresh(deps.documentRepo, current.id);
+      }
+
+      if (current.complianceStatus === ComplianceStatus.VALIDATED) {
+        await deps.prepareDocument(current.id);
+        logger.log(
+          `retry document=${current.id} VALIDATED -> READY_FOR_SUBMISSION`,
+        );
+        current = await refresh(deps.documentRepo, current.id);
+      }
 
       if (
         current.complianceStatus === ComplianceStatus.REJECTED ||
@@ -99,6 +196,7 @@ export async function retrySalesToEtims(
           ...current,
           complianceStatus: ComplianceStatus.RETRYING,
         });
+        logger.log(`retry document=${current.id} -> RETRYING`);
       }
 
       const outcome = await submitDocumentUseCase(
@@ -108,6 +206,12 @@ export async function retrySalesToEtims(
         deps.eventRepo,
         deps.etimsAdapter,
         deps.syncStateRepo,
+      );
+
+      logger.log(
+        `retry document=${doc.id} finished success=${outcome.success} status=${outcome.document.complianceStatus} receipt=${outcome.receiptNumber ?? '-'}${
+          outcome.error ? ` error=${outcome.error}` : ''
+        }`,
       );
 
       results.push({
@@ -120,6 +224,10 @@ export async function retrySalesToEtims(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      logger.error(
+        `retry document=${doc.id} number=${doc.documentNumber} threw: ${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       results.push({
         documentId: doc.id,
         documentNumber: doc.documentNumber,
@@ -134,6 +242,10 @@ export async function retrySalesToEtims(
   const succeeded = results.filter((r) => r.success).length;
   const failed = results.length - succeeded;
 
+  logger.log(
+    `retry merchant=${input.merchantId} done attempted=${results.length} succeeded=${succeeded} failed=${failed}`,
+  );
+
   return {
     merchantId: input.merchantId,
     attempted: results.length,
@@ -141,4 +253,19 @@ export async function retrySalesToEtims(
     failed,
     results,
   };
+}
+
+/**
+ * Re-reads a document after a use case advanced its status. Those use cases
+ * persist through the repository and return their own shapes, so the in-memory
+ * copy this loop holds is stale the moment one of them runs -- and acting on a
+ * stale status is exactly how a document ends up skipping a state.
+ */
+async function refresh(
+  documentRepo: IComplianceDocumentRepository,
+  documentId: string,
+): Promise<ComplianceDocument> {
+  const document = await documentRepo.findById(documentId);
+  if (!document) throw new Error(`Document ${documentId} not found`);
+  return document;
 }

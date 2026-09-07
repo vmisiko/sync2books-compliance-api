@@ -262,7 +262,10 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
     const logCtx = `${pathSegment} merchant=${connectionContext.merchantId} branch=${connectionContext.branchId} env=${connectionContext.environment}`;
     const headers = await this.buildHeaders(connectionContext);
 
-    this.logger.debug(`-> ${logCtx} body=${JSON.stringify(body)}`);
+    // log(), not debug(): NODE_ENV=production is the Dockerfile default for
+    // every deploy, and Nest's default logger drops debug there -- which is why
+    // a submission left no trace at all of whether it reached KRA.
+    this.logger.log(`-> ${logCtx} body=${JSON.stringify(body)}`);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -309,7 +312,7 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
           `<- ${logCtx} status=${status} rejected: ${JSON.stringify(raw)}`,
         );
       } else {
-        this.logger.debug(`<- ${logCtx} status=${status} ok`);
+        this.logger.log(`<- ${logCtx} status=${status} ok`);
       }
 
       return { ok, status, raw };

@@ -96,7 +96,12 @@ export class StockTypeOrmRepository
       }
       const now = new Date();
       const toSave = existing
-        ? { ...existing, quantityOnHand: newQty, version: existing.version + 1, lastMovementAt: now }
+        ? {
+            ...existing,
+            quantityOnHand: newQty,
+            version: existing.version + 1,
+            lastMovementAt: now,
+          }
         : repo.create({
             id,
             itemId,
@@ -133,6 +138,17 @@ export class StockTypeOrmRepository
     });
     await this.movementRepo.save(row);
     return movement;
+  }
+
+  async findByReference(
+    referenceType: string,
+    referenceId: string,
+  ): Promise<StockMovement[]> {
+    const rows = await this.movementRepo.find({
+      where: { referenceType, referenceId },
+      order: { createdAt: 'ASC' },
+    });
+    return rows.map(toDomainMovement);
   }
 
   async list(params: {

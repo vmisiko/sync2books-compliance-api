@@ -474,6 +474,12 @@ export class InventoryService {
     return this.movementRepo.list(params);
   }
 
+  /** See IStockMovementRepository.findByReference -- backs re-run safety for
+   *  callers that apply a whole document's movements in one go. */
+  async listMovementsByReference(referenceType: string, referenceId: string) {
+    return this.movementRepo.findByReference(referenceType, referenceId);
+  }
+
   async adjustStock(params: {
     itemId: string;
     branchId: string;
