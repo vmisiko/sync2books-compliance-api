@@ -1,4 +1,5 @@
 import {
+  BadGatewayException,
   BadRequestException,
   Injectable,
   Logger,
@@ -61,6 +62,13 @@ export type PullItemsResult = {
   attempted: number;
   succeeded: number;
   failed: number;
+  /**
+   * Set when the best-effort ERP refresh on the main API failed but the pull carried on against
+   * whatever the main API already had cached. Optional and additive so the dashboard can surface
+   * it without the two repos having to deploy together. A refresh failure that produced *nothing*
+   * throws instead -- see pullItems.
+   */
+  warning?: string;
   results: Array<{
     mainApiItemId: string;
     catalogItemId?: string;
@@ -115,16 +123,16 @@ export class DashboardItemsApplicationService {
     // Best-effort: refresh the main API's own cache from the source ERP
     // first, so the list below isn't stale. A failure here (e.g. token
     // expired) shouldn't block reading whatever the main API already has.
+    let refreshError: string | null = null;
     try {
       await this.mainApiPull.syncItemsFromBookkeeping(
         connection.mainApiApiKey,
         connectionId,
       );
     } catch (error) {
+      refreshError = error instanceof Error ? error.message : String(error);
       this.logger.warn(
-        `sync-from-bookkeeping (items) failed for tenant ${complianceTenantId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `sync-from-bookkeeping (items) failed for tenant ${complianceTenantId}: ${refreshError}`,
       );
     }
 
@@ -248,12 +256,26 @@ export class DashboardItemsApplicationService {
       page += 1;
     } while (page <= totalPages);
 
+    // A refresh failure was swallowed above so a stale-but-real catalog still pulls. When it
+    // produced nothing at all, though, "0 pulled" is indistinguishable from "the ERP is empty" --
+    // so say what actually went wrong instead of reporting an empty success.
+    if (results.length === 0 && refreshError) {
+      throw new BadGatewayException(
+        `Could not refresh ${SOURCE_DISPLAY_NAME[pullSource]} items via the main API, and it has none cached for this business: ${refreshError}`,
+      );
+    }
+
     return {
       merchantId,
       source: pullSource,
       attempted: results.length,
       succeeded: results.filter((r) => r.status === 'ok').length,
       failed: results.filter((r) => r.status === 'error').length,
+      ...(refreshError
+        ? {
+            warning: `Showing items already cached by the main API — refreshing from ${SOURCE_DISPLAY_NAME[pullSource]} failed: ${refreshError}`,
+          }
+        : {}),
       results,
     };
   }
