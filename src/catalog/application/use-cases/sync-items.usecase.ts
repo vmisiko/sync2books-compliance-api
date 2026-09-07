@@ -30,6 +30,14 @@ export type SyncItemResult = {
   resultCd: string | null;
   resultMsg: string | null;
   error: string | null;
+  /**
+   * True when this attempt failed because KRA/OSCU was unreachable or busy
+   * (HTTP 5xx, timeout, OSCU 9xx) rather than because KRA rejected the item.
+   * The item is left PENDING, not FAILED, and keeps its itemCd -- see the
+   * registrationStatus assignment below. Additive and optional-by-default for
+   * consumers: existing callers that ignore it keep working unchanged.
+   */
+  retryable: boolean;
 };
 
 export interface SyncItemsResult {
@@ -259,6 +267,7 @@ export async function syncItemsToEtims(
         resultCd: null,
         resultMsg: null,
         error: reason,
+        retryable: false,
       });
     }
     return {
@@ -295,6 +304,7 @@ export async function syncItemsToEtims(
         resultMsg: null,
         error:
           'This item has no product type set (Raw Material / Finished Product / Service) -- set it before syncing to KRA.',
+        retryable: false,
       });
       continue;
     }
@@ -321,6 +331,7 @@ export async function syncItemsToEtims(
         resultMsg: null,
         error:
           'This item is missing its classification and/or unit codes -- resolve them via Mapping Center or edit the item before syncing to KRA.',
+        retryable: false,
       });
       continue;
     }
@@ -480,6 +491,7 @@ export async function syncItemsToEtims(
           resultCd: updated.lastSyncResultCd,
           resultMsg: updated.lastSyncResultMsg,
           error: null,
+          retryable: false,
         });
         continue;
       }
@@ -511,7 +523,22 @@ export async function syncItemsToEtims(
         // otherwise a later retry would resubmit a number that may since have
         // been handed to a different item.
         etimsItemCode: retryable ? itemCd : null,
-        registrationStatus: 'FAILED',
+        // KRA being unavailable is not a registration failure. A 504/timeout/
+        // OSCU 9xx means the item was never put to KRA at all, so FAILED
+        // overstated it: the item drawer showed a red "Last sync attempt
+        // failed" for what is really "try again in a minute", and it read
+        // identically to a genuine rejection the merchant has to go fix
+        // (bad classification code, wrong unit) -- two states needing
+        // opposite responses. PENDING is the accurate one, and is what the
+        // item was before the attempt. Deliberately NOT a new
+        // `RETRYING`/`PENDING_RETRY` enum value: registrationStatus is a
+        // closed enum other repos read, and widening it breaks them silently.
+        // Nothing here treats PENDING and FAILED differently anyway -- every
+        // check in this service is `=== 'REGISTERED'` or `!== 'REGISTERED'`,
+        // so a PENDING item is still picked up by the next sync exactly as a
+        // FAILED one was. lastSyncAttemptAt/lastSyncResultMsg below keep the
+        // full attempt history either way, so nothing is hidden.
+        registrationStatus: retryable ? 'PENDING' : 'FAILED',
         lastSyncAttemptAt: now,
         lastSyncResultCd: resultCd,
         // A failure that never got a KRA envelope back (network error, DNS
@@ -533,6 +560,7 @@ export async function syncItemsToEtims(
         resultCd,
         resultMsg,
         error: res.error ?? 'Unknown error',
+        retryable,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -553,6 +581,7 @@ export async function syncItemsToEtims(
         resultCd: null,
         resultMsg: null,
         error: message,
+        retryable: false,
       });
     }
   }

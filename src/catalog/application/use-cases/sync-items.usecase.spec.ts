@@ -414,7 +414,11 @@ describe('syncItemsToEtims', () => {
     );
     const savedItem = itemRepo.save.mock.calls[0][0];
     expect(savedItem.etimsItemCode).toBe('KE2NTNO0000001');
-    expect(savedItem.registrationStatus).toBe('FAILED');
+    // PENDING, not FAILED: KRA was unreachable, so it never rejected this
+    // item -- it simply isn't registered yet, which is what PENDING means.
+    // The next sync picks PENDING up exactly as it did FAILED.
+    expect(savedItem.registrationStatus).toBe('PENDING');
+    expect(result.results[0].retryable).toBe(true);
     // res.rawResponse is undefined for a network-level failure -- there's no
     // KRA resultCd/resultMsg to persist, but the real reason (res.error)
     // must still be saved, or the item detail drawer's "Error from KRA /
@@ -423,6 +427,57 @@ describe('syncItemsToEtims', () => {
     // to see.
     expect(savedItem.lastSyncResultCd).toBeNull();
     expect(savedItem.lastSyncResultMsg).toBe('retryable: fetch failed');
+  });
+
+  // The other half of the same distinction: a genuine KRA rejection is a
+  // permanent failure the merchant has to act on (fix the classification,
+  // the unit code, ...), so it must stay FAILED and must NOT be softened
+  // into PENDING alongside transient outages.
+  it('marks a genuine KRA rejection FAILED, not PENDING', async () => {
+    const item = makeItem({ id: 'item-rejected' });
+    const itemRepo = {
+      findByMerchant: jest.fn().mockResolvedValue([item]),
+      save: jest.fn().mockImplementation((i) => Promise.resolve(i)),
+    };
+    const connectionRepo = {
+      findByMerchantAndBranch: jest.fn().mockResolvedValue({
+        merchantId: 'merchant-1',
+        branchId: 'branch-1',
+        kraPin: 'P000000000A',
+        kraBhfId: '00',
+        cmcKey: 'cmc-key',
+        deviceId: 'device-1',
+        environment: 'SANDBOX',
+      }),
+    };
+    const etimsAdapter = {
+      saveItem: jest.fn().mockResolvedValue({
+        success: false,
+        error: 'OSCU 400 The ItemCd isnt made up of correct QtyUnitCd',
+        rawResponse: {
+          resultCd: '400',
+          resultMsg: 'The ItemCd isnt made up of correct QtyUnitCd',
+        },
+      }),
+    };
+    const syncStateRepo = makeSyncStateRepo();
+
+    const result = await syncItemsToEtims(
+      { merchantId: 'merchant-1', branchId: 'branch-1' },
+      {
+        itemRepo: itemRepo as any,
+        connectionRepo: connectionRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+      },
+    );
+
+    expect(result.failed).toBe(1);
+    expect(result.results[0].retryable).toBe(false);
+    const savedItem = itemRepo.save.mock.calls[0][0];
+    expect(savedItem.registrationStatus).toBe('FAILED');
+    // Permanent rejection releases the sequence and clears the itemCd.
+    expect(savedItem.etimsItemCode).toBeNull();
   });
 
   /**
