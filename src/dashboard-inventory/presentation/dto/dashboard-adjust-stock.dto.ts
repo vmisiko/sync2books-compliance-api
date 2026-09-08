@@ -21,7 +21,9 @@ export class DashboardAdjustStockDto {
   @ApiProperty({
     required: false,
     description:
-      'Unit price, required for the eTIMS insertStockIO sync to succeed. Without it, the adjustment still records locally.',
+      'Unit price, required for the eTIMS insertStockIO sync to succeed. Without it the ' +
+      'adjustment still records locally and still pushes the new on-hand quantity to KRA ' +
+      'via saveStockMaster, which needs no amount -- only the ledger entry is skipped.',
   })
   unitPrice?: number;
 }

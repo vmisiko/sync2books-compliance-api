@@ -146,7 +146,8 @@ describe('InventoryService eTIMS stock sync', () => {
     expect(req.itemList[0].totAmt).toBe(500);
     expect(req.orgSarNo).toBe(0);
 
-    // saveStockMaster is reconciliation-only now.
+    // A SALE is not an authoritative restatement of on-hand -- see
+    // STOCK_MASTER_SYNC_MOVEMENT_TYPES in inventory.service.ts.
     expect(saveStockMaster).toHaveBeenCalledTimes(0);
 
     // Skips the sync entirely (rather than sending a rejected zero-amount

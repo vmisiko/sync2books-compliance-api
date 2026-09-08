@@ -22,8 +22,10 @@ export class ReconcileStockDto {
   @ApiProperty({
     required: false,
     description:
-      'Unit price for the reconciled quantity, required for the eTIMS saveStockMaster sync ' +
-      '(ETIMS_STOCK_MASTER_SYNC) to actually succeed -- KRA rejects a zero amount.',
+      'Unit price for the reconciled quantity, required for the eTIMS insertStockIO ' +
+      'sync (ETIMS_STOCK_SYNC) to actually succeed -- KRA rejects a zero amount. ' +
+      'saveStockMaster (ETIMS_STOCK_MASTER_SYNC) sends only itemCd/rsdQty and needs ' +
+      'no amount, so it still fires without this.',
   })
   unitPrice?: number;
 }

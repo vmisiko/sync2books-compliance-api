@@ -28,6 +28,23 @@ import {
   round2,
 } from '../../regulatory/oscu/mapping/oscu-tax-rates';
 
+/**
+ * Movement types that restate on-hand quantity from outside KRA's own document
+ * flow, so KRA's resident-quantity snapshot (`rsdQty`) has to follow them:
+ * RECONCILE (a diff against an ERP's QtyOnHand) and ADJUSTMENT (a manual
+ * dashboard add/deduct -- the only way a manually-created item ever gets a
+ * quantity, so nothing else will ever tell KRA about it).
+ *
+ * SALE/PURCHASE/TRANSFER/RETURN stay out deliberately: KRA already derives
+ * stock from the sales and purchase documents themselves, so pushing
+ * saveStockMaster after each one would be both wrong (it's not what
+ * saveStockMaster is for) and wasteful.
+ */
+const STOCK_MASTER_SYNC_MOVEMENT_TYPES: readonly MovementType[] = [
+  MovementType.RECONCILE,
+  MovementType.ADJUSTMENT,
+];
+
 @Injectable()
 export class InventoryService {
   private readonly logger = new Logger(InventoryService.name);
@@ -422,11 +439,13 @@ export class InventoryService {
       this.movementRepo,
     );
     await this.syncStockMovementToEtims({ ...result, unitPrice });
-    // saveStockMaster is reconciliation-only: it sets KRA's resident-quantity
-    // snapshot (rsdQty), not a per-movement ledger entry -- firing it after
-    // every SALE/PURCHASE/TRANSFER would be both wrong (it's not what
-    // saveStockMaster is for) and wasteful.
-    if (result.movement.movementType === MovementType.RECONCILE) {
+    // saveStockMaster sets KRA's resident-quantity snapshot (rsdQty), not a
+    // per-movement ledger entry -- see STOCK_MASTER_SYNC_MOVEMENT_TYPES for
+    // which movements are authoritative restatements of on-hand and which
+    // KRA already learns about from their own documents.
+    if (
+      STOCK_MASTER_SYNC_MOVEMENT_TYPES.includes(result.movement.movementType)
+    ) {
       await this.syncStockMasterToEtims(result.stock);
     }
     return result;
