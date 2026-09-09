@@ -5,6 +5,11 @@ import type { IComplianceConnectionRepository } from '../../../shared/ports/repo
 import type { IEtimsAdapter } from '../../../regulatory/oscu/ports/etims-adapter.port';
 import type { OscuItemSaveReq } from '../../../regulatory/oscu/transport/endpoints/item-save.dto';
 import { OscuSyncStateOrmEntity } from '../../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
+import {
+  itemCdSlice,
+  PKG_UNIT_CD_SLICE_FALLBACK,
+  QTY_UNIT_CD_SLICE_FALLBACK,
+} from '../../../regulatory/oscu/mapping/oscu-item-cd-slices';
 import { fetchMaxItemCdSeqFromKra } from './resync-item-cd-sequence.usecase';
 
 export interface SyncItemsInput {
@@ -50,31 +55,6 @@ export interface SyncItemsResult {
 }
 
 /**
- * itemCd's qtyUnitCd(2)/pkgUnitCd(2) slots are a fixed-width identifier
- * component. Many legitimate KRA codes aren't exactly 2 chars ("U", "L",
- * "BLL", "CTN", ...; KRA's live /selectCodeList has no 2-char code for
- * Litre at all -- only "L" and "LTR"), so when a merchant's real code
- * doesn't fit the slot, substitute one of KRA's own 2-char codes instead of
- * failing the whole sync.
- *
- * That substitution MUST be mirrored into the request's separate
- * qtyUnitCd/pkgUnitCd fields too -- they can't diverge from what's embedded
- * in itemCd. An earlier version of this code sent the real (unsubstituted)
- * value in those flat fields while itemCd carried the fallback, on the
- * theory (confirmed once, 2026-08-10, PIN P600004123A) that KRA only
- * validates the two independently. That's since proven wrong: confirmed
- * live 2026-09-01 against two different merchants/items whose real codes
- * were on opposite sides of 2 chars (unitCode "L", 1 char, and unitCode
- * "BLL", 3 chars) -- both were rejected with the identical `400 "The
- * ItemCd isn't made up of correct QtyUnitCd"`, which only makes sense if
- * KRA cross-checks itemCd's embedded component against the flat field and
- * rejects any mismatch. Keeping both in lockstep (same fallback value in
- * both places whenever the real code doesn't fit) is what fixes it.
- */
-const QTY_UNIT_CD_SLICE_FALLBACK = 'NO'; // "Number" (cdCls 10) -- generic, always valid
-const PKG_UNIT_CD_SLICE_FALLBACK = 'NT'; // "Not applicable" (cdCls 17) -- generic, always valid
-
-/**
  * Small residual bound for isItemCdSequenceDriftRejection retries AFTER the
  * one-time authoritative KRA correction below has already run this batch --
  * only meant to absorb a genuine race (another writer allocating a slot
@@ -90,10 +70,6 @@ const PKG_UNIT_CD_SLICE_FALLBACK = 'NT'; // "Not applicable" (cdCls 17) -- gener
  */
 const MAX_ITEM_CD_DRIFT_RETRIES = 5;
 
-function itemCdSlice(code: string, fallback: string): string {
-  return code.length === 2 ? code : fallback;
-}
-
 /**
  * OSCU `itemCd` format, per spec section 4.19 "Item Code":
  * `orgnNatCd(2) + itemTyCd(1) + pkgUnitCd(2) + qtyUnitCd(2) + seq(7 digits, from 0000001)`
@@ -104,7 +80,7 @@ function itemCdSlice(code: string, fallback: string): string {
  * `400 "Invalid itemCd Sequence. Expected sequence ending with: ********1"`).
  *
  * Takes the already-substituted pkgUnitCd/qtyUnitCd slices (see the doc
- * comment above itemCdSlice/QTY_UNIT_CD_SLICE_FALLBACK) rather than the raw
+ * comment in oscu-item-cd-slices.ts) rather than the raw
  * item codes, so the caller can pass the exact same two values into the
  * request's flat pkgUnitCd/qtyUnitCd fields -- itemCd and those fields must
  * never disagree.
@@ -169,6 +145,47 @@ async function releaseItemCdSequence(
       'syncKey',
     ]);
   }
+}
+
+/**
+ * itemCd is not an opaque identifier -- by construction (see
+ * generateEtimsItemCd) its 3rd character IS itemTyCd and its next four are
+ * the pkgUnitCd/qtyUnitCd slices. So a persisted itemCd stops describing its
+ * own item the moment any of those three change, and re-sending it is a
+ * guaranteed KRA rejection.
+ *
+ * The case that actually bites is a Goods item being corrected to a Service
+ * (or the reverse): itemTyCd flips 1/2 <-> 3, but `if (!itemCd)` below would
+ * happily resubmit the old KE**2**... code under itemTyCd '3'. KRA rejects
+ * that, the non-retryable path then releases the sequence and nulls
+ * etimsItemCode, and only the NEXT sync allocates the correct KE**3**...
+ * code -- so the item silently needs two sync passes to register, and in
+ * between, every document that snapshotted the old code is left pointing at
+ * an itemCd KRA has no record of ("Invalid Item: Item KE2CTNO0000009
+ * (itemSeq 1) does not exist in your stock master", confirmed live
+ * 2026-09-09 on a QuickBooks service item reclassified from Finished
+ * Product to Service). Detecting the mismatch up front turns that into one
+ * clean pass.
+ *
+ * Deliberately NOT paired with a releaseItemCdSequence call: the superseded
+ * code was accepted by KRA under the old type, so its sequence value is
+ * genuinely spent and handing it back would put the counter behind KRA.
+ */
+function itemCdMatchesItem(
+  itemCd: string,
+  productTypeCode: string,
+  pkgUnitCdSlice: string,
+  qtyUnitCdSlice: string,
+): boolean {
+  // orgnNatCd(2) + itemTyCd(1) + pkgUnitCd(2) + qtyUnitCd(2) + seq(7).
+  // A code that isn't this shape at all (hand-edited, or written by an older
+  // format) can't be validated component-wise -- treat it as stale too.
+  if (itemCd.length !== 14) return false;
+  return (
+    itemCd.slice(2, 3) === productTypeCode &&
+    itemCd.slice(3, 5) === pkgUnitCdSlice &&
+    itemCd.slice(5, 7) === qtyUnitCdSlice
+  );
 }
 
 /** itemCd's trailing 7 chars are always the sequence, by construction (see
@@ -342,8 +359,6 @@ export async function syncItemsToEtims(
     // batch with a bare 500 instead of recording just that item as FAILED
     // and continuing with the rest.
     try {
-      let itemCd = normalizeNonEmptyString(item.etimsItemCode);
-
       // Computed once per item, outside the retry loop, and reused for both
       // itemCd generation and the request's flat fields below -- see
       // generateEtimsItemCd's doc comment for why these two must never
@@ -356,6 +371,22 @@ export async function syncItemsToEtims(
         item.unitCode,
         QTY_UNIT_CD_SLICE_FALLBACK,
       );
+
+      let itemCd = normalizeNonEmptyString(item.etimsItemCode);
+      // Must come after the slices are computed, and before the allocate
+      // loop's `if (!itemCd)` -- nulling it here is what makes that loop
+      // allocate a fresh, correct code. See itemCdMatchesItem.
+      if (
+        itemCd &&
+        !itemCdMatchesItem(
+          itemCd,
+          productTypeCode,
+          pkgUnitCdSlice,
+          qtyUnitCdSlice,
+        )
+      ) {
+        itemCd = null;
+      }
 
       let res: Awaited<ReturnType<IEtimsAdapter['saveItem']>>;
       let resultCd: string | null;

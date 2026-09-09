@@ -23,6 +23,12 @@ function toDomain(
     kraPin: conn.kraPin,
     deviceId: conn.deviceId,
     dvcSrlNo: conn.dvcSrlNo,
+    sdcId: conn.sdcId,
+    mrcNo: conn.mrcNo,
+    tradeAddressLine1: branch.tradeAddressLine1,
+    tradeCity: branch.tradeCity,
+    receiptHeaderMessage: tenant.receiptHeaderMessage,
+    receiptFooterMessage: tenant.receiptFooterMessage,
     environment: conn.environment as ConnectionEnvironment,
     status: conn.status as ConnectionStatus,
     cmcKey: conn.cmcKey,
@@ -39,6 +45,8 @@ export type UpsertEtimsConnectionInput = {
   deviceId?: string;
   cmcKey?: string;
   dvcSrlNo?: string | null;
+  sdcId?: string | null;
+  mrcNo?: string | null;
   environment: ConnectionEnvironment;
   status: ConnectionStatus;
   sync2booksConnectionId?: string | null;
@@ -129,6 +137,8 @@ export class ComplianceOrganizationConnectionTypeOrmRepository implements ICompl
         kraPin: input.kraPin,
         deviceId: input.deviceId ?? PENDING_DEVICE_ID,
         dvcSrlNo: input.dvcSrlNo ?? null,
+        sdcId: input.sdcId ?? null,
+        mrcNo: input.mrcNo ?? null,
         cmcKey: input.cmcKey ?? PENDING_CMC_KEY,
         environment: input.environment,
         status: input.status,
@@ -149,6 +159,12 @@ export class ComplianceOrganizationConnectionTypeOrmRepository implements ICompl
       }
       if (input.dvcSrlNo !== undefined) {
         row.dvcSrlNo = input.dvcSrlNo;
+      }
+      if (input.sdcId !== undefined) {
+        row.sdcId = input.sdcId;
+      }
+      if (input.mrcNo !== undefined) {
+        row.mrcNo = input.mrcNo;
       }
       row.environment = input.environment;
       row.status = input.status;

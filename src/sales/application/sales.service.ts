@@ -17,6 +17,7 @@ import type {
 } from './use-cases/create-document.usecase';
 import { createDocument as createDocumentUseCase } from './use-cases/create-document.usecase';
 import { prepareDocument as prepareDocumentUseCase } from './use-cases/prepare-document.usecase';
+import { refreshLineOscuCodes as refreshLineOscuCodesUseCase } from './use-cases/refresh-line-oscu-codes.usecase';
 import { submitDocument as submitDocumentUseCase } from './use-cases/submit-document.usecase';
 import { validateDocument as validateDocumentUseCase } from './use-cases/validate-document.usecase';
 import {
@@ -46,6 +47,7 @@ import { ComplianceOrganizationApplicationService } from '../../compliance-organ
 import { MovementType } from '../../inventory/domain/enums/movement-type.enum';
 import { DocumentType } from '../../shared/domain/enums/document-type.enum';
 import { generateEtimsReceiptPdf } from './receipt/etims-receipt-pdf.generator';
+import { buildEtimsReceiptUrl } from './receipt/etims-receipt-url';
 import type {
   IComplianceConnectionRepository,
   IComplianceDocumentRepository,
@@ -172,6 +174,15 @@ export class SalesService {
     );
   }
 
+  /** See refresh-line-oscu-codes.usecase.ts. */
+  async refreshLineOscuCodes(documentId: string) {
+    return refreshLineOscuCodesUseCase(
+      documentId,
+      this.documentRepo,
+      this.itemRepo,
+    );
+  }
+
   async submitDocument(documentId: string) {
     return submitDocumentUseCase(
       documentId,
@@ -212,6 +223,7 @@ export class SalesService {
       applyInventoryMovements: (id) => this.applyInventoryMovements(id),
       validateDocument: (id) => this.validateDocument(id),
       prepareDocument: (id) => this.prepareDocument(id),
+      refreshLineOscuCodes: (id) => this.refreshLineOscuCodes(id),
     });
   }
 
@@ -390,10 +402,7 @@ export class SalesService {
     const rcptSign = safeString(kraData?.rcptSign);
     const intrlData = safeString(kraData?.intrlData);
 
-    const etimsUrl =
-      connection?.kraPin && rcptSign
-        ? `https://etims.kra.go.ke/common/link/etims/receipt/indexEtimsReceptData?{${connection.kraPin}+${document.branchId}+${rcptSign}}`
-        : null;
+    const etimsUrl = buildEtimsReceiptUrl(connection, rcptSign);
 
     const taxBuckets = computeTaxBuckets(document);
 
@@ -498,6 +507,13 @@ export class SalesService {
     const receiptNumber = safeNumber(curRcptNoRaw);
     const rcptSign = safeString(kraData?.rcptSign);
     const intrlData = safeString(kraData?.intrlData);
+    const totRcptNoRaw =
+      kraData?.totRcptNo ??
+      (kraData as Record<string, unknown>)?.['totRcptNo '];
+    const totRcptNo =
+      totRcptNoRaw != null ? String(totRcptNoRaw) : document.totRcptNo;
+    const sdcDateTime =
+      safeString(kraData?.sdcDateTime) || document.sdcDateTime;
 
     const connection = await this.connectionRepo.findByMerchantAndBranch(
       document.merchantId,
@@ -508,10 +524,7 @@ export class SalesService {
         document.merchantId,
       );
 
-    const etimsUrl =
-      connection?.kraPin && rcptSign
-        ? `https://etims.kra.go.ke/common/link/etims/receipt/indexEtimsReceptData?{${connection.kraPin}+${document.branchId}+${rcptSign}}`
-        : null;
+    const etimsUrl = buildEtimsReceiptUrl(connection, rcptSign);
 
     const itemIds = [...new Set(document.lines.map((l) => l.itemId))];
     const items: ComplianceItem[] = await this.itemRepo.findByIds(itemIds);
@@ -519,8 +532,28 @@ export class SalesService {
 
     const taxBuckets = computeTaxBuckets(document);
 
+    // Credit note: resolve the original sale's own CU Invoice No. for the page 10
+    // "ORIGINAL CU INVOICE NO.#" field -- same connection (same sdcId), original
+    // document's own curRcptNo/receiptLabel.
+    let originalCuInvoiceNo: string | null = null;
+    if (document.originalSaleId) {
+      const originalDoc = await this.documentRepo.findById(
+        document.originalSaleId,
+      );
+      if (originalDoc?.etimsReceiptNumber) {
+        const originalCuId = connection?.sdcId ?? connection?.deviceId ?? '-';
+        originalCuInvoiceNo = `${originalCuId}/${originalDoc.etimsReceiptNumber} ${
+          originalDoc.receiptLabel ?? 'NS'
+        }`;
+      }
+    }
+
     return generateEtimsReceiptPdf({
       document,
+      totRcptNo,
+      sdcDateTime,
+      receiptLabel: document.receiptLabel,
+      originalCuInvoiceNo,
       connection,
       itemsById,
       receiptNumber,
@@ -912,10 +945,7 @@ function buildNormalizedSaleReport(input: {
   const rcptSign = safeString(kraData?.rcptSign);
   const intrlData = safeString(kraData?.intrlData);
 
-  const etimsUrl =
-    connection?.kraPin && rcptSign
-      ? `https://etims.kra.go.ke/common/link/etims/receipt/indexEtimsReceptData?{${connection.kraPin}+${document.branchId}+${rcptSign}}`
-      : null;
+  const etimsUrl = buildEtimsReceiptUrl(connection, rcptSign);
 
   const taxBuckets = computeTaxBuckets(document);
 

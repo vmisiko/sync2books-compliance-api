@@ -59,7 +59,107 @@ function makeSyncStateRepo() {
   };
 }
 
+/** Connection + adapter pair that accepts every saveItem, so a test can assert
+ * purely on which itemCd got submitted. */
+function makeAcceptingDeps(item: CatalogItem) {
+  const itemRepo = {
+    findByMerchant: jest.fn().mockResolvedValue([item]),
+    save: jest.fn().mockImplementation((i) => Promise.resolve(i)),
+  };
+  const connectionRepo = {
+    findByMerchantAndBranch: jest.fn().mockResolvedValue({
+      kraPin: 'P000000000A',
+      kraBhfId: '00',
+      cmcKey: 'cmc-key',
+      deviceId: 'device-1',
+      environment: 'SANDBOX',
+    }),
+  };
+  const etimsAdapter = {
+    saveItem: jest.fn().mockResolvedValue({
+      success: true,
+      rawResponse: { resultCd: '000', resultMsg: 'Successful' },
+    }),
+  };
+  return { itemRepo, connectionRepo, etimsAdapter };
+}
+
 describe('syncItemsToEtims', () => {
+
+  /**
+   * itemCd encodes itemTyCd in its 3rd character, so a Goods item corrected
+   * to a Service can't keep its old code -- confirmed live 2026-09-09, where
+   * resubmitting KE**2**CTNO0000009 under itemTyCd '3' was rejected, and only
+   * the retry after that allocated the correct KE**3**... code. In between,
+   * every invoice holding the old code failed with "Invalid Item: Item
+   * KE2CTNO0000009 (itemSeq 1) does not exist in your stock master".
+   */
+  it('allocates a fresh itemCd when an item is reclassified from Goods to Service', async () => {
+    const item = makeItem({
+      productTypeCode: '3',
+      isStockItem: false,
+      unitCode: 'NO',
+      packagingUnitCode: 'CT',
+      etimsItemCode: 'KE2CTNO0000009', // issued while it was a Finished Product
+      registrationStatus: 'PENDING',
+    });
+    const { itemRepo, connectionRepo, etimsAdapter } = makeAcceptingDeps(item);
+    const syncStateRepo = makeSyncStateRepo();
+    syncStateRepo._store.set('item_cd_seq:P000000000A:SANDBOX', '18');
+
+    const result = await syncItemsToEtims(
+      { merchantId: 'merchant-1', branchId: 'branch-1' },
+      {
+        itemRepo: itemRepo as any,
+        connectionRepo: connectionRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+      },
+    );
+
+    expect(etimsAdapter.saveItem).toHaveBeenCalledTimes(1);
+    expect(etimsAdapter.saveItem.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ itemCd: 'KE3CTNO0000019', itemTyCd: '3' }),
+    );
+    expect(result.results[0].itemCd).toBe('KE3CTNO0000019');
+    expect(itemRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        etimsItemCode: 'KE3CTNO0000019',
+        registrationStatus: 'REGISTERED',
+      }),
+    );
+  });
+
+  it('reuses the persisted itemCd when it still matches the item', async () => {
+    const item = makeItem({
+      productTypeCode: '2',
+      unitCode: 'NO',
+      packagingUnitCode: 'NT',
+      etimsItemCode: 'KE2NTNO0000007',
+      registrationStatus: 'PENDING',
+    });
+    const { itemRepo, connectionRepo, etimsAdapter } = makeAcceptingDeps(item);
+    const syncStateRepo = makeSyncStateRepo();
+    syncStateRepo._store.set('item_cd_seq:P000000000A:SANDBOX', '7');
+
+    await syncItemsToEtims(
+      { merchantId: 'merchant-1', branchId: 'branch-1' },
+      {
+        itemRepo: itemRepo as any,
+        connectionRepo: connectionRepo as any,
+        etimsAdapter: etimsAdapter as any,
+        syncStateRepo: syncStateRepo as any,
+      },
+    );
+
+    expect(etimsAdapter.saveItem.mock.calls[0][0].itemCd).toBe(
+      'KE2NTNO0000007',
+    );
+    // No sequence burned -- the counter is exactly where it started.
+    expect(syncStateRepo._store.get('item_cd_seq:P000000000A:SANDBOX')).toBe(
+      '7',
+    );
+  });
   it('reports a clean per-item failure instead of throwing when there is no active eTIMS connection', async () => {
     // A new/not-yet-connected business's first sync attempt used to throw an
     // uncaught Error here, which the dashboard surfaced as a bare 500

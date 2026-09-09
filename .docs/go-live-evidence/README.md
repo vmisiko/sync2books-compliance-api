@@ -26,11 +26,22 @@
 
 ### Where invoice-copy.pdf / credit-note-copy.pdf came from
 
-The `etimsUrl` our own `sales.service.ts` constructs (`https://etims.kra.go.ke/common/link/etims/receipt/
-indexEtimsReceptData?{...}`) is **not a real, verified KRA endpoint** — it 404s on both the production host
-and the `etims-sbx.kra.go.ke` sandbox variant. It looks like a guessed/placeholder URL format that was never
-confirmed against KRA's real receipt-verification portal; don't rely on it for evidence, and don't assume
-fixing the host would make it work without further investigation.
+> **Corrected 2026-09-09.** The paragraph below used to claim this URL was "not a real, verified KRA
+> endpoint". That was wrong — the conclusion was drawn by testing the *malformed* URL our code emitted at
+> the time. KRA's receipt-verification portal is real and live, and our own go-live sale now resolves on it:
+> `https://etims-sbx.kra.go.ke/common/link/etims/receipt/indexEtimsReceiptData?Data=P600004185A00UEKEZNJ4BXML4OU3`
+> returns the genuine receipt (`Invoice Number : KRACU0400001074/9`, `TOTAL : 6,300`, "End of Legal Receipt").
+> The old URL failed for five reasons, all now fixed in `receipt/etims-receipt-url.ts`: the path was
+> misspelled `indexEtimsReceptData` (KRA's route is `indexEtimsReceiptData`), the `Data=` parameter name was
+> missing, literal `{}` braces made KRA's Tomcat reject the request with a 400 before any application code
+> ran, `+` separators were inserted where the payload is unseparated fixed-width concatenation
+> (11-char PIN + 2-char branch code + 16-char signature), and the branch slot carried a sync2books-internal
+> UUID instead of `connection.kraBhfId`. The host is also environment-specific: a sandbox receipt only
+> resolves on `etims-sbx.kra.go.ke`.
+>
+> The receipt PDF below is still perfectly good evidence — but the QR codes in the two PDFs already in this
+> folder encode the old broken URL and should be regenerated before reuse.
+
 
 Instead, use the project's own working receipt PDF generator:
 

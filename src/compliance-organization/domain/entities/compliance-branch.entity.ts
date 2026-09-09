@@ -9,6 +9,10 @@ export interface ComplianceBranch {
   displayName: string | null;
   /** KRA/OSCU branch id (`bhfId`) when known */
   kraBhfId: string | null;
+  /** Trade address line for the receipt header (TIS page 8 "Shop address"). */
+  tradeAddressLine1: string | null;
+  /** Trade city for the receipt header. */
+  tradeCity: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

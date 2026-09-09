@@ -92,6 +92,14 @@ export async function retrySalesToEtims(
       documentId: string,
     ) => Promise<{ validation: { isValid: boolean; errors: unknown[] } }>;
     prepareDocument: (documentId: string) => Promise<unknown>;
+    /**
+     * Re-points lines at their items' current eTIMS codes immediately before
+     * submit. Needed because the REJECTED/FAILED -> RETRYING and the
+     * already-READY_FOR_SUBMISSION/RETRYING paths below never pass through
+     * `prepareDocument`, which is the only other place that does this -- see
+     * refresh-line-oscu-codes.usecase.ts.
+     */
+    refreshLineOscuCodes: (documentId: string) => Promise<unknown>;
   },
 ): Promise<RetrySalesResult> {
   const all = await deps.documentRepo.findByMerchant(input.merchantId);
@@ -198,6 +206,11 @@ export async function retrySalesToEtims(
         });
         logger.log(`retry document=${current.id} -> RETRYING`);
       }
+
+      // Last thing before submit, so it covers every path into this loop --
+      // including the two that skipped prepareDocument entirely. A no-op for
+      // documents whose lines already hold their item's current itemCd.
+      await deps.refreshLineOscuCodes(current.id);
 
       const outcome = await submitDocumentUseCase(
         current.id,

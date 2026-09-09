@@ -20,6 +20,14 @@ export class ComplianceTenantOrmEntity {
   @Column('varchar', { nullable: true })
   organizationId!: string | null;
 
+  /** Commercial message above the item list (TIS page 8 sample: "Welcome to our shop"). Null falls back to a generic default at render time. */
+  @Column('varchar', { nullable: true })
+  receiptHeaderMessage!: string | null;
+
+  /** Commercial message in the footer (TIS page 8 sample: "THANK YOU ..."). Null falls back to a generic default at render time. */
+  @Column('varchar', { nullable: true })
+  receiptFooterMessage!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

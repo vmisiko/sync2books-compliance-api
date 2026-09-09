@@ -87,6 +87,12 @@ export interface ComplianceDocument {
   complianceStatus: ComplianceStatus;
   submissionAttempts: number;
   etimsReceiptNumber: string | null;
+  /** OSCU `totRcptNo` from the submission response -- see the ORM entity's doc comment. */
+  totRcptNo: string | null;
+  /** OSCU `sdcDateTime` from the submission response -- the SCU's own clock, `yyyyMMddhhmmss`. */
+  sdcDateTime: string | null;
+  /** Receipt label (NS/NC/CS/CC/TS/TC/PS) per TIS spec §4.3 -- derived at acceptance time. */
+  receiptLabel: string | null;
   /**
    * OSCU `invcNo` -- persistent, strictly-incrementing-from-1 sequence per
    * (kraPin, environment), allocated on first submission and reused on retry.

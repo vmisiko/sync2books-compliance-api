@@ -21,7 +21,11 @@ import type {
 import type { IEtimsAdapter } from '../../regulatory/oscu/ports/etims-adapter.port';
 import type { OscuStockIOSaveReq } from '../../regulatory/oscu/transport/endpoints/stock-io-save.dto';
 import { parseExpectedSarNo } from '../../regulatory/oscu/mapping/oscu-sequence-drift';
-import type { ComplianceItem } from '../../shared/domain/entities/compliance-item.entity';
+import {
+  deriveItemType,
+  type ComplianceItem,
+} from '../../shared/domain/entities/compliance-item.entity';
+import { ItemType } from '../../shared/domain/enums/item-type.enum';
 import type { InventoryStock } from '../domain/entities/inventory-stock.entity';
 import type { StockMovement } from '../domain/entities/stock-movement.entity';
 import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
@@ -295,6 +299,20 @@ export class InventoryService {
     const item: ComplianceItem | null = found[0] ?? null;
     if (!item) return;
 
+    // A Service (itemTyCd '3') is not stock-tracked -- KRA has no stock
+    // master row for it, so a insertStockIO call naming its itemCd is rejected. Normally
+    // unreachable (services never get a stock row seeded, and
+    // SalesService.applyInventoryMovements skips them), but an item
+    // reclassified from Goods to Service keeps whatever stock row it already
+    // had, and adjust/reconcile reach recordMovement without any such check.
+    // Guard at the eTIMS boundary so every caller is covered at once.
+    if (deriveItemType(item.productTypeCode) === ItemType.SERVICE) {
+      this.logger.debug(
+        `eTIMS insertStockIO skipped for ${item.id}: item is a Service (itemTyCd 3), not stock-tracked`,
+      );
+      return;
+    }
+
     const itemCd =
       typeof item.etimsItemCode === 'string' && item.etimsItemCode.trim() !== ''
         ? item.etimsItemCode
@@ -471,6 +489,20 @@ export class InventoryService {
     const found = await this.itemRepo.findByIds([stock.itemId]);
     const item: ComplianceItem | null = found[0] ?? null;
     if (!item) return;
+
+    // A Service (itemTyCd '3') is not stock-tracked -- KRA has no stock
+    // master row for it, so a saveStockMaster call naming its itemCd is rejected. Normally
+    // unreachable (services never get a stock row seeded, and
+    // SalesService.applyInventoryMovements skips them), but an item
+    // reclassified from Goods to Service keeps whatever stock row it already
+    // had, and adjust/reconcile reach recordMovement without any such check.
+    // Guard at the eTIMS boundary so every caller is covered at once.
+    if (deriveItemType(item.productTypeCode) === ItemType.SERVICE) {
+      this.logger.debug(
+        `eTIMS saveStockMaster skipped for ${item.id}: item is a Service (itemTyCd 3), not stock-tracked`,
+      );
+      return;
+    }
 
     const itemCd =
       typeof item.etimsItemCode === 'string' && item.etimsItemCode.trim() !== ''

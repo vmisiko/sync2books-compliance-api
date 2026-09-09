@@ -7,6 +7,9 @@ export function parseOscuInitializeDeviceInfo(raw: Record<string, unknown>): {
   dvcId: string;
   tin?: string;
   bhfId?: string;
+  /** OSCU/SCU id (`sdcId`), e.g. "KRACU0400001074" -- the "CU ID" TIS receipts must print, distinct from `dvcId`. */
+  sdcId?: string;
+  mrcNo?: string;
 } | null {
   const data = raw['data'];
   if (!data || typeof data !== 'object') return null;
@@ -21,5 +24,7 @@ export function parseOscuInitializeDeviceInfo(raw: Record<string, unknown>): {
     dvcId,
     tin: typeof o.tin === 'string' ? o.tin : undefined,
     bhfId: typeof o.bhfId === 'string' ? o.bhfId : undefined,
+    sdcId: typeof o.sdcId === 'string' ? o.sdcId : undefined,
+    mrcNo: typeof o.mrcNo === 'string' ? o.mrcNo : undefined,
   };
 }

@@ -113,6 +113,30 @@ export class ComplianceDocumentOrmEntity {
   etimsReceiptNumber!: string | null;
 
   /**
+   * OSCU `totRcptNo` from the `/saveTrnsSalesOsdc` response -- total receipt counter
+   * across every receipt type, printed on the TIS receipt as the "A/B RT" receipt
+   * counter alongside `etimsReceiptNumber` (`curRcptNo`), per TIS spec §6.23.5.
+   */
+  @Column('varchar', { nullable: true })
+  totRcptNo!: string | null;
+
+  /**
+   * OSCU `sdcDateTime` from the same response -- the SCU's own clock, formatted
+   * `yyyyMMddhhmmss`. TIS §6.23.2 requires the SCU's date/time on the receipt, not
+   * the document's own `saleDate`.
+   */
+  @Column('varchar', { nullable: true })
+  sdcDateTime!: string | null;
+
+  /**
+   * Receipt label per TIS spec §4.3 (NS/NC/CS/CC/TS/TC/PS) -- appended to the CU
+   * Invoice No. on the receipt (page 10 sample: ".../259 NC") and usable standalone.
+   * Derived at acceptance time from documentType + receiptTypeCode, not sent by KRA.
+   */
+  @Column('varchar', { nullable: true })
+  receiptLabel!: string | null;
+
+  /**
    * OSCU `invcNo` -- a real, persistent, strictly-incrementing-from-1 sequence per
    * (kraPin, environment), NOT parsed from the human-readable documentNumber. KRA
    * rejects a wrong invcNo with "Invalid invcNo sequence, expected: N but found: M"

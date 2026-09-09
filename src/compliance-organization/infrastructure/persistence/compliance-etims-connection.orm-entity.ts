@@ -43,6 +43,14 @@ export class ComplianceEtimsConnectionOrmEntity {
   @Column('varchar')
   cmcKey!: string;
 
+  /** OSCU `data.info.sdcId` from `/selectInitOsdcInfo` -- see ComplianceConnection.sdcId's doc comment. */
+  @Column('varchar', { nullable: true })
+  sdcId!: string | null;
+
+  /** OSCU `data.info.mrcNo` from the same initialize response. */
+  @Column('varchar', { nullable: true })
+  mrcNo!: string | null;
+
   @Column('varchar')
   environment!: string;
 

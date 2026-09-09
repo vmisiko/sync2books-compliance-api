@@ -11,6 +11,8 @@ function toDomain(e: ComplianceTenantOrmEntity): ComplianceTenant {
     sync2booksCompanyId: e.sync2booksCompanyId,
     displayName: e.displayName,
     organizationId: e.organizationId,
+    receiptHeaderMessage: e.receiptHeaderMessage,
+    receiptFooterMessage: e.receiptFooterMessage,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
   };
@@ -46,6 +48,8 @@ export class ComplianceTenantTypeOrmRepository implements IComplianceTenantRepos
       sync2booksCompanyId: tenant.sync2booksCompanyId ?? null,
       displayName: tenant.displayName,
       organizationId: tenant.organizationId ?? null,
+      receiptHeaderMessage: tenant.receiptHeaderMessage ?? null,
+      receiptFooterMessage: tenant.receiptFooterMessage ?? null,
       createdAt: tenant.createdAt,
       updatedAt: tenant.updatedAt,
     });

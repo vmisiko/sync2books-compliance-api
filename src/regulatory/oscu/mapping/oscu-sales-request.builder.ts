@@ -5,6 +5,7 @@ import {
   round2,
   splitTaxInclusiveAmount,
 } from './oscu-tax-rates';
+import { pkgUnitCdSlice, qtyUnitCdSlice } from './oscu-item-cd-slices';
 
 export class OscuSalesRequestBuilder {
   static build(params: {
@@ -31,13 +32,21 @@ export class OscuSalesRequestBuilder {
       const splyAmt = round2(l.quantity * l.unitPrice);
       const { taxblAmt, taxAmt } = splitTaxInclusiveAmount(splyAmt, l.taxTyCd);
       const totAmt = splyAmt;
+      // Not l.packagingUnitCode/l.unitCode raw: the itemCd on this same line
+      // embeds 2-char SLICES of these two codes, and KRA cross-checks the flat
+      // field against what itemCd carries. Any real code that isn't exactly 2
+      // chars ("L", "BLL", "CTN", ...) was substituted at registration time, so
+      // sending the real one here contradicts the itemCd. See
+      // oscu-item-cd-slices.ts for the live-confirmed rejections.
+      const pkgUnitCd = pkgUnitCdSlice(l.packagingUnitCode);
+      const qtyUnitCd = qtyUnitCdSlice(l.unitCode);
       return {
         itemSeq: idx + 1,
         itemClsCd: l.classificationCode,
         itemCd: l.itemCode,
         itemNm: l.description,
         bcd: null,
-        pkgUnitCd: l.packagingUnitCode,
+        pkgUnitCd,
         // pkg is a package COUNT, independent of qty -- KRA always expects exactly 1
         // for sendSalesTransaction, regardless of pkgUnitCd or qty. Confirmed live
         // 2026-09-01 for pkgUnitCd "NT" (qty: 2, pkg: 2 rejected: "Invalid pkg for
@@ -48,7 +57,7 @@ export class OscuSalesRequestBuilder {
         // Don't generalize to insertStockIO, which has its own confirmed-live success
         // with pkg: 10, qty: 10 -- KRA validates pkg inconsistently across endpoints.
         pkg: 1,
-        qtyUnitCd: l.unitCode,
+        qtyUnitCd,
         qty: l.quantity,
         prc: l.unitPrice,
         splyAmt,

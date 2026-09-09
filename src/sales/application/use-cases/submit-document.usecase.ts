@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 import { ComplianceDocument } from '../../domain/entities/compliance-document.entity';
+import { DocumentType } from '../../../shared/domain/enums/document-type.enum';
 import { assertSubmissionAttemptsIncremented } from '../../domain/invariants/document-invariants';
 import { assertValidTransition } from '../../domain/state-machine/compliance-state-machine';
 import { EtimsPayloadBuilder } from '../../../regulatory/oscu/mapping/etims-payload.builder';
@@ -14,6 +15,32 @@ import type {
 } from '../../../shared/ports/repository.port';
 import { OscuSyncStateOrmEntity } from '../../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
 import { parseExpectedInvcNo } from '../../../regulatory/oscu/mapping/oscu-sequence-drift';
+
+/**
+ * `totRcptNo`/`sdcDateTime` from a `/saveTrnsSalesOsdc` `result.rawResponse.data` --
+ * mirrors kra-sales-save-response.mapper.ts's trailing-space tolerance
+ * (`"totRcptNo "` is a real artifact of KRA's own PDF-derived spec sample).
+ */
+function extractScuReceiptFields(
+  rawResponse: Record<string, unknown> | undefined,
+): { totRcptNo: string | null; sdcDateTime: string | null } {
+  const data = rawResponse?.data as Record<string, unknown> | undefined;
+  if (!data) return { totRcptNo: null, sdcDateTime: null };
+  const totRcptNoRaw = data.totRcptNo ?? data['totRcptNo '];
+  const sdcDateTimeRaw = data.sdcDateTime;
+  return {
+    totRcptNo: typeof totRcptNoRaw === 'string' ? totRcptNoRaw : totRcptNoRaw != null ? String(totRcptNoRaw) : null,
+    sdcDateTime: typeof sdcDateTimeRaw === 'string' ? sdcDateTimeRaw : null,
+  };
+}
+
+/** TIS spec §4.3 receipt label -- only the two labels this flow ever actually submits (NS/NC); reprints/training/proforma aren't tracked yet. */
+function receiptLabelForDocumentType(documentType: DocumentType): string {
+  return documentType === DocumentType.CREDIT_NOTE ||
+    documentType === DocumentType.REVERSE_INVOICE
+    ? 'NC'
+    : 'NS';
+}
 
 export interface SubmitDocumentResult {
   document: ComplianceDocument;
@@ -269,10 +296,16 @@ export async function submitDocument(
       ComplianceStatus.SUBMITTED,
       ComplianceStatus.ACCEPTED,
     );
+    const { totRcptNo, sdcDateTime } = extractScuReceiptFields(
+      result.rawResponse,
+    );
     const updated: ComplianceDocument = {
       ...submittedDoc,
       complianceStatus: ComplianceStatus.ACCEPTED,
       etimsReceiptNumber: result.receiptNumber,
+      totRcptNo,
+      sdcDateTime,
+      receiptLabel: receiptLabelForDocumentType(document.documentType),
     };
     await documentRepo.save(updated);
     await eventRepo.append({

@@ -174,6 +174,8 @@ export class ComplianceOrganizationApplicationService {
           sync2booksCompanyId: companyId,
           displayName: input.displayName ?? null,
           organizationId: input.organizationId ?? null,
+          receiptHeaderMessage: null,
+          receiptFooterMessage: null,
           createdAt: now,
           updatedAt: now,
         };
@@ -186,6 +188,8 @@ export class ComplianceOrganizationApplicationService {
         sync2booksCompanyId: null,
         displayName: input.displayName ?? null,
         organizationId: input.organizationId ?? null,
+        receiptHeaderMessage: null,
+        receiptFooterMessage: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -258,6 +262,8 @@ export class ComplianceOrganizationApplicationService {
       sync2booksBranchId: null,
       displayName: DEFAULT_BRANCH_DISPLAY_NAME,
       kraBhfId: branchId,
+      tradeAddressLine1: null,
+      tradeCity: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -299,6 +305,12 @@ export class ComplianceOrganizationApplicationService {
             kraPin: found.etims.kraPin,
             deviceId: found.etims.deviceId,
             dvcSrlNo: found.etims.dvcSrlNo,
+            sdcId: found.etims.sdcId,
+            mrcNo: found.etims.mrcNo,
+            tradeAddressLine1: branch.tradeAddressLine1 ?? null,
+            tradeCity: branch.tradeCity ?? null,
+            receiptHeaderMessage: tenant.receiptHeaderMessage ?? null,
+            receiptFooterMessage: tenant.receiptFooterMessage ?? null,
             environment: found.etims.environment as ConnectionEnvironment,
             status: found.etims.status as ConnectionStatus,
             cmcKey: found.etims.cmcKey,
@@ -338,20 +350,31 @@ export class ComplianceOrganizationApplicationService {
       return this.branchRepo.save(updated);
     }
 
-    if (branchKey) {
-      const existing = await this.branchRepo.findByTenantAndSync2booksBranchId(
-        input.tenantId,
-        branchKey,
-      );
-      if (existing) {
-        const updated: ComplianceBranch = {
-          ...existing,
-          displayName: input.displayName ?? existing.displayName,
-          kraBhfId: input.kraBhfId ?? existing.kraBhfId,
-          updatedAt: now,
-        };
-        return this.branchRepo.save(updated);
-      }
+    const existingByKey = branchKey
+      ? await this.branchRepo.findByTenantAndSync2booksBranchId(
+          input.tenantId,
+          branchKey,
+        )
+      : // A branch pulled from KRA (see DashboardBranchesApplicationService.
+        // pullFromEtims) has no sync2booksBranchId to match on, so without this
+        // fallback every re-pull would insert a second row for the same bhfId --
+        // the same duplicate-by-branch-key class of bug as the split
+        // inventory_stock rows resolveCanonicalBranchId exists to prevent.
+        input.kraBhfId
+        ? await this.branchRepo.findByTenantAndKraBhfId(
+            input.tenantId,
+            input.kraBhfId,
+          )
+        : null;
+
+    if (existingByKey) {
+      const updated: ComplianceBranch = {
+        ...existingByKey,
+        displayName: input.displayName ?? existingByKey.displayName,
+        kraBhfId: input.kraBhfId ?? existingByKey.kraBhfId,
+        updatedAt: now,
+      };
+      return this.branchRepo.save(updated);
     }
 
     const branch: ComplianceBranch = {
@@ -360,6 +383,8 @@ export class ComplianceOrganizationApplicationService {
       sync2booksBranchId: branchKey ?? null,
       displayName: input.displayName ?? null,
       kraBhfId: input.kraBhfId ?? null,
+      tradeAddressLine1: null,
+      tradeCity: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -555,6 +580,8 @@ export class ComplianceOrganizationApplicationService {
       deviceId: parsed.dvcId,
       cmcKey: parsed.cmcKey,
       dvcSrlNo,
+      sdcId: parsed.sdcId ?? null,
+      mrcNo: parsed.mrcNo ?? null,
       environment: etims.environment as ConnectionEnvironment,
       status: ConnectionStatus.ACTIVE,
       sync2booksConnectionId: etims.sync2booksConnectionId,

@@ -373,6 +373,89 @@ describe('DashboardInvoicesApplicationService — receipt push-back toggle', () 
   });
 
   /**
+   * TIS_TEMPLATE_CONFORMANCE_PLAN.md §1.1: createSaleFromInvoice always
+   * resolves the tenant's CREDIT bucket, never a constant '02' string,
+   * because a QuickBooks/Odoo `Invoice` object is structurally an on-credit
+   * document with no payment-method field at all (paid-at-till sales are
+   * SalesReceipt, which this pull never touches -- see the plan's §1.1 for
+   * why hardcoding CREDIT here is intentional, not a bypass of the
+   * resolver). This locks in two things that must both stay true even
+   * though the input is always the same constant:
+   *  1. paymentTypeResolver.resolve is actually invoked (with this
+   *     merchant's id and the 'CREDIT' bucket) -- not skipped in favor of a
+   *     literal '02' -- so a tenant's approved CREDIT mapping (or a future
+   *     non-Invoice caller reusing this same resolve() call with a real
+   *     payment method) is honored rather than silently ignored.
+   *  2. Whatever the resolver returns is what actually reaches
+   *     createDocument's paymentTypeCode -- proven here by having the
+   *     resolver return a non-'02' value and asserting it flows through
+   *     unchanged, so this can't regress back to a hardcoded '02' either.
+   */
+  it("resolves payment type via paymentTypeResolver.resolve(merchantId, 'CREDIT') and forwards its result verbatim", async () => {
+    const deps = defaultDeps(false);
+    const resolve = jest
+      .fn<
+        ReturnType<IPaymentTypeResolver['resolve']>,
+        Parameters<IPaymentTypeResolver['resolve']>
+      >()
+      .mockResolvedValue('09'); // deliberately not '02' -- proves this isn't a coincidental match against the fallback.
+    deps.paymentTypeResolver.resolve = resolve;
+    const createDocument = jest
+      .fn<
+        ReturnType<SalesService['createDocument']>,
+        Parameters<SalesService['createDocument']>
+      >()
+      .mockResolvedValue({
+        created: true,
+        document: { id: 'doc-1' },
+      } as Awaited<ReturnType<SalesService['createDocument']>>);
+    deps.sales.createDocument = createDocument;
+    const service = makeService(deps);
+
+    await expect(
+      service.createSaleFromInvoice('tenant-1', 'invoice-1'),
+    ).resolves.toBeDefined();
+
+    expect(resolve).toHaveBeenCalledWith('merchant-1', 'CREDIT');
+    expect(createDocument.mock.calls[0][0]).toMatchObject({
+      paymentTypeCode: '09',
+    });
+  });
+
+  /**
+   * Defensive fallback: if the payment mapping table were somehow missing
+   * its global CREDIT seed row (oscu-mapping.seed.ts guarantees it isn't,
+   * but this is the safety net if that ever regresses), createSaleFromInvoice
+   * must still produce a sellable document rather than throwing -- falls
+   * back to the raw KRA code '02' (Credit) directly.
+   */
+  it("falls back to the raw '02' KRA code if the payment mapping resolver rejects", async () => {
+    const deps = defaultDeps(false);
+    deps.paymentTypeResolver.resolve = async () => {
+      throw new Error('Missing payment mapping for internalPaymentMethod=CREDIT');
+    };
+    const createDocument = jest
+      .fn<
+        ReturnType<SalesService['createDocument']>,
+        Parameters<SalesService['createDocument']>
+      >()
+      .mockResolvedValue({
+        created: true,
+        document: { id: 'doc-1' },
+      } as Awaited<ReturnType<SalesService['createDocument']>>);
+    deps.sales.createDocument = createDocument;
+    const service = makeService(deps);
+
+    await expect(
+      service.createSaleFromInvoice('tenant-1', 'invoice-1'),
+    ).resolves.toBeDefined();
+
+    expect(createDocument.mock.calls[0][0]).toMatchObject({
+      paymentTypeCode: '02',
+    });
+  });
+
+  /**
    * Regression: a line matched to a real catalog row that's still missing
    * unitCode/classificationCode/packagingUnitCode or productTypeCode used to
    * show as "classified"/readyForSale (classified only checked the match

@@ -36,6 +36,14 @@ export class ComplianceBranchOrmEntity {
   @Column('varchar', { nullable: true })
   kraBhfId!: string | null;
 
+  /** Trade address line for the receipt header (TIS page 8 "Shop address"). */
+  @Column('varchar', { nullable: true })
+  tradeAddressLine1!: string | null;
+
+  /** Trade city for the receipt header. */
+  @Column('varchar', { nullable: true })
+  tradeCity!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

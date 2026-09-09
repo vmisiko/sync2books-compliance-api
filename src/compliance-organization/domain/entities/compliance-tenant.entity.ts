@@ -7,6 +7,10 @@ export interface ComplianceTenant {
   displayName: string | null;
   /** Owning DashboardOrganization ("business" belongs to an org) — null for tenants created via the main-API service-to-service path, which predates this concept. */
   organizationId: string | null;
+  /** Commercial message above the item list on a receipt (TIS page 8 sample: "Welcome to our shop"). Null falls back to a generic default at render time. */
+  receiptHeaderMessage: string | null;
+  /** Commercial message in a receipt's footer (TIS page 8 sample: "THANK YOU ..."). Null falls back to a generic default at render time. */
+  receiptFooterMessage: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -44,6 +44,9 @@ function makeDocument(
     complianceStatus: ComplianceStatus.REJECTED,
     submissionAttempts: 1,
     etimsReceiptNumber: null,
+    totRcptNo: null,
+    sdcDateTime: null,
+    receiptLabel: null,
     oscuInvcNo: null,
     idempotencyKey: `idem-${id}`,
     createdAt: new Date('2026-08-14T10:00:00Z'),
@@ -160,6 +163,10 @@ function makePipeline(documentRepo: ReturnType<typeof makeDocumentRepo>) {
       advance(id, ComplianceStatus.READY_FOR_SUBMISSION);
       return Promise.resolve(undefined);
     }),
+    // No-op here: its own behaviour is covered by
+    // refresh-line-oscu-codes.usecase.spec.ts. What matters for these tests
+    // is only that the retry pipeline calls it before every submit.
+    refreshLineOscuCodes: jest.fn().mockResolvedValue(undefined),
   };
 }
 

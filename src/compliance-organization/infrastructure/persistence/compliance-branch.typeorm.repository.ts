@@ -12,6 +12,8 @@ function toDomain(e: ComplianceBranchOrmEntity): ComplianceBranch {
     sync2booksBranchId: e.sync2booksBranchId,
     displayName: e.displayName,
     kraBhfId: e.kraBhfId,
+    tradeAddressLine1: e.tradeAddressLine1,
+    tradeCity: e.tradeCity,
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
   };
@@ -39,6 +41,14 @@ export class ComplianceBranchTypeOrmRepository implements IComplianceBranchRepos
     return e ? toDomain(e) : null;
   }
 
+  async findByTenantAndKraBhfId(
+    tenantId: string,
+    kraBhfId: string,
+  ): Promise<ComplianceBranch | null> {
+    const e = await this.repo.findOne({ where: { tenantId, kraBhfId } });
+    return e ? toDomain(e) : null;
+  }
+
   async listByTenantId(tenantId: string): Promise<ComplianceBranch[]> {
     const rows = await this.repo.find({
       where: { tenantId },
@@ -54,6 +64,8 @@ export class ComplianceBranchTypeOrmRepository implements IComplianceBranchRepos
       sync2booksBranchId: branch.sync2booksBranchId,
       displayName: branch.displayName,
       kraBhfId: branch.kraBhfId,
+      tradeAddressLine1: branch.tradeAddressLine1,
+      tradeCity: branch.tradeCity,
       createdAt: branch.createdAt,
       updatedAt: branch.updatedAt,
     });

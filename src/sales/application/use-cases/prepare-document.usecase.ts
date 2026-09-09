@@ -2,6 +2,7 @@ import { ComplianceDocument } from '../../domain/entities/compliance-document.en
 import { assertValidTransition as _assertValidTransition } from '../../domain/state-machine/compliance-state-machine';
 import { ComplianceStatus } from '../../../shared/domain/enums/compliance-status.enum';
 import { deriveLineSnapshot } from '../../domain/utils/line-snapshot.util';
+import { resolveLineOscuCodes } from '../../domain/utils/line-oscu-codes.util';
 import { ItemNotReadyForEtimsError } from '../../domain/errors/item-not-ready-for-etims.error';
 import type { ComplianceItem } from '../../../shared/domain/entities/compliance-item.entity';
 import type {
@@ -44,24 +45,16 @@ export async function prepareDocument(
       throw new Error(`Item ${l.itemId} not found while preparing document`);
     }
 
-    const itemCd =
-      typeof l.etimsItemCodeSnapshot === 'string' &&
-      l.etimsItemCodeSnapshot.trim() !== ''
-        ? l.etimsItemCodeSnapshot
-        : typeof item.etimsItemCode === 'string' &&
-            item.etimsItemCode.trim() !== ''
-          ? item.etimsItemCode
-          : null;
-    if (!itemCd) {
+    // itemCd (and the codes derived from the same registration) may have
+    // been superseded since this line was created -- see
+    // resolveLineOscuCodes, which is shared with the retry pipeline so the
+    // two can't drift.
+    const resolution = resolveLineOscuCodes(l, item);
+    if (resolution.status === 'UNREGISTERED') {
       throw new ItemNotReadyForEtimsError(
         `Item ${l.itemId} has not been synced to eTIMS (missing etimsItemCode)`,
       );
     }
-
-    const packagingUnitCodeSnapshot: string =
-      l.packagingUnitCodeSnapshot ?? item.packagingUnitCode;
-
-    const taxTyCdSnapshot: string = l.taxTyCdSnapshot ?? item.taxTyCd;
 
     // item.productTypeCode is guaranteed non-null here in practice -- it's
     // required by saveItem, so an item can't have an etimsItemCode (already
@@ -72,16 +65,20 @@ export async function prepareDocument(
         `Item ${l.itemId} has no product type set (Raw Material / Finished Product / Service) -- cannot prepare this document`,
       );
     }
-    const productTypeCodeSnapshot: string =
-      l.productTypeCodeSnapshot ?? (item.productTypeCode as string);
+
+    if (resolution.status === 'SUPERSEDED') {
+      return { ...l, ...resolution.codes };
+    }
 
     return {
       ...l,
-      etimsItemCodeSnapshot: itemCd,
+      etimsItemCodeSnapshot: resolution.itemCd,
       ...deriveLineSnapshot(l, item),
-      packagingUnitCodeSnapshot,
-      taxTyCdSnapshot,
-      productTypeCodeSnapshot,
+      packagingUnitCodeSnapshot:
+        l.packagingUnitCodeSnapshot ?? item.packagingUnitCode,
+      taxTyCdSnapshot: l.taxTyCdSnapshot ?? item.taxTyCd,
+      productTypeCodeSnapshot:
+        l.productTypeCodeSnapshot ?? (item.productTypeCode as string),
     };
   });
 
