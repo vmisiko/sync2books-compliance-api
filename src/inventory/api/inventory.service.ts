@@ -19,6 +19,7 @@ import type {
   IComplianceItemRepository,
 } from '../../shared/ports/repository.port';
 import type { IEtimsAdapter } from '../../regulatory/oscu/ports/etims-adapter.port';
+import type { OscuStockIOSaveReq } from '../../regulatory/oscu/transport/endpoints/stock-io-save.dto';
 import type { ComplianceItem } from '../../shared/domain/entities/compliance-item.entity';
 import type { InventoryStock } from '../domain/entities/inventory-stock.entity';
 import type { StockMovement } from '../domain/entities/stock-movement.entity';
@@ -27,6 +28,27 @@ import {
   splitTaxInclusiveAmount,
   round2,
 } from '../../regulatory/oscu/mapping/oscu-tax-rates';
+
+/**
+ * KRA states the sarNo it expects directly in an insertStockIO rejection, e.g.
+ * "Invalid sarNo: Expected: 10 but found: 15" (confirmed live 2026-09-09,
+ * sandbox PIN P600004185A). That makes the sarNo counter cheaper to repair than
+ * the itemCd sequence, whose rejection reveals nothing and therefore needs a
+ * /itemInfo probe to discover the true value (see fetchMaxItemCdSeqFromKra).
+ * Returns the expected value, or null when this isn't a sarNo drift rejection.
+ */
+export function parseExpectedSarNo(
+  message: string | null | undefined,
+): number | null {
+  if (!message) return null;
+  const m =
+    /invalid\s+sarno\s*:\s*expected\s*:\s*(\d+)\s*but\s*found\s*:\s*(\d+)/i.exec(
+      message,
+    );
+  if (!m) return null;
+  const expected = Number.parseInt(m[1], 10);
+  return Number.isSafeInteger(expected) && expected > 0 ? expected : null;
+}
 
 /**
  * Movement types that restate on-hand quantity from outside KRA's own document
@@ -154,6 +176,28 @@ export class InventoryService {
    * Same semantic as the old `current === sarNo` guard, just applied
    * atomically instead of racily.
    */
+  /**
+   * Overwrites the counter to `sarNo` so it reads as "this value is the latest
+   * allocated" -- the next allocateSarNo() therefore returns sarNo + 1. Used
+   * only by the drift correction, which then sends `sarNo` itself.
+   *
+   * Deliberately an unconditional overwrite rather than a Math.max: when this
+   * runs, the local value is precisely the one KRA has told us is wrong, so
+   * preserving it is never right. Same reasoning as
+   * resyncItemCdSequenceFromKra's refusal to take Math.max(previous, kra).
+   */
+  private async forceSarNo(
+    kraPin: string,
+    environment: string,
+    sarNo: number,
+  ): Promise<void> {
+    if (!this.syncStateRepo) return;
+    const syncKey = `stock_sar_no:${kraPin}:${environment}`;
+    await this.syncStateRepo.upsert({ syncKey, lastReqDt: String(sarNo) }, [
+      'syncKey',
+    ]);
+  }
+
   private async releaseSarNo(
     kraPin: string,
     environment: string,
@@ -225,7 +269,7 @@ export class InventoryService {
     if (!connection || !connection.kraBhfId) return;
 
     const ocrnDt = this.formatYyyyMMddUtc(movement.createdAt);
-    const sarNo = await this.allocateSarNo(
+    let sarNo = await this.allocateSarNo(
       connection.kraPin,
       connection.environment,
     );
@@ -251,86 +295,131 @@ export class InventoryService {
     const { taxblAmt, taxAmt } = splitTaxInclusiveAmount(splyAmt, item.taxTyCd);
     const totAmt = splyAmt;
 
-    try {
-      const result = await adapter.insertStockIO(
+    const kraBhfId = connection.kraBhfId;
+    const connectionContext = {
+      merchantId: item.merchantId,
+      branchId: kraBhfId,
+      kraPin: connection.kraPin,
+      environment: connection.environment,
+      cmcKey: connection.cmcKey,
+      deviceId: connection.deviceId,
+    };
+
+    // Built per attempt so the sarNo drift correction below can rebuild the
+    // request with the value KRA actually expects, instead of duplicating this
+    // payload at a second call site.
+    const buildRequest = (sar: number): OscuStockIOSaveReq => ({
+      tin: connection.kraPin,
+      bhfId: kraBhfId,
+      cmcKey: connection.cmcKey,
+      sarNo: sar,
+      orgSarNo: 0,
+      regTyCd: this.mapRegTyCd(movement),
+      custTin: null,
+      custNm: null,
+      custBhfId: null,
+      sarTyCd: this.mapSarTyCd(movement),
+      ocrnDt,
+      totItemCnt: 1,
+      totTaxblAmt: taxblAmt,
+      totTaxAmt: taxAmt,
+      totAmt,
+      remark: movement.referenceId
+        ? `${movement.referenceType ?? 'REF'}:${movement.referenceId}`
+        : movement.referenceType,
+      regrId: 'sync2books',
+      regrNm: 'sync2books',
+      modrId: 'sync2books',
+      modrNm: 'sync2books',
+      itemList: [
         {
-          tin: connection.kraPin,
-          bhfId: connection.kraBhfId,
-          cmcKey: connection.cmcKey,
-          sarNo,
-          orgSarNo: 0,
-          regTyCd: this.mapRegTyCd(movement),
-          custTin: null,
-          custNm: null,
-          custBhfId: null,
-          sarTyCd: this.mapSarTyCd(movement),
-          ocrnDt,
-          totItemCnt: 1,
-          totTaxblAmt: taxblAmt,
-          totTaxAmt: taxAmt,
+          itemSeq: 1,
+          itemCd,
+          itemClsCd: item.classificationCode,
+          itemNm: item.name,
+          bcd: item.sku ?? null,
+          pkgUnitCd: item.packagingUnitCode,
+          // KRA rejects pkg: 0 ("Invalid pkg for ItemList N") -- see
+          // oscu-sales-request.builder.ts for the same rule on sales. NOTE:
+          // unlike sendSalesTransaction, insertStockIO has a confirmed-live
+          // success with pkg == qty (pkg: 10, qty: 10, see oscu-payload-gotchas.md),
+          // so do NOT force pkg to 1 here without live-testing insertStockIO
+          // specifically -- KRA validates these endpoints inconsistently.
+          pkg: qty,
+          qtyUnitCd: item.unitCode,
+          qty,
+          itemExprDt: null,
+          prc: unitPrice,
+          splyAmt,
+          totDcAmt: 0,
+          taxblAmt,
+          taxTyCd: item.taxTyCd,
+          taxAmt,
           totAmt,
-          remark: movement.referenceId
-            ? `${movement.referenceType ?? 'REF'}:${movement.referenceId}`
-            : movement.referenceType,
-          regrId: 'sync2books',
-          regrNm: 'sync2books',
-          modrId: 'sync2books',
-          modrNm: 'sync2books',
-          itemList: [
-            {
-              itemSeq: 1,
-              itemCd,
-              itemClsCd: item.classificationCode,
-              itemNm: item.name,
-              bcd: item.sku ?? null,
-              pkgUnitCd: item.packagingUnitCode,
-              // KRA rejects pkg: 0 ("Invalid pkg for ItemList N") -- see
-              // oscu-sales-request.builder.ts for the same rule on sales. NOTE:
-              // unlike sendSalesTransaction, insertStockIO has a confirmed-live
-              // success with pkg == qty (pkg: 10, qty: 10, see oscu-payload-gotchas.md),
-              // so do NOT force pkg to 1 here without live-testing insertStockIO
-              // specifically -- KRA validates these endpoints inconsistently.
-              pkg: qty,
-              qtyUnitCd: item.unitCode,
-              qty,
-              itemExprDt: null,
-              prc: unitPrice,
-              splyAmt,
-              totDcAmt: 0,
-              taxblAmt,
-              taxTyCd: item.taxTyCd,
-              taxAmt,
-              totAmt,
-            },
-          ],
         },
-        {
-          merchantId: item.merchantId,
-          branchId: connection.kraBhfId,
-          kraPin: connection.kraPin,
-          environment: connection.environment,
-          cmcKey: connection.cmcKey,
-          deviceId: connection.deviceId,
-        },
-      );
-      if (!result.success) {
+      ],
+    });
+
+    // One drift correction per movement, then give up: bounded so a rejection
+    // that merely looks like drift can never loop.
+    let driftCorrected = false;
+    for (;;) {
+      let result: Awaited<ReturnType<IEtimsAdapter['insertStockIO']>>;
+      try {
+        result = await adapter.insertStockIO(
+          buildRequest(sarNo),
+          connectionContext,
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         this.logger.warn(
-          `eTIMS insertStockIO rejected: itemCd=${itemCd} sarNo=${sarNo} ` +
-            `movement=${movement.id} error=${result.error}`,
+          `eTIMS insertStockIO failed: itemCd=${itemCd} sarNo=${sarNo} ` +
+            `movement=${movement.id} error=${msg}`,
         );
         await this.releaseSarNo(
           connection.kraPin,
           connection.environment,
           sarNo,
         );
+        return;
       }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+
+      if (result.success) return;
+
+      // KRA names the sarNo it expects in the rejection itself, so this needs
+      // no probe call -- contrast the itemCd sequence, whose rejection reveals
+      // nothing and therefore costs a /itemInfo round trip to repair (see
+      // fetchMaxItemCdSeqFromKra). Overwrite the counter and retry once.
+      //
+      // Deliberately does NOT releaseSarNo on this path: releasing would
+      // decrement the counter this correction just set, re-stranding it one
+      // behind and guaranteeing the retry fails too. Same rule as the itemCd
+      // loop, where a drift rejection never releases its sequence back.
+      const expected = parseExpectedSarNo(
+        result.error ?? result.rawResponse?.resultMsg ?? null,
+      );
+      if (expected !== null && !driftCorrected) {
+        driftCorrected = true;
+        this.logger.warn(
+          `eTIMS insertStockIO sarNo drift: itemCd=${itemCd} sent=${sarNo} ` +
+            `expected=${expected} movement=${movement.id} -- ` +
+            `correcting counter and retrying once`,
+        );
+        await this.forceSarNo(
+          connection.kraPin,
+          connection.environment,
+          expected,
+        );
+        sarNo = expected;
+        continue;
+      }
+
       this.logger.warn(
-        `eTIMS insertStockIO failed: itemCd=${itemCd} sarNo=${sarNo} ` +
-          `movement=${movement.id} error=${msg}`,
+        `eTIMS insertStockIO rejected: itemCd=${itemCd} sarNo=${sarNo} ` +
+          `movement=${movement.id} error=${result.error}`,
       );
       await this.releaseSarNo(connection.kraPin, connection.environment, sarNo);
+      return;
     }
   }
 
