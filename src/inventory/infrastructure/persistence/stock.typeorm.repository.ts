@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import type { InventoryStock } from '../../domain/entities/inventory-stock.entity';
@@ -46,6 +46,8 @@ function toDomainMovement(e: StockMovementOrmEntity): StockMovement {
 export class StockTypeOrmRepository
   implements IStockRepository, IStockMovementRepository
 {
+  private readonly logger = new Logger(StockTypeOrmRepository.name);
+
   constructor(
     @InjectDataSource()
     private readonly dataSource: DataSource,
@@ -95,6 +97,7 @@ export class StockTypeOrmRepository
         );
       }
       const now = new Date();
+      if (!existing) await this.warnOnSplitBranchKeying(repo, itemId, branchId);
       const toSave = existing
         ? {
             ...existing,
@@ -114,6 +117,33 @@ export class StockTypeOrmRepository
       const saved = await repo.save(toSave);
       return toDomainStock(saved);
     });
+  }
+
+  /**
+   * Recurrence guard for the two-rows-per-branch bug (`'00'` vs the branch
+   * UUID -- see InventoryStockOrmEntity.branchId). The unique constraint
+   * can't catch it, because two spellings of one branch are two legitimately
+   * distinct keys, so the only thing left is to make it loud the moment a
+   * second branch id shows up for an item that already has stock somewhere.
+   * Only runs on first insert for a pair, and only logs -- a genuine
+   * multi-branch tenant hits this too, and blocking its second branch would
+   * be worse than the split it's warning about.
+   */
+  private async warnOnSplitBranchKeying(
+    repo: Repository<InventoryStockOrmEntity>,
+    itemId: string,
+    branchId: string,
+  ): Promise<void> {
+    const siblings = await repo.find({ where: { itemId } });
+    if (siblings.length === 0) return;
+    this.logger.warn(
+      `Item ${itemId} is gaining a stock row for branch ${branchId} while it ` +
+        `already has row(s) for branch(es) ${siblings
+          .map((r) => `${r.branchId}(qty=${r.quantityOnHand})`)
+          .join(', ')}. Expected if this tenant is genuinely multi-branch; ` +
+        `otherwise a caller is keying by a non-canonical branch id -- see ` +
+        `InventoryService.toCanonicalBranchId.`,
+    );
   }
 
   async listByBranch(branchId?: string): Promise<InventoryStock[]> {

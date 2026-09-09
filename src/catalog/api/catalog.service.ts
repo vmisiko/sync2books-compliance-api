@@ -119,6 +119,14 @@ export class CatalogService {
    * never trip the negative-stock guard, and this deliberately writes no
    * StockMovement ledger entry -- it must never throw or block item
    * registration/KRA-sync.
+   *
+   * Keys the row by the canonical branch id (`ComplianceBranch.id`), same as
+   * every other `inventory_stock` writer. This used to seed
+   * `branches[0].sync2booksBranchId` instead, which for a tenant whose branch
+   * key is `'00'` produced a *second*, permanently-empty stock row alongside
+   * the real one the adjust/reconcile/sale paths maintain -- and
+   * InventoryService.syncStockMasterToEtims would then report whichever of
+   * the two the caller's branch id happened to resolve to as `rsdQty` to KRA.
    */
   private async seedZeroStockRow(
     merchantId: string,
@@ -128,8 +136,9 @@ export class CatalogService {
       const tenant =
         await this.organization.getTenantBySync2booksCompanyId(merchantId);
       if (!tenant) return;
-      const branches = await this.organization.listBranches(tenant.id);
-      const branchId = branches[0]?.sync2booksBranchId;
+      const branchId = await this.organization.resolveDefaultBranchId(
+        tenant.id,
+      );
       if (!branchId) return;
       await this.stockRepo.applyDelta(catalogItemId, branchId, 0);
     } catch (error) {

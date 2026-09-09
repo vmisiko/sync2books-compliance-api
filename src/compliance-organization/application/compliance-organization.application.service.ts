@@ -383,14 +383,60 @@ export class ComplianceOrganizationApplicationService {
    * service.
    */
   async resolveDashboardBranchId(tenantId: string): Promise<string> {
-    const branches = await this.listBranches(tenantId);
-    const branch = branches[0];
-    if (!branch) {
+    const branchId = await this.resolveDefaultBranchId(tenantId);
+    if (!branchId) {
       throw new NotFoundException(
         `No branch configured for tenant ${tenantId}`,
       );
     }
-    return branch.id;
+    return branchId;
+  }
+
+  /**
+   * The tenant's default/HQ branch in canonical form (`ComplianceBranch.id`),
+   * or null when the tenant has no branch at all. Same resolution
+   * {@link resolveDashboardBranchId} performs, minus the throw -- for
+   * best-effort callers (e.g. CatalogService.seedZeroStockRow) that must not
+   * fail the operation they're piggybacking on.
+   */
+  async resolveDefaultBranchId(tenantId: string): Promise<string | null> {
+    const branches = await this.listBranches(tenantId);
+    return branches[0]?.id ?? null;
+  }
+
+  /**
+   * Normalizes either accepted branch-id form to the canonical one
+   * (`ComplianceBranch.id`), so a row keyed by branch (today:
+   * `inventory_stock`) can't end up split across `'00'` and the branch UUID
+   * depending on which door the request came through -- Mode A (main API)
+   * sends `branch.sync2booksBranchId ?? branch.id`, Mode B (dashboard) sends
+   * `branch.id`. Returns null when nothing matches, leaving the caller to
+   * decide between passing the id through and failing.
+   *
+   * Scoped to one tenant on purpose: `sync2booksBranchId` is only unique per
+   * tenant (`@Unique(['tenantId', 'sync2booksBranchId'])`), so resolving a
+   * bare `'00'` across all tenants would hand back another tenant's branch.
+   */
+  async resolveCanonicalBranchId(
+    tenantId: string,
+    branchId: string,
+  ): Promise<string | null> {
+    const branches = await this.listBranches(tenantId);
+    const match =
+      branches.find((b) => b.id === branchId) ??
+      branches.find((b) => b.sync2booksBranchId === branchId);
+    return match?.id ?? null;
+  }
+
+  /** {@link resolveCanonicalBranchId} keyed by the Sync2Books company id that
+   *  compliance-owned rows carry as `merchantId`. */
+  async resolveCanonicalBranchIdForMerchant(
+    merchantId: string,
+    branchId: string,
+  ): Promise<string | null> {
+    const tenant = await this.getTenantBySync2booksCompanyId(merchantId);
+    if (!tenant) return null;
+    return this.resolveCanonicalBranchId(tenant.id, branchId);
   }
 
   async getBranchById(branchId: string): Promise<ComplianceBranch | null> {

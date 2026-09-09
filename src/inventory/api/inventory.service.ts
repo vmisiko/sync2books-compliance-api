@@ -25,6 +25,7 @@ import type { ComplianceItem } from '../../shared/domain/entities/compliance-ite
 import type { InventoryStock } from '../domain/entities/inventory-stock.entity';
 import type { StockMovement } from '../domain/entities/stock-movement.entity';
 import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
+import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import {
   splitTaxInclusiveAmount,
   round2,
@@ -68,7 +69,65 @@ export class InventoryService {
     @Optional()
     @InjectRepository(OscuSyncStateOrmEntity)
     private readonly syncStateRepo?: Repository<OscuSyncStateOrmEntity>,
+    /**
+     * Branch-id canonicalization (see {@link toCanonicalBranchId}). Optional
+     * only so the plain unit specs in this folder can construct the service
+     * with stub repositories and literal branch ids; InventoryModule always
+     * provides it, and without it every branch id is written through
+     * unchanged -- which is the pre-canonicalization behaviour, not a silent
+     * data change.
+     */
+    @Optional()
+    private readonly organization?: ComplianceOrganizationApplicationService,
   ) {}
+
+  /**
+   * `inventory_stock.branchId` / `stock_movements.branchId` are keyed by the
+   * canonical branch id (`ComplianceBranch.id`), but callers legitimately
+   * arrive holding either form: Mode A (main API) forwards its own branch key
+   * -- `branch.sync2booksBranchId ?? branch.id`, typically `'00'` -- while
+   * Mode B (compliance dashboard) resolves `branch.id` directly via
+   * ComplianceOrganizationApplicationService.resolveDashboardBranchId. Left
+   * unnormalized, one logical item+branch pair gets two stock rows, and
+   * {@link syncStockMasterToEtims} then reports whichever row the caller's
+   * branch id resolved to as KRA's resident quantity (`rsdQty`) -- a wrong
+   * `rsdQty` is a wrong tax filing, not a display glitch.
+   *
+   * Resolution is tenant-scoped through the item's `merchantId` because
+   * `sync2booksBranchId` is unique only per tenant; a bare `'00'` looked up
+   * globally would match another tenant's branch. An id we can't resolve
+   * (unknown item, unprovisioned tenant, no matching branch) passes through
+   * untouched rather than failing the write.
+   */
+  private async toCanonicalBranchId(
+    itemId: string,
+    branchId: string,
+  ): Promise<string> {
+    if (!this.organization || !this.itemRepo) return branchId;
+    try {
+      const [item] = await this.itemRepo.findByIds([itemId]);
+      if (!item) return branchId;
+      const canonical =
+        await this.organization.resolveCanonicalBranchIdForMerchant(
+          item.merchantId,
+          branchId,
+        );
+      if (canonical && canonical !== branchId) {
+        this.logger.debug(
+          `Canonicalized branch id ${branchId} -> ${canonical} for item ${itemId}`,
+        );
+      }
+      return canonical ?? branchId;
+    } catch (error) {
+      this.logger.warn(
+        `Branch-id canonicalization failed for item ${itemId} branch ${branchId}; ` +
+          `using it as given: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+      );
+      return branchId;
+    }
+  }
 
   private shouldSyncMovementsToEtims(): boolean {
     return (process.env.ETIMS_STOCK_SYNC ?? '').toLowerCase() === 'true';
@@ -483,7 +542,10 @@ export class InventoryService {
     itemId: string,
     branchId: string,
   ): Promise<void> {
-    const stock = await this.stockRepo.getStock(itemId, branchId);
+    const stock = await this.stockRepo.getStock(
+      itemId,
+      await this.toCanonicalBranchId(itemId, branchId),
+    );
     if (!stock) return;
     await this.syncStockMasterToEtims(stock);
   }
@@ -502,6 +564,13 @@ export class InventoryService {
     unitPrice?: number;
   }) {
     const { unitPrice, ...movementParams } = params;
+    // Single choke point: adjustStock/reconcileStock/transferStock and
+    // SalesService.applyInventoryMovements all reach the stock tables through
+    // here, so canonicalizing once covers every writer.
+    movementParams.branchId = await this.toCanonicalBranchId(
+      params.itemId,
+      params.branchId,
+    );
     const result = await recordMovement(
       movementParams,
       this.stockRepo,
@@ -533,14 +602,17 @@ export class InventoryService {
     referenceId?: string;
     unitPrice?: number;
   }) {
-    const current = await this.stockRepo.getStock(
+    // Canonicalize before the read too -- diffing against the wrong row would
+    // compute a delta that then gets applied to the right one.
+    const branchId = await this.toCanonicalBranchId(
       params.itemId,
       params.branchId,
     );
+    const current = await this.stockRepo.getStock(params.itemId, branchId);
     const delta = params.externalQtyOnHand - (current?.quantityOnHand ?? 0);
     return this.recordMovement({
       itemId: params.itemId,
-      branchId: params.branchId,
+      branchId,
       movementType: MovementType.RECONCILE,
       quantity: delta,
       referenceType: 'RECONCILE',

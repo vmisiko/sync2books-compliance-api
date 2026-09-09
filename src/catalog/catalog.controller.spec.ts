@@ -136,7 +136,14 @@ describe('CatalogService: isStockItem derivation + zero-stock auto-seed', () => 
     stockRepo = module.get<IStockRepository>(STOCK_REPO);
   });
 
-  /** Sets up a tenant + a default branch with a linked sync2books branch id, so seedZeroStockRow's best-effort lookup can resolve. */
+  /**
+   * Sets up a tenant + a default branch with a linked sync2books branch id
+   * (e.g. `'00'`), so seedZeroStockRow's best-effort lookup can resolve.
+   * Returns the *canonical* branch id (`ComplianceBranch.id`) as `branchId`
+   * -- that's what `inventory_stock` is keyed by -- plus the non-canonical
+   * `aliasId` (`sync2booksBranchId`) so tests can assert the seed row is
+   * NOT also duplicated under the alias (the bug this fixed).
+   */
   async function setupTenantAndBranch(
     merchantId: string,
     sync2booksBranchId: string,
@@ -149,11 +156,15 @@ describe('CatalogService: isStockItem derivation + zero-stock auto-seed', () => 
       id: defaultBranchId,
       sync2booksBranchId,
     });
-    return { tenantId: tenant.id, branchId: sync2booksBranchId };
+    return {
+      tenantId: tenant.id,
+      branchId: defaultBranchId,
+      aliasId: sync2booksBranchId,
+    };
   }
 
-  it('registering a Goods item creates a 0-qty stock row in the default branch', async () => {
-    const { branchId } = await setupTenantAndBranch(
+  it('registering a Goods item creates a 0-qty stock row keyed by the canonical branch id, not the sync2books alias', async () => {
+    const { branchId, aliasId } = await setupTenantAndBranch(
       'merchant-goods',
       'branch-goods',
     );
@@ -175,6 +186,11 @@ describe('CatalogService: isStockItem derivation + zero-stock auto-seed', () => 
     const stock = await stockRepo.getStock(result.item.id, branchId);
     expect(stock).not.toBeNull();
     expect(stock?.quantityOnHand).toBe(0);
+
+    // Regression: this used to seed under `aliasId` (`sync2booksBranchId`,
+    // e.g. '00') instead, producing a second, permanently-empty stock row
+    // alongside the one every other writer keys by `branchId`.
+    expect(await stockRepo.getStock(result.item.id, aliasId)).toBeNull();
   });
 
   it('registering a Service item does not create a stock row', async () => {
