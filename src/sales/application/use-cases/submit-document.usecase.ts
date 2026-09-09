@@ -13,6 +13,7 @@ import type {
   IComplianceEventRepository,
 } from '../../../shared/ports/repository.port';
 import { OscuSyncStateOrmEntity } from '../../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
+import { parseExpectedInvcNo } from '../../../regulatory/oscu/mapping/oscu-sequence-drift';
 
 export interface SubmitDocumentResult {
   document: ComplianceDocument;
@@ -59,25 +60,6 @@ async function releaseInvoiceSequence(
       'syncKey',
     ]);
   }
-}
-
-/**
- * KRA names the invcNo it expects directly in the rejection, e.g.
- * "Invc No: 8 is invalid, use the expected value: 9" (confirmed live 2026-09-09,
- * sandbox PIN P600004185A). Same property as the sarNo rejection, and the same
- * consequence: the counter can be repaired inline with no probe call, unlike the
- * itemCd sequence whose rejection masks the expected value behind asterisks and
- * therefore costs an /itemInfo round trip (see fetchMaxItemCdSeqFromKra).
- * Returns the expected value, or null when this isn't an invcNo drift rejection.
- */
-export function parseExpectedInvcNo(
-  message: string | null | undefined,
-): number | null {
-  if (!message) return null;
-  const m = /invc\s*no\b[\s\S]*?expected\s+value\s*:?\s*(\d+)/i.exec(message);
-  if (!m) return null;
-  const expected = Number.parseInt(m[1], 10);
-  return Number.isSafeInteger(expected) && expected > 0 ? expected : null;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { InventoryService, parseExpectedSarNo } from './api/inventory.service';
+import { InventoryService } from './api/inventory.service';
+import { parseExpectedSarNo } from '../regulatory/oscu/mapping/oscu-sequence-drift';
 import {
   CONNECTION_REPO,
   ETIMS_ADAPTER,

@@ -39,6 +39,7 @@ import {
   type MatchedPurchaseItem,
   type RawKraPurchaseItem,
 } from './purchase-kra-confirmation.builder';
+import { parseExpectedInvcNo } from '../../regulatory/oscu/mapping/oscu-sequence-drift';
 
 const PRODUCT_TYPE_CODES = ['1', '2', '3'] as const;
 
@@ -304,25 +305,60 @@ export class DashboardPurchasesApplicationService {
         await this.repo.save(row);
       }
 
-      const payload = buildPurchaseConfirmationPayload({
-        row,
-        matches,
-        invcNo,
-        now: new Date(),
-      });
+      // Rebuilt per attempt so the drift correction below can resubmit under
+      // the invcNo KRA actually expects.
+      const send = async (
+        seq: number,
+      ): Promise<{ success: boolean; error?: string }> => {
+        const payload = buildPurchaseConfirmationPayload({
+          row,
+          matches,
+          invcNo: seq,
+          now: new Date(),
+        });
+        try {
+          return await this.oscuOperations.sendPurchaseTransaction(
+            merchantId,
+            branch.sync2booksBranchId ?? branch.id,
+            payload,
+          );
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      };
 
-      let envelope: { success: boolean; error?: string };
-      try {
-        envelope = await this.oscuOperations.sendPurchaseTransaction(
-          merchantId,
-          branch.sync2booksBranchId ?? branch.id,
-          payload,
-        );
-      } catch (error) {
-        envelope = {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
+      let envelope = await send(invcNo);
+
+      // Purchases carry their own invcNo sequence, independent of sales'
+      // `invoice_seq:*` -- but it drifts for the same shared-PIN reason and KRA
+      // names the expected value the same way, so it takes the same inline
+      // repair (see oscu-sequence-drift.ts). One correction, then fall through
+      // to the normal rejection handling below.
+      //
+      // `expected !== invcNo` guards KRA echoing back the value already sent:
+      // that retry would be identical and pointless. Both the counter and
+      // `row.kraConfirmInvcNo` are corrected, since a later retry of this row
+      // reuses the persisted value.
+      if (!envelope.success) {
+        const expected = parseExpectedInvcNo(envelope.error ?? null);
+        if (expected !== null && expected !== invcNo) {
+          this.logger.warn(
+            `purchase ${row.id} invcNo drift: sent=${invcNo} expected=${expected} ` +
+              `-- correcting counter and retrying once`,
+          );
+          await this.forcePurchaseInvcNo(
+            connectionInfo.kraPin,
+            connectionInfo.environment,
+            expected,
+          );
+          invcNo = expected;
+          row.kraConfirmInvcNo = expected;
+          await this.repo.save(row);
+          envelope = await send(invcNo);
+        }
       }
 
       if (envelope.success) {
@@ -865,6 +901,24 @@ export class DashboardPurchasesApplicationService {
       'syncKey',
     ]);
     return next;
+  }
+
+  /**
+   * Overwrites the counter so `invcNo` reads as the latest issued value; the
+   * caller then submits that same value rather than re-allocating.
+   * Unconditional rather than a Math.max: when this runs, the local value is
+   * precisely the one KRA has just told us is wrong. Mirrors
+   * forceInvoiceSequence on the sales side.
+   */
+  private async forcePurchaseInvcNo(
+    kraPin: string,
+    environment: string,
+    invcNo: number,
+  ): Promise<void> {
+    const syncKey = `purchase_confirm_seq:${kraPin}:${environment}`;
+    await this.syncStateRepo.upsert({ syncKey, lastReqDt: String(invcNo) }, [
+      'syncKey',
+    ]);
   }
 
   /** Rolls the counter back on permanent rejection, guarded so it can't stomp a value another request has since advanced past. */

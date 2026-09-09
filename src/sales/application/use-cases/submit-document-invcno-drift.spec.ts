@@ -1,7 +1,5 @@
-import {
-  parseExpectedInvcNo,
-  submitDocument,
-} from './submit-document.usecase';
+import { submitDocument } from './submit-document.usecase';
+import { parseExpectedInvcNo } from '../../../regulatory/oscu/mapping/oscu-sequence-drift';
 import { ComplianceStatus } from '../../../shared/domain/enums/compliance-status.enum';
 import { ConnectionStatus } from '../../../shared/domain/enums/connection-status.enum';
 import type { ComplianceDocument } from '../../domain/entities/compliance-document.entity';

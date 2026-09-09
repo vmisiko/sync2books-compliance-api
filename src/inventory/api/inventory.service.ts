@@ -20,6 +20,7 @@ import type {
 } from '../../shared/ports/repository.port';
 import type { IEtimsAdapter } from '../../regulatory/oscu/ports/etims-adapter.port';
 import type { OscuStockIOSaveReq } from '../../regulatory/oscu/transport/endpoints/stock-io-save.dto';
+import { parseExpectedSarNo } from '../../regulatory/oscu/mapping/oscu-sequence-drift';
 import type { ComplianceItem } from '../../shared/domain/entities/compliance-item.entity';
 import type { InventoryStock } from '../domain/entities/inventory-stock.entity';
 import type { StockMovement } from '../domain/entities/stock-movement.entity';
@@ -28,27 +29,6 @@ import {
   splitTaxInclusiveAmount,
   round2,
 } from '../../regulatory/oscu/mapping/oscu-tax-rates';
-
-/**
- * KRA states the sarNo it expects directly in an insertStockIO rejection, e.g.
- * "Invalid sarNo: Expected: 10 but found: 15" (confirmed live 2026-09-09,
- * sandbox PIN P600004185A). That makes the sarNo counter cheaper to repair than
- * the itemCd sequence, whose rejection reveals nothing and therefore needs a
- * /itemInfo probe to discover the true value (see fetchMaxItemCdSeqFromKra).
- * Returns the expected value, or null when this isn't a sarNo drift rejection.
- */
-export function parseExpectedSarNo(
-  message: string | null | undefined,
-): number | null {
-  if (!message) return null;
-  const m =
-    /invalid\s+sarno\s*:\s*expected\s*:\s*(\d+)\s*but\s*found\s*:\s*(\d+)/i.exec(
-      message,
-    );
-  if (!m) return null;
-  const expected = Number.parseInt(m[1], 10);
-  return Number.isSafeInteger(expected) && expected > 0 ? expected : null;
-}
 
 /**
  * Movement types that restate on-hand quantity from outside KRA's own document
