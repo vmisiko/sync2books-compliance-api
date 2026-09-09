@@ -28,9 +28,11 @@ export class AdjustStockDto {
   @ApiProperty({
     required: false,
     description:
-      'Unit price for this quantity, required for the eTIMS insertStockIO sync ' +
-      '(ETIMS_STOCK_SYNC) to actually succeed -- KRA rejects a zero amount. Without ' +
-      'it, the adjustment still records locally but the eTIMS sync is skipped.',
+      'Unit price for this quantity -- KRA rejects a zero amount on insertStockIO. ' +
+      "Optional: omit it and the item's own catalog price is used. With no price " +
+      'anywhere the ledger entry is skipped, which also makes the saveStockMaster ' +
+      'that follows fail ("rsdQty mismatch") -- the response\'s `etims` block says ' +
+      'which half went through.',
   })
   unitPrice?: number;
 }

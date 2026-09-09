@@ -41,7 +41,7 @@ describe('InventoryService -- saveStockMaster on manual adjustment', () => {
     process.env = { ...oldEnv };
   });
 
-  async function buildService() {
+  async function buildService(opts: { itemUnitPrice?: number | null } = {}) {
     const insertStockIO = jest
       .fn<
         ReturnType<IEtimsAdapter['insertStockIO']>,
@@ -80,6 +80,7 @@ describe('InventoryService -- saveStockMaster on manual adjustment', () => {
             taxTyCd: 'B',
             productTypeCode: '2',
             etimsItemCode: ITEM_CD,
+            unitPrice: opts.itemUnitPrice ?? null,
             version: 1,
             createdAt: new Date(),
             updatedAt: new Date(),
@@ -153,12 +154,53 @@ describe('InventoryService -- saveStockMaster on manual adjustment', () => {
   });
 
   /**
-   * The two halves have independent requirements: insertStockIO needs a real
-   * non-zero amount, saveStockMaster sends only itemCd/rsdQty. A dashboard
-   * adjust with no price must still reach KRA's stock master, or the missing
-   * price silently reintroduces the original bug.
+   * The dashboard's inline stock edit has nowhere to type a price, so the
+   * adjustment arrives without one -- and a priceless movement can't be sent
+   * as insertStockIO at all (KRA rejects a zero amount). Falling back to the
+   * item's own catalog price is what lets that edit reach KRA.
+   *
+   * This is not a nicety. KRA derives the rsdQty it expects on saveStockMaster
+   * from the accumulated Stock IO ledger, so a skipped ledger entry doesn't
+   * merely lose an audit row -- it makes the stock-master push that follows
+   * fail with "rsdQty mismatch", leaving the item absent from KRA's stock
+   * master and every later sale of it rejected for "does not exist in your
+   * stock master".
    */
-  it('still pushes rsdQty when no unitPrice is supplied, skipping only the ledger entry', async () => {
+  it("falls back to the item's catalog price when the caller supplies none", async () => {
+    process.env = {
+      ...oldEnv,
+      ETIMS_STOCK_SYNC: 'true',
+      ETIMS_STOCK_MASTER_SYNC: 'true',
+    };
+    const { service, insertStockIO, saveStockMaster } = await buildService({
+      itemUnitPrice: 250,
+    });
+
+    const result = await service.adjustStock({
+      itemId: 'item-catalogprice',
+      branchId: 'branch-1',
+      quantity: 7,
+      action: 'ADD',
+    });
+
+    expect(insertStockIO).toHaveBeenCalledTimes(1);
+    expect(insertStockIO.mock.calls[0][0].itemList[0].prc).toBe(250);
+    expect(saveStockMaster).toHaveBeenCalledTimes(1);
+    expect(saveStockMaster.mock.calls[0][0].rsdQty).toBe(7);
+    expect(result.etims).toEqual({
+      stockIo: { status: 'ok' },
+      stockMaster: { status: 'ok' },
+    });
+  });
+
+  /**
+   * With no price anywhere the ledger entry genuinely can't be built. The
+   * adjustment still records locally and the stock-master push is still
+   * attempted -- but the caller has to be told the ledger half didn't go, or
+   * the dashboard reports a flat "Stock adjusted" for a change KRA will
+   * reject.
+   */
+  it('reports the skipped ledger entry when neither the caller nor the item has a price', async () => {
     process.env = {
       ...oldEnv,
       ETIMS_STOCK_SYNC: 'true',
@@ -166,7 +208,7 @@ describe('InventoryService -- saveStockMaster on manual adjustment', () => {
     };
     const { service, insertStockIO, saveStockMaster } = await buildService();
 
-    await service.adjustStock({
+    const result = await service.adjustStock({
       itemId: 'item-nopricing',
       branchId: 'branch-1',
       quantity: 7,
@@ -176,6 +218,53 @@ describe('InventoryService -- saveStockMaster on manual adjustment', () => {
     expect(insertStockIO).toHaveBeenCalledTimes(0);
     expect(saveStockMaster).toHaveBeenCalledTimes(1);
     expect(saveStockMaster.mock.calls[0][0].rsdQty).toBe(7);
+    expect(result.etims.stockIo.status).toBe('skipped');
+    expect(result.etims.stockIo.reason).toMatch(/unit price/i);
+  });
+
+  /**
+   * The pushes are best-effort so a KRA outage never blocks bookkeeping --
+   * which is precisely why the rejection has to come back in the result. It
+   * used to exist only as a `logger.warn` nobody reads, so the dashboard
+   * showed "Stock adjusted" and the failure only surfaced days later as a
+   * rejected sale.
+   */
+  it('reports a KRA rejection back to the caller instead of only logging it', async () => {
+    process.env = {
+      ...oldEnv,
+      ETIMS_STOCK_SYNC: 'true',
+      ETIMS_STOCK_MASTER_SYNC: 'true',
+    };
+    const { service, saveStockMaster } = await buildService({
+      itemUnitPrice: 100,
+    });
+    // A plain rejection, not a ledger mismatch -- the self-healing paths have
+    // their own spec (etims-rsdqty-ledger-repair.spec.ts); this one is only
+    // about the rejection reaching the caller at all.
+    saveStockMaster.mockResolvedValue({
+      success: false,
+      error: 'OSCU 999 Please try again later',
+    });
+
+    const result = await service.adjustStock({
+      itemId: 'item-rejected',
+      branchId: 'branch-1',
+      quantity: 7,
+      action: 'ADD',
+    });
+
+    expect(result.stock.quantityOnHand).toBe(7);
+    expect(result.etims.stockMaster.status).toBe('failed');
+    expect(result.etims.stockMaster.reason).toBe(
+      'OSCU 999 Please try again later',
+    );
+    // The evidence rides along, so the dashboard can show what KRA was asked
+    // and what it said without anyone tailing the API console.
+    expect(result.etims.stockMaster.detail).toMatchObject({
+      endpoint: 'saveStockMaster',
+      itemCd: ITEM_CD,
+      sent: { rsdQty: 7 },
+    });
   });
 
   it('sends the resulting balance rather than the delta on DEDUCT', async () => {

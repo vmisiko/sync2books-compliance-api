@@ -33,7 +33,8 @@ export class StockController {
   @ApiOperation({
     summary:
       'Reconcile local stock against an external on-hand quantity (records a RECONCILE ' +
-      'movement and pushes eTIMS saveStockMaster, unlike adjust which only pushes insertStockIO)',
+      'movement, then pushes eTIMS insertStockIO followed by saveStockMaster — the same ' +
+      'pair a manual adjust sends)',
   })
   @ApiResponse({ status: 201, description: 'Stock reconciled' })
   async reconcileStock(@Body() body: ReconcileStockDto) {
