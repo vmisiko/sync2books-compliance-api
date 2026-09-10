@@ -147,6 +147,24 @@ export class DashboardInventoryApplicationService {
   }
 
   /**
+   * Repairs KRA's Stock IO ledger for one item so its `rsdQty` can be
+   * declared again -- see InventoryService.repairKraStockLedger.
+   *
+   * Separate from {@link adjust} on purpose, and the separation is the whole
+   * point: an adjustment changes local stock and appends a ledger entry, so
+   * repeating one to "force the KRA push through" moves both sides equally
+   * and closes nothing while making the ledger messier. This changes only
+   * KRA's side, records no local movement, and is safe to run twice.
+   */
+  async repairKraLedger(input: {
+    itemId: string;
+    branchId: string;
+    kraLedgerQty?: number;
+  }) {
+    return this.inventory.repairKraStockLedger(input);
+  }
+
+  /**
    * Pulls each item's current QuickBooks QtyOnHand from the main API (same
    * on-demand pull mechanism as the Items page's "Pull items" action, not a
    * separate push channel) and reconciles it into the default branch's stock,

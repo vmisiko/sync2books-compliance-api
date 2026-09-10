@@ -1,9 +1,18 @@
-import { Body, Controller, Post, Put, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InventoryService } from './inventory.service';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { TransferStockDto } from './dto/transfer-stock.dto';
 import { ReconcileStockDto } from './dto/reconcile-stock.dto';
+import { RepairKraLedgerDto } from './dto/repair-kra-ledger.dto';
 import { ComplianceServiceAuthGuard } from '../../integration/compliance-service-auth.guard';
 
 @Controller('api/stock')
@@ -27,6 +36,21 @@ export class StockController {
     const result = await this.inventoryService.adjustStock(body);
 
     return result;
+  }
+
+  @Post('repair-kra-ledger')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Bring KRA's Stock IO ledger for one item into agreement with local " +
+      'on-hand, then re-declare rsdQty — records NO local movement. Use this ' +
+      'when a sale is rejected for "does not exist in your stock master" and ' +
+      'the stock push keeps failing on rsdQty: retrying the adjustment can ' +
+      'never close that gap, because an adjustment moves both sides equally.',
+  })
+  @ApiResponse({ status: 200, description: 'Ledger repair outcome' })
+  async repairKraLedger(@Body() body: RepairKraLedgerDto) {
+    return this.inventoryService.repairKraStockLedger(body);
   }
 
   @Post('reconcile')

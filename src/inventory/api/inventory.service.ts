@@ -25,6 +25,7 @@ import {
   parseExpectedSarNo,
   parseRsdQtyMismatch,
 } from '../../regulatory/oscu/mapping/oscu-sequence-drift';
+import { deriveKraLedgerQty } from '../../regulatory/oscu/mapping/oscu-stock-ledger';
 import type { ComplianceConnection } from '../../shared/domain/entities/compliance-connection.entity';
 import {
   deriveItemType,
@@ -952,6 +953,206 @@ export class InventoryService {
    * ETIMS_STOCK_MASTER_SYNC isn't enabled (same env-flag gate
    * syncStockMasterToEtims itself already applies).
    */
+  /**
+   * Brings KRA's Stock IO ledger for one item into agreement with the local
+   * on-hand quantity, then declares that quantity -- **without recording a
+   * local stock movement**.
+   *
+   * This is the lever the two automatic self-heals can't be. KRA validates
+   * `rsdQty` against the ledger's running total, and the arithmetic of a
+   * normal adjustment can never close a gap between them: an adjustment of Δ
+   * moves local on-hand to L+Δ *and* the ledger to K+Δ, then declares L+Δ,
+   * which is accepted only if L already equalled K. So an item whose ledger
+   * fell behind -- most often because its movements predate the unit-price
+   * fallback and were skipped -- stays stuck no matter how many times anyone
+   * retries the edit, and each retry appends another ledger entry that leaves
+   * the gap exactly as wide. Only a ledger-only entry of L-K fixes it.
+   *
+   * {@link repairStockLedgerGap} already does this automatically when KRA's
+   * rejection names both numbers. This is the same repair for the wording
+   * that names neither: measure the ledger instead of reading it.
+   *
+   * `kraLedgerQty` overrides the measurement. It exists because the derivation
+   * can legitimately fail (see deriveKraLedgerQty -- the documented
+   * StockMoveRes has no `sarTyCd`, so movements may not be signable), and the
+   * honest fallback for a number that goes into a tax filing is a human who
+   * has read KRA's ledger, not a guess.
+   *
+   * Idempotent in the way that matters: run it twice and the second run
+   * measures a ledger that already agrees, computes a zero gap, and only
+   * re-declares `rsdQty`. It is the *adjustment* endpoint that is unsafe to
+   * repeat, which is exactly why this is a separate operation.
+   */
+  async repairKraStockLedger(params: {
+    itemId: string;
+    branchId: string;
+    /** KRA's net for this item, when it can't be derived. Read it off the ledger. */
+    kraLedgerQty?: number;
+  }): Promise<{
+    itemId: string;
+    branchId: string;
+    itemCd: string | null;
+    localQtyOnHand: number;
+    kraLedgerQty: number | null;
+    /** How the ledger figure was obtained. */
+    kraLedgerSource: 'derived' | 'supplied' | 'unavailable';
+    gap: number | null;
+    ledgerEntry: EtimsPushOutcome;
+    stockMaster: EtimsPushOutcome;
+  }> {
+    const branchId = await this.toCanonicalBranchId(
+      params.itemId,
+      params.branchId,
+    );
+    const base = {
+      itemId: params.itemId,
+      branchId,
+      itemCd: null as string | null,
+      localQtyOnHand: 0,
+      kraLedgerQty: null as number | null,
+      kraLedgerSource: 'unavailable' as 'derived' | 'supplied' | 'unavailable',
+      gap: null as number | null,
+    };
+
+    if (!this.itemRepo || !this.connectionRepo || !this.etimsAdapter) {
+      const out = pushSkipped(
+        'eTIMS stock sync is not wired up in this context',
+      );
+      return { ...base, ledgerEntry: out, stockMaster: out };
+    }
+    if (!this.shouldSyncMovementsToEtims()) {
+      const out = pushSkipped(
+        'eTIMS stock sync is disabled (ETIMS_STOCK_SYNC) — nothing can be pushed',
+      );
+      return { ...base, ledgerEntry: out, stockMaster: out };
+    }
+
+    const stock = await this.stockRepo.getStock(params.itemId, branchId);
+    if (!stock) {
+      const out = pushSkipped('No stock recorded for this item/branch');
+      return { ...base, ledgerEntry: out, stockMaster: out };
+    }
+    base.localQtyOnHand = stock.quantityOnHand;
+
+    const [item] = await this.itemRepo.findByIds([params.itemId]);
+    if (!item) {
+      const out = pushSkipped(`Item ${params.itemId} not found`);
+      return { ...base, ledgerEntry: out, stockMaster: out };
+    }
+    if (deriveItemType(item.productTypeCode) === ItemType.SERVICE) {
+      const out = pushSkipped('Services are not stock-tracked by KRA');
+      return { ...base, ledgerEntry: out, stockMaster: out };
+    }
+
+    const itemCd =
+      typeof item.etimsItemCode === 'string' && item.etimsItemCode.trim() !== ''
+        ? item.etimsItemCode
+        : null;
+    if (!itemCd) {
+      const out = pushSkipped(
+        'Item is not registered with KRA yet (no itemCd) — run Item Sync first',
+      );
+      return { ...base, ledgerEntry: out, stockMaster: out };
+    }
+    base.itemCd = itemCd;
+
+    const connection = await this.connectionRepo.findByMerchantAndBranch(
+      item.merchantId,
+      branchId,
+    );
+    if (!connection || !connection.kraBhfId) {
+      const out = pushSkipped(
+        'No initialized eTIMS connection for this branch',
+      );
+      return { ...base, ledgerEntry: out, stockMaster: out };
+    }
+
+    // Resolve KRA's side of the comparison.
+    let kraLedgerQty: number;
+    if (typeof params.kraLedgerQty === 'number') {
+      kraLedgerQty = params.kraLedgerQty;
+      base.kraLedgerSource = 'supplied';
+    } else {
+      const probe = await this.probeKraStockLedger(
+        itemCd,
+        item.merchantId,
+        connection,
+      );
+      const derived = deriveKraLedgerQty(probe, itemCd);
+      if (derived.status === 'unsignable') {
+        const out = pushFailed(
+          `KRA's ledger for ${itemCd} could not be totalled automatically: ` +
+            `${derived.reason}. Read the net off the ledger in this error's ` +
+            `detail and pass it as kraLedgerQty.`,
+          {
+            endpoint: 'selectStockMoveList',
+            itemCd,
+            branchId: connection.kraBhfId,
+            kraStockLedger: probe,
+          },
+        );
+        return { ...base, ledgerEntry: out, stockMaster: out };
+      }
+      kraLedgerQty = derived.status === 'empty' ? 0 : derived.qty;
+      base.kraLedgerSource = 'derived';
+    }
+    base.kraLedgerQty = kraLedgerQty;
+
+    const gap = round2(stock.quantityOnHand - kraLedgerQty);
+    base.gap = gap;
+
+    this.logger.log(
+      `eTIMS ledger repair: itemCd=${itemCd} branch=${branchId} ` +
+        `local=${stock.quantityOnHand} kraLedger=${kraLedgerQty} ` +
+        `(${base.kraLedgerSource}) gap=${gap}`,
+    );
+
+    let ledgerEntry: EtimsPushOutcome;
+    if (gap === 0) {
+      ledgerEntry = pushSkipped(
+        "KRA's ledger already matches the local quantity — nothing to correct",
+      );
+    } else {
+      const unitPrice =
+        typeof item.unitPrice === 'number' && item.unitPrice > 0
+          ? item.unitPrice
+          : null;
+      if (unitPrice === null) {
+        const out = pushSkipped(
+          'the item has no unit price, and KRA rejects a zero-amount stock movement',
+        );
+        return { ...base, ledgerEntry: out, stockMaster: out };
+      }
+      ledgerEntry = await this.sendStockIo({
+        item,
+        itemCd,
+        connection,
+        qty: Math.abs(gap),
+        unitPrice,
+        // OSCU code classification 12: 05 incoming adjustment, 16 outgoing.
+        sarTyCd: gap > 0 ? '05' : '16',
+        regTyCd: 'A',
+        ocrnDt: this.formatYyyyMMddUtc(new Date()),
+        remark: 'RSDQTY_LEDGER_REPAIR',
+        logContext: `ledger-repair item=${item.id} branch=${branchId}`,
+      });
+      if (ledgerEntry.status !== 'ok') {
+        // Declaring rsdQty on a ledger we just failed to correct would only
+        // reproduce the original rejection.
+        return {
+          ...base,
+          ledgerEntry,
+          stockMaster: pushSkipped(
+            'not attempted — the ledger correction did not go through',
+          ),
+        };
+      }
+    }
+
+    const stockMaster = await this.syncStockMasterToEtims(stock);
+    return { ...base, ledgerEntry, stockMaster };
+  }
+
   async pushStockMasterCatchUp(
     itemId: string,
     branchId: string,

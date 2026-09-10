@@ -22,6 +22,7 @@ import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guard
 import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { DashboardAdjustStockDto } from './dto/dashboard-adjust-stock.dto';
 import { DashboardTransferStockDto } from './dto/dashboard-transfer-stock.dto';
+import { DashboardRepairKraLedgerDto } from './dto/dashboard-repair-kra-ledger.dto';
 
 @Controller('dashboard-api/inventory')
 @ApiTags('Dashboard inventory (Mode B)')
@@ -82,6 +83,21 @@ export class DashboardInventoryController {
   async transfer(@Body() body: DashboardTransferStockDto) {
     const result = await this.inventory.transfer(body);
     return { success: true, message: 'Stock transferred', data: result };
+  }
+
+  @Post('repair-kra-ledger')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Bring KRA's Stock IO ledger for one item into agreement with local " +
+      'on-hand, then re-declare rsdQty. Records no local movement, and is ' +
+      'safe to re-run — unlike retrying an adjustment, which can never close ' +
+      'an rsdQty gap because it moves both sides equally.',
+  })
+  @ApiResponse({ status: 200, description: 'Ledger repair outcome' })
+  async repairKraLedger(@Body() body: DashboardRepairKraLedgerDto) {
+    const result = await this.inventory.repairKraLedger(body);
+    return { success: true, message: 'OK', data: result };
   }
 
   @Post('reconcile')

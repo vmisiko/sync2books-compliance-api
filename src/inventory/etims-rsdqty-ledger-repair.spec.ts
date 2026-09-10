@@ -24,6 +24,7 @@ import {
   isRsdQtyLedgerMismatch,
   parseRsdQtyMismatch,
 } from '../regulatory/oscu/mapping/oscu-sequence-drift';
+import { deriveKraLedgerQty } from '../regulatory/oscu/mapping/oscu-stock-ledger';
 
 const ITEM_CD = 'KE2BFBL0000051';
 
@@ -147,6 +148,30 @@ describe('InventoryService -- rsdQty ledger repair', () => {
       insertStockIO,
       saveStockMaster,
       selectStockMoveList,
+    };
+  }
+
+  /** Shapes a `selectStockMoveList` rawResponse the way the OSCU spec describes it. */
+  function ledgerResponse(
+    moves: Array<{
+      sarNo: number;
+      sarTyCd?: string;
+      itemCd?: string;
+      qty: number;
+    }>,
+  ) {
+    return {
+      resultCd: '000',
+      resultMsg: 'Successful',
+      resultDt: '20260910013000',
+      data: {
+        stockMoveList: moves.map((m) => ({
+          sarNo: m.sarNo,
+          ...(m.sarTyCd === undefined ? {} : { sarTyCd: m.sarTyCd }),
+          ocrnDt: '20260910',
+          itemList: [{ itemSeq: 1, itemCd: m.itemCd ?? ITEM_CD, qty: m.qty }],
+        })),
+      },
     };
   }
 
@@ -373,5 +398,262 @@ describe('InventoryService -- rsdQty ledger repair', () => {
     expect(result.etims.stockMaster.reason).toBe(
       'Invalid Item: Item KE2BFBL0000051 does not exist',
     );
+  });
+
+  describe('deriveKraLedgerQty', () => {
+    it('nets incoming against outgoing movements for the item', () => {
+      const raw = ledgerResponse([
+        { sarNo: 1, sarTyCd: '02', qty: 100 }, // purchase in
+        { sarNo: 2, sarTyCd: '11', qty: 30 }, // sale out
+        { sarNo: 3, sarTyCd: '05', qty: 5 }, // adjustment in
+      ]);
+      expect(deriveKraLedgerQty(raw, ITEM_CD)).toEqual({
+        status: 'ok',
+        qty: 75,
+        movements: 3,
+      });
+    });
+
+    // A tenant's ledger covers the whole catalog, so other items' movements
+    // must be ignored rather than netted in.
+    it('ignores movements for other items', () => {
+      const raw = ledgerResponse([
+        { sarNo: 1, sarTyCd: '02', qty: 100 },
+        { sarNo: 2, sarTyCd: '02', itemCd: 'KE2BFBL0000099', qty: 999 },
+      ]);
+      expect(deriveKraLedgerQty(raw, ITEM_CD)).toEqual({
+        status: 'ok',
+        qty: 100,
+        movements: 1,
+      });
+    });
+
+    it('reports an item KRA has no history for as empty, not as an error', () => {
+      expect(deriveKraLedgerQty(ledgerResponse([]), ITEM_CD)).toEqual({
+        status: 'empty',
+      });
+    });
+
+    /**
+     * The reason this function is allowed to fail at all. The documented
+     * StockMoveRes field table lists no sarTyCd, so a real response may not
+     * carry one -- and a movement whose direction is unknown cannot be
+     * totalled. Refusing beats returning a number that goes into a tax filing.
+     */
+    it('refuses to total movements whose direction it cannot determine', () => {
+      const raw = ledgerResponse([{ sarNo: 7, qty: 100 }]);
+      const result = deriveKraLedgerQty(raw, ITEM_CD);
+      expect(result.status).toBe('unsignable');
+      expect(result.status === 'unsignable' ? result.reason : '').toContain(
+        'sarTyCd',
+      );
+    });
+
+    // A partial total is indistinguishable from a correct one at the call
+    // site, so one unreadable movement fails the whole derivation.
+    it('fails the whole derivation, not just the unreadable movement', () => {
+      const raw = ledgerResponse([
+        { sarNo: 1, sarTyCd: '02', qty: 100 },
+        { sarNo: 2, qty: 30 },
+      ]);
+      expect(deriveKraLedgerQty(raw, ITEM_CD).status).toBe('unsignable');
+    });
+  });
+
+  /**
+   * The lever the automatic repairs can't be. KRA validates rsdQty against the
+   * ledger's running total, and an ordinary adjustment moves BOTH sides by the
+   * same delta -- so it can never close a gap between them, no matter how many
+   * times it is retried. Only a ledger-only entry does.
+   */
+  describe('repairKraStockLedger', () => {
+    it('sends only the difference, records no local movement, then re-declares rsdQty', async () => {
+      withStockSyncOn();
+      const { service, insertStockIO, saveStockMaster, selectStockMoveList } =
+        await buildService({ itemUnitPrice: 120 });
+
+      // Local on-hand 52, built by an adjustment KRA never saw.
+      saveStockMaster.mockResolvedValueOnce({
+        success: false,
+        error:
+          'rsdQty quantity provided does not match the KE2BFBL0000051 code from Stock IO',
+      });
+      await service.adjustStock({
+        itemId: 'item-repair',
+        branchId: 'branch-1',
+        quantity: 52,
+        action: 'ADD',
+      });
+      insertStockIO.mockClear();
+      saveStockMaster.mockClear();
+      saveStockMaster.mockResolvedValue({ success: true });
+
+      // KRA's ledger holds 20 of the 52.
+      selectStockMoveList.mockResolvedValue({
+        success: true,
+        rawResponse: ledgerResponse([{ sarNo: 1, sarTyCd: '02', qty: 20 }]),
+      });
+
+      const result = await service.repairKraStockLedger({
+        itemId: 'item-repair',
+        branchId: 'branch-1',
+      });
+
+      expect(result.localQtyOnHand).toBe(52);
+      expect(result.kraLedgerQty).toBe(20);
+      expect(result.kraLedgerSource).toBe('derived');
+      expect(result.gap).toBe(32);
+      expect(insertStockIO).toHaveBeenCalledTimes(1);
+      expect(insertStockIO.mock.calls[0][0].itemList[0].qty).toBe(32);
+      expect(insertStockIO.mock.calls[0][0].sarTyCd).toBe('05');
+      expect(result.ledgerEntry.status).toBe('ok');
+      expect(result.stockMaster.status).toBe('ok');
+      expect(saveStockMaster.mock.calls[0][0].rsdQty).toBe(52);
+
+      // The local ledger is untouched -- this is a KRA-side correction only.
+      const movements = await service.listMovements({ itemId: 'item-repair' });
+      expect(movements.filter((m) => m.quantity === 32)).toHaveLength(0);
+    });
+
+    // Running it twice must not append a second correction; that is the
+    // property the adjust endpoint does not have.
+    it('is safe to re-run — a ledger that already agrees sends no entry', async () => {
+      withStockSyncOn();
+      const { service, insertStockIO, saveStockMaster, selectStockMoveList } =
+        await buildService({ itemUnitPrice: 120 });
+      await service.adjustStock({
+        itemId: 'item-repair-twice',
+        branchId: 'branch-1',
+        quantity: 40,
+        action: 'ADD',
+      });
+      insertStockIO.mockClear();
+      saveStockMaster.mockClear();
+      selectStockMoveList.mockResolvedValue({
+        success: true,
+        rawResponse: ledgerResponse([{ sarNo: 1, sarTyCd: '02', qty: 40 }]),
+      });
+
+      const result = await service.repairKraStockLedger({
+        itemId: 'item-repair-twice',
+        branchId: 'branch-1',
+      });
+
+      expect(result.gap).toBe(0);
+      expect(insertStockIO).toHaveBeenCalledTimes(0);
+      expect(result.ledgerEntry.status).toBe('skipped');
+      expect(result.stockMaster.status).toBe('ok');
+    });
+
+    it('sends an outgoing entry when KRA holds more than we do', async () => {
+      withStockSyncOn();
+      const { service, insertStockIO, selectStockMoveList } =
+        await buildService({ itemUnitPrice: 120 });
+      await service.adjustStock({
+        itemId: 'item-repair-down',
+        branchId: 'branch-1',
+        quantity: 10,
+        action: 'ADD',
+      });
+      insertStockIO.mockClear();
+      selectStockMoveList.mockResolvedValue({
+        success: true,
+        rawResponse: ledgerResponse([{ sarNo: 1, sarTyCd: '02', qty: 35 }]),
+      });
+
+      const result = await service.repairKraStockLedger({
+        itemId: 'item-repair-down',
+        branchId: 'branch-1',
+      });
+
+      expect(result.gap).toBe(-25);
+      expect(insertStockIO.mock.calls[0][0].sarTyCd).toBe('16');
+      expect(insertStockIO.mock.calls[0][0].itemList[0].qty).toBe(25);
+    });
+
+    it('accepts a hand-supplied ledger figure instead of deriving one', async () => {
+      withStockSyncOn();
+      const { service, insertStockIO, selectStockMoveList } =
+        await buildService({ itemUnitPrice: 120 });
+      await service.adjustStock({
+        itemId: 'item-repair-manual',
+        branchId: 'branch-1',
+        quantity: 52,
+        action: 'ADD',
+      });
+      insertStockIO.mockClear();
+
+      const result = await service.repairKraStockLedger({
+        itemId: 'item-repair-manual',
+        branchId: 'branch-1',
+        kraLedgerQty: 12,
+      });
+
+      expect(selectStockMoveList).not.toHaveBeenCalled();
+      expect(result.kraLedgerSource).toBe('supplied');
+      expect(result.gap).toBe(40);
+      expect(insertStockIO.mock.calls[0][0].itemList[0].qty).toBe(40);
+    });
+
+    it("asks for the figure when KRA's ledger cannot be totalled", async () => {
+      withStockSyncOn();
+      const { service, insertStockIO, selectStockMoveList } =
+        await buildService({ itemUnitPrice: 120 });
+      await service.adjustStock({
+        itemId: 'item-repair-unsignable',
+        branchId: 'branch-1',
+        quantity: 52,
+        action: 'ADD',
+      });
+      insertStockIO.mockClear();
+      // No sarTyCd -- direction unknowable.
+      selectStockMoveList.mockResolvedValue({
+        success: true,
+        rawResponse: ledgerResponse([{ sarNo: 1, qty: 20 }]),
+      });
+
+      const result = await service.repairKraStockLedger({
+        itemId: 'item-repair-unsignable',
+        branchId: 'branch-1',
+      });
+
+      expect(insertStockIO).toHaveBeenCalledTimes(0);
+      expect(result.kraLedgerSource).toBe('unavailable');
+      expect(result.ledgerEntry.status).toBe('failed');
+      expect(result.ledgerEntry.reason).toMatch(/pass it as kraLedgerQty/);
+      expect(result.ledgerEntry.detail?.kraStockLedger).toBeDefined();
+    });
+
+    // Declaring rsdQty on a ledger we just failed to correct would only
+    // reproduce the original rejection.
+    it('does not declare rsdQty when the ledger correction itself failed', async () => {
+      withStockSyncOn();
+      const { service, insertStockIO, saveStockMaster, selectStockMoveList } =
+        await buildService({ itemUnitPrice: 120 });
+      await service.adjustStock({
+        itemId: 'item-repair-failed',
+        branchId: 'branch-1',
+        quantity: 52,
+        action: 'ADD',
+      });
+      saveStockMaster.mockClear();
+      selectStockMoveList.mockResolvedValue({
+        success: true,
+        rawResponse: ledgerResponse([{ sarNo: 1, sarTyCd: '02', qty: 20 }]),
+      });
+      insertStockIO.mockResolvedValue({
+        success: false,
+        error: 'OSCU 999 Please try again later',
+      });
+
+      const result = await service.repairKraStockLedger({
+        itemId: 'item-repair-failed',
+        branchId: 'branch-1',
+      });
+
+      expect(result.ledgerEntry.status).toBe('failed');
+      expect(result.stockMaster.status).toBe('skipped');
+      expect(saveStockMaster).toHaveBeenCalledTimes(0);
+    });
   });
 });
