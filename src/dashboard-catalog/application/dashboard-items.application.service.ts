@@ -77,6 +77,12 @@ export type PullItemsResult = {
     catalogItemId?: string;
     created?: boolean;
     classificationCode?: string;
+    /**
+     * The item registered fine, but something about it needs a human --
+     * currently only the first-ERP-quantity conflict below. Distinct from
+     * `error`, which means the item did not register at all.
+     */
+    warning?: string;
     status: 'ok' | 'error';
     error?: string;
   }>;
@@ -225,14 +231,17 @@ export class DashboardItemsApplicationService {
           // reconcileStock's own KRA push still gates on etimsItemCode being
           // set, so a PENDING item's stock is tracked locally without
           // anything reaching KRA before it's accepted.
+          let warning: string | undefined;
           if (branchId && mainApiItem.qtyOnHand != null) {
             try {
-              await this.inventory.reconcileStock({
+              warning = await this.reconcilePulledQuantity({
                 itemId: result.item.id,
+                itemName: result.item.name,
                 branchId,
                 externalQtyOnHand: mainApiItem.qtyOnHand,
-                sourceSystem: sourceSystem ?? undefined,
-                unitPrice: result.item.unitPrice ?? undefined,
+                sourceSystem,
+                unitPrice: result.item.unitPrice,
+                erpBeganTrackingStock: result.erpBeganTrackingStock,
               });
             } catch (error) {
               this.logger.warn(
@@ -249,6 +258,7 @@ export class DashboardItemsApplicationService {
             catalogItemId: result.item.id,
             created: result.created,
             classificationCode: result.item.classificationCode,
+            ...(warning ? { warning } : {}),
             status: 'ok',
           });
         } catch (error) {
@@ -507,6 +517,77 @@ export class DashboardItemsApplicationService {
       }
     }
     return { updated, skipped };
+  }
+
+  /**
+   * Applies one pulled `qtyOnHand` to local stock -- except on the single
+   * occasion where doing so would silently destroy a quantity nobody else
+   * holds.
+   *
+   * On QuickBooks Essentials and Simple Start there is no inventory feature,
+   * so no `qtyOnHand` ever arrives and a merchant's goods are stocked by hand
+   * through the dashboard (and pushed to KRA from there). The day they
+   * upgrade to Plus, or convert an item to Inventory, the ERP starts
+   * answering -- and a freshly converted Inventory item typically starts at
+   * **0**, because opening quantities are entered separately if at all.
+   *
+   * A plain reconcile at that moment computes `0 - 52`, writes it, and pushes
+   * `rsdQty: 0` to KRA for an item with 52 units physically on the shelf.
+   * That is a wrong tax filing arriving through a routine "Pull items", with
+   * nothing on screen to say it happened.
+   *
+   * So on that first-ever ERP quantity, when the two disagree and the local
+   * figure is not zero, the reconcile is skipped and reported instead. Not
+   * blocked forever and not resolved by guessing -- the house rule is to
+   * surface a conflict between two legitimate numbers rather than pick one
+   * (see the tax-convention decision). A human reconciles deliberately from
+   * the Inventory page, and every pull after that is ordinary: `stockTracked`
+   * is true by then, so this only ever fires once per item.
+   *
+   * Returns a warning for the pull result, or undefined when the reconcile
+   * went through normally.
+   */
+  private async reconcilePulledQuantity(params: {
+    itemId: string;
+    itemName: string;
+    branchId: string;
+    externalQtyOnHand: number;
+    sourceSystem: string | null;
+    unitPrice: number | null;
+    erpBeganTrackingStock: boolean;
+  }): Promise<string | undefined> {
+    if (params.erpBeganTrackingStock) {
+      const local = await this.inventory.getStockLevel(
+        params.itemId,
+        params.branchId,
+      );
+      if (
+        local.quantityOnHand !== 0 &&
+        local.quantityOnHand !== params.externalQtyOnHand
+      ) {
+        const message =
+          `${params.itemName}: this ERP has started tracking stock for this item ` +
+          `and reports ${params.externalQtyOnHand}, but ${local.quantityOnHand} ` +
+          `is tracked here from manual adjustments the ERP has never seen. Left ` +
+          `at ${local.quantityOnHand} — reconcile it from the Inventory page once ` +
+          `you know which figure is right.`;
+        this.logger.warn(
+          `First ERP quantity for item ${params.itemId} disagrees with local stock ` +
+            `(erp=${params.externalQtyOnHand} local=${local.quantityOnHand}); ` +
+            `skipping reconcile so the manual figure is not overwritten`,
+        );
+        return message;
+      }
+    }
+
+    await this.inventory.reconcileStock({
+      itemId: params.itemId,
+      branchId: params.branchId,
+      externalQtyOnHand: params.externalQtyOnHand,
+      sourceSystem: params.sourceSystem ?? undefined,
+      unitPrice: params.unitPrice ?? undefined,
+    });
+    return undefined;
   }
 
   private async resolveMerchantId(complianceTenantId: string): Promise<string> {

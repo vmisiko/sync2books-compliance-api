@@ -61,6 +61,21 @@ export interface RegisterItemInput {
 export interface RegisterItemResult {
   item: CatalogItem;
   created: boolean;
+  /**
+   * True when this call is the first time the ERP has ever claimed to track
+   * this item's quantity -- `stockTracked` moved from null/false to true on
+   * an item that already existed.
+   *
+   * The moment matters because it is when a merchant upgrades their
+   * QuickBooks plan (Essentials and Simple Start have no inventory feature),
+   * or converts an item to Inventory. Until then the item's stock was kept
+   * by hand; from now on the ERP has an opinion about it, and the two can
+   * disagree wildly -- a freshly converted Inventory item typically starts at
+   * 0. Reported here so the pull can notice rather than reconcile straight
+   * over the top of hand-kept stock. Always false for a brand-new item:
+   * there is no prior quantity to lose.
+   */
+  erpBeganTrackingStock: boolean;
 }
 
 /**
@@ -135,6 +150,8 @@ export async function registerItem(
   // above: only a pull knows this, so every other write path omits it and
   // must leave what the pull already established alone.
   const stockTracked = input.stockTracked ?? existing?.stockTracked ?? null;
+  const erpBeganTrackingStock =
+    existing != null && stockTracked === true && existing.stockTracked !== true;
   // Deliberately NOT a function of stockTracked -- see
   // CatalogItem.isStockItem. What the ERP inventory-tracks and what KRA
   // needs a stock master for are different questions.
@@ -182,7 +199,9 @@ export async function registerItem(
     // re-staged unconditionally below -- re-pulling has always been the way
     // to retry those, and that's preserved.
     if (!changed && existing.registrationStatus === 'REGISTERED') {
-      if (!metadataChanged) return { item: existing, created: false };
+      if (!metadataChanged) {
+        return { item: existing, created: false, erpBeganTrackingStock };
+      }
       // Record the new signal and nothing else: registrationStatus,
       // lastSyncedAt, the sync result and `version` all stay exactly as they
       // were, because as far as KRA is concerned nothing happened.
@@ -191,7 +210,7 @@ export async function registerItem(
         stockTracked,
         updatedAt: now,
       });
-      return { item: saved, created: false };
+      return { item: saved, created: false, erpBeganTrackingStock };
     }
 
     const updated: CatalogItem = {
@@ -223,7 +242,7 @@ export async function registerItem(
       updatedAt: now,
     };
     const saved = await itemRepo.save(updated);
-    return { item: saved, created: false };
+    return { item: saved, created: false, erpBeganTrackingStock };
   }
 
   const newItem: CatalogItem = {
@@ -270,7 +289,7 @@ export async function registerItem(
     updatedAt: now,
   };
   const saved = await itemRepo.save(newItem);
-  return { item: saved, created: true };
+  return { item: saved, created: true, erpBeganTrackingStock: false };
 }
 
 function ensureNonEmptyString(value: unknown, field: string): string {
