@@ -53,6 +53,12 @@ export class StockRepositoryStub implements IStockRepository {
       branchId ? all.filter((s) => s.branchId === branchId) : all,
     );
   }
+
+  listByItem(itemId: string): Promise<InventoryStock[]> {
+    return Promise.resolve(
+      Array.from(stockByKey.values()).filter((s) => s.itemId === itemId),
+    );
+  }
 }
 
 export class StockMovementRepositoryStub implements IStockMovementRepository {

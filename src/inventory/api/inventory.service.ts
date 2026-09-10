@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
 import { recordMovement } from '../application/use-cases/record-movement.usecase';
+import { getStockLevel } from '../application/use-cases/get-stock-level.usecase';
 import type {
   IStockMovementRepository,
   IStockRepository,
@@ -1249,8 +1250,27 @@ export class InventoryService {
     });
   }
 
+  /**
+   * Current on-hand for one item/branch. Canonicalizes the branch id like
+   * every other reader here, so a caller holding either form (Mode A's '00',
+   * Mode B's ComplianceBranch.id) gets the row the writers actually maintain.
+   * Zero for an item with no row yet -- absence and empty are the same thing
+   * to a caller asking "how much is there".
+   */
+  async getStockLevel(itemId: string, branchId: string) {
+    return getStockLevel(
+      { itemId, branchId: await this.toCanonicalBranchId(itemId, branchId) },
+      this.stockRepo,
+    );
+  }
+
   async listStock(branchId?: string) {
     return this.stockRepo.listByBranch(branchId);
+  }
+
+  /** Every stock row for one item across all branches -- including any row still keyed by a non-canonical branch id. */
+  async listStockForItem(itemId: string) {
+    return this.stockRepo.listByItem(itemId);
   }
 
   async listMovements(params: {

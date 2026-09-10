@@ -6,7 +6,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CatalogService } from '../../catalog/api/catalog.service';
-import type { CatalogItem } from '../../catalog/domain/entities/catalog-item.entity';
+import {
+  normalizeItemName,
+  type CatalogItem,
+} from '../../catalog/domain/entities/catalog-item.entity';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { InventoryService } from '../../inventory/api/inventory.service';
 import {
@@ -77,6 +80,12 @@ export type PullItemsResult = {
     catalogItemId?: string;
     created?: boolean;
     classificationCode?: string;
+    /**
+     * The item registered fine, but something about it needs a human --
+     * currently only the first-ERP-quantity conflict below. Distinct from
+     * `error`, which means the item did not register at all.
+     */
+    warning?: string;
     status: 'ok' | 'error';
     error?: string;
   }>;
@@ -225,14 +234,20 @@ export class DashboardItemsApplicationService {
           // reconcileStock's own KRA push still gates on etimsItemCode being
           // set, so a PENDING item's stock is tracked locally without
           // anything reaching KRA before it's accepted.
-          if (branchId && mainApiItem.qtyOnHand != null) {
+          let warning: string | undefined;
+          // A deleted duplicate stays deleted, stock included -- reconciling
+          // the ERP's quantity into it would put stock back on a row nobody
+          // can see or sell.
+          if (branchId && mainApiItem.qtyOnHand != null && !result.deleted) {
             try {
-              await this.inventory.reconcileStock({
+              warning = await this.reconcilePulledQuantity({
                 itemId: result.item.id,
+                itemName: result.item.name,
                 branchId,
                 externalQtyOnHand: mainApiItem.qtyOnHand,
-                sourceSystem: sourceSystem ?? undefined,
-                unitPrice: result.item.unitPrice ?? undefined,
+                sourceSystem,
+                unitPrice: result.item.unitPrice,
+                erpBeganTrackingStock: result.erpBeganTrackingStock,
               });
             } catch (error) {
               this.logger.warn(
@@ -249,6 +264,7 @@ export class DashboardItemsApplicationService {
             catalogItemId: result.item.id,
             created: result.created,
             classificationCode: result.item.classificationCode,
+            ...(warning ? { warning } : {}),
             status: 'ok',
           });
         } catch (error) {
@@ -341,6 +357,64 @@ export class DashboardItemsApplicationService {
   }
 
   /**
+   * Deletes a same-named duplicate from this tenant's catalog -- REGISTERED
+   * ones included, which is the whole point: a product created twice (once by
+   * hand, again when it reached the ERP) ends up as two KRA items, and stock
+   * adjusted on the wrong one silently doesn't count toward sales.
+   *
+   * Soft delete (see CatalogItem.deletedAt), so history and open drafts that
+   * reference the item by id keep working, and a later pull leaves it deleted.
+   * KRA is not touched -- OSCU has no way to unregister an itemCd, and the
+   * itemCd sequence never reuses one, so the orphaned registration is inert.
+   *
+   * Refused unless:
+   * - another live item in this catalog has the same name, so this can only
+   *   ever remove a duplicate, never a product's only row; and
+   * - the item holds no stock in any branch. Deleting it with stock on hand
+   *   would strand that quantity (and KRA's rsdQty for its itemCd) where
+   *   nothing can move it -- move it to the twin with Adjust Stock first.
+   */
+  async deleteDuplicateItem(
+    complianceTenantId: string,
+    itemId: string,
+  ): Promise<CatalogItem> {
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+    const item = await this.catalog.getItemById(itemId);
+    if (!item || item.merchantId !== merchantId || item.deletedAt) {
+      throw new NotFoundException(`Item ${itemId} not found`);
+    }
+
+    const name = normalizeItemName(item.name);
+    const { items } = await this.catalog.listItems(merchantId);
+    const twins = items.filter(
+      (other) => other.id !== item.id && normalizeItemName(other.name) === name,
+    );
+    if (twins.length === 0) {
+      throw new BadRequestException(
+        `"${item.name}" is the only catalog item with this name -- only a duplicate can be deleted.`,
+      );
+    }
+
+    const rows = await this.inventory.listStockForItem(item.id);
+    const onHand = rows.reduce((sum, row) => sum + row.quantityOnHand, 0);
+    const reserved = rows.reduce((sum, row) => sum + row.reservedQuantity, 0);
+    if (onHand !== 0 || reserved !== 0) {
+      throw new BadRequestException(
+        `"${item.name}" (${item.etimsItemCode ?? 'not registered'}) still holds ${onHand} in stock` +
+          (reserved ? ` (${reserved} reserved)` : '') +
+          ` -- move it to the item you're keeping with Adjust Stock, then delete this one.`,
+      );
+    }
+
+    const deleted = await this.catalog.deleteItem(item.id);
+    this.logger.log(
+      `Deleted duplicate catalog item ${item.id} (${item.etimsItemCode ?? 'unregistered'}) ` +
+        `for merchant ${merchantId}; kept ${twins.map((t) => t.id).join(', ')}`,
+    );
+    return deleted as CatalogItem;
+  }
+
+  /**
    * Sync selected (or all PENDING/FAILED) catalog items to KRA eTIMS via
    * OSCU saveItem. Registering an item (pull/override) only ever writes
    * the local catalog row with status PENDING — this is the step that
@@ -421,7 +495,7 @@ export class DashboardItemsApplicationService {
 
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const existing = await this.catalog.getItemById(itemId);
-    if (!existing || existing.merchantId !== merchantId) {
+    if (!existing || existing.merchantId !== merchantId || existing.deletedAt) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
 
@@ -507,6 +581,77 @@ export class DashboardItemsApplicationService {
       }
     }
     return { updated, skipped };
+  }
+
+  /**
+   * Applies one pulled `qtyOnHand` to local stock -- except on the single
+   * occasion where doing so would silently destroy a quantity nobody else
+   * holds.
+   *
+   * On QuickBooks Essentials and Simple Start there is no inventory feature,
+   * so no `qtyOnHand` ever arrives and a merchant's goods are stocked by hand
+   * through the dashboard (and pushed to KRA from there). The day they
+   * upgrade to Plus, or convert an item to Inventory, the ERP starts
+   * answering -- and a freshly converted Inventory item typically starts at
+   * **0**, because opening quantities are entered separately if at all.
+   *
+   * A plain reconcile at that moment computes `0 - 52`, writes it, and pushes
+   * `rsdQty: 0` to KRA for an item with 52 units physically on the shelf.
+   * That is a wrong tax filing arriving through a routine "Pull items", with
+   * nothing on screen to say it happened.
+   *
+   * So on that first-ever ERP quantity, when the two disagree and the local
+   * figure is not zero, the reconcile is skipped and reported instead. Not
+   * blocked forever and not resolved by guessing -- the house rule is to
+   * surface a conflict between two legitimate numbers rather than pick one
+   * (see the tax-convention decision). A human reconciles deliberately from
+   * the Inventory page, and every pull after that is ordinary: `stockTracked`
+   * is true by then, so this only ever fires once per item.
+   *
+   * Returns a warning for the pull result, or undefined when the reconcile
+   * went through normally.
+   */
+  private async reconcilePulledQuantity(params: {
+    itemId: string;
+    itemName: string;
+    branchId: string;
+    externalQtyOnHand: number;
+    sourceSystem: string | null;
+    unitPrice: number | null;
+    erpBeganTrackingStock: boolean;
+  }): Promise<string | undefined> {
+    if (params.erpBeganTrackingStock) {
+      const local = await this.inventory.getStockLevel(
+        params.itemId,
+        params.branchId,
+      );
+      if (
+        local.quantityOnHand !== 0 &&
+        local.quantityOnHand !== params.externalQtyOnHand
+      ) {
+        const message =
+          `${params.itemName}: this ERP has started tracking stock for this item ` +
+          `and reports ${params.externalQtyOnHand}, but ${local.quantityOnHand} ` +
+          `is tracked here from manual adjustments the ERP has never seen. Left ` +
+          `at ${local.quantityOnHand} — reconcile it from the Inventory page once ` +
+          `you know which figure is right.`;
+        this.logger.warn(
+          `First ERP quantity for item ${params.itemId} disagrees with local stock ` +
+            `(erp=${params.externalQtyOnHand} local=${local.quantityOnHand}); ` +
+            `skipping reconcile so the manual figure is not overwritten`,
+        );
+        return message;
+      }
+    }
+
+    await this.inventory.reconcileStock({
+      itemId: params.itemId,
+      branchId: params.branchId,
+      externalQtyOnHand: params.externalQtyOnHand,
+      sourceSystem: params.sourceSystem ?? undefined,
+      unitPrice: params.unitPrice ?? undefined,
+    });
+    return undefined;
   }
 
   private async resolveMerchantId(complianceTenantId: string): Promise<string> {

@@ -83,15 +83,26 @@ function deriveProductTypeCode(
 
 /**
  * Records whether the ERP maintains a quantity for this item. Informational
- * only -- see CatalogItem.stockTracked, and note in particular that it does
- * NOT decide `isStockItem`: a QuickBooks NonInventory item is very often a
- * real good that KRA still needs a stock master for, because inventory
- * tracking there requires an asset account and a start date that plenty of
- * merchants never set up.
+ * only -- see CatalogItem.stockTracked. It does NOT decide `isStockItem`.
  *
- * What it is for: `false` means no `qtyOnHand` will ever arrive for this
- * item, so reconcile cannot maintain its stock and someone has to adjust it
- * by hand. Worth knowing, and otherwise invisible.
+ * The reason that matters, and the reason `false` here is completely normal:
+ * **QuickBooks Essentials and Simple Start have no inventory feature at all.**
+ * On those plans every item is Service or NonInventory by construction, no
+ * `QtyOnHand` is ever returned, and a merchant selling real goods is simply
+ * running their stock outside QuickBooks. Only Plus and Advanced expose
+ * Inventory items. So a whole catalogue coming back `stockTracked: false`
+ * says nothing about whether those goods need a KRA stock master -- they
+ * usually do. (Confirmed 2026-09-10: reading this signal as "not stocked"
+ * un-stocked 38 real goods on an Essentials tenant, including the item whose
+ * "does not exist in your stock master" rejection started that work.)
+ *
+ * What it IS good for: `false` means no `qtyOnHand` will ever arrive, so
+ * reconcile cannot maintain that item's stock and someone has to adjust it by
+ * hand -- otherwise an invisible and confusing state. And a flip to `true`
+ * marks the moment an ERP starts supplying quantities for an item it never
+ * did before (a plan upgrade, or an item converted to Inventory), which
+ * DashboardItemsApplicationService.pullItems treats with care rather than
+ * letting the first ERP number silently overwrite hand-kept stock.
  *
  * `Unknown` falls back to the presence of `qtyOnHand`, which main API returns
  * only for quantity-tracked items -- and to `undefined` when even that is

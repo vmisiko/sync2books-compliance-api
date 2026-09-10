@@ -48,6 +48,7 @@ function ormToDomain(row: CatalogItemOrmEntity): CatalogItem {
     lastSyncedAt: row.lastSyncedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt ?? null,
   };
 }
 
@@ -79,6 +80,7 @@ function domainToOrm(item: CatalogItem): CatalogItemOrmEntity {
   e.lastSyncedAt = item.lastSyncedAt;
   e.createdAt = item.createdAt;
   e.updatedAt = item.updatedAt;
+  e.deletedAt = item.deletedAt ?? null;
   return e;
 }
 
@@ -111,9 +113,14 @@ export class CatalogItemTypeOrmRepository
     return rows.map(ormToDomain);
   }
 
-  async findByMerchant(merchantId: string): Promise<CatalogItem[]> {
+  async findByMerchant(
+    merchantId: string,
+    options?: { includeDeleted?: boolean },
+  ): Promise<CatalogItem[]> {
     const rows = await this.repo.find({
-      where: { merchantId },
+      where: options?.includeDeleted
+        ? { merchantId }
+        : { merchantId, deletedAt: IsNull() },
       order: { createdAt: 'DESC' },
     });
     return rows.map(ormToDomain);
@@ -123,12 +130,19 @@ export class CatalogItemTypeOrmRepository
     merchantId: string,
     externalId: string,
     sourceSystem?: string | null,
+    options?: { includeDeleted?: boolean },
   ): Promise<CatalogItem | null> {
+    const deleted = options?.includeDeleted ? {} : { deletedAt: IsNull() };
     const row = await this.repo.findOne({
       where:
         sourceSystem !== undefined
-          ? { merchantId, externalId, sourceSystem: sourceSystem ?? IsNull() }
-          : { merchantId, externalId },
+          ? {
+              merchantId,
+              externalId,
+              sourceSystem: sourceSystem ?? IsNull(),
+              ...deleted,
+            }
+          : { merchantId, externalId, ...deleted },
     });
     return row ? ormToDomain(row) : null;
   }
@@ -140,7 +154,7 @@ export class CatalogItemTypeOrmRepository
     const trimmed = name.trim();
     if (!trimmed) return null;
     const row = await this.repo.findOne({
-      where: { merchantId, name: ILike(trimmed) },
+      where: { merchantId, name: ILike(trimmed), deletedAt: IsNull() },
     });
     return row ? ormToDomain(row) : null;
   }

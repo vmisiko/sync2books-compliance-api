@@ -116,4 +116,13 @@ export class CatalogItemOrmEntity {
    */
   @Column('varchar', { nullable: true })
   sourceSystem!: string | null;
+
+  /**
+   * Set when a same-named duplicate was deleted from the catalog. A plain
+   * column, deliberately NOT TypeORM's @DeleteDateColumn: that would hide the
+   * row from findById too, and sale lines/drafts still resolve their item by
+   * id. See CatalogItem.deletedAt.
+   */
+  @Column({ type: 'datetime', nullable: true })
+  deletedAt!: Date | null;
 }

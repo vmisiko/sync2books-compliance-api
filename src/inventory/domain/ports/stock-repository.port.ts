@@ -15,6 +15,8 @@ export interface IStockRepository {
     delta: number,
   ): Promise<InventoryStock>;
   listByBranch(branchId?: string): Promise<InventoryStock[]>;
+  /** Every stock row for one item, under whatever branch ids it's keyed by. */
+  listByItem(itemId: string): Promise<InventoryStock[]>;
 }
 
 export interface IStockMovementRepository {
