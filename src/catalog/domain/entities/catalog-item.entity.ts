@@ -92,14 +92,38 @@ export interface CatalogItem {
    */
   sourceSystem: string | null;
   /**
-   * Whether this item requires KRA stock tracking (insertStockIO etc).
+   * The ERP's own answer to "is this stock-tracked?" -- QuickBooks
+   * Inventory vs NonInventory, Odoo `is_storable`, Xero
+   * `IsTrackedAsInventory`, all already normalised to one vocabulary by the
+   * main API (see MainApiStandardizedItemType). Null means nobody has ever
+   * told us: a manually-created item, or a pull from before this was
+   * carried through.
+   *
+   * Persisted rather than recomputed per call because it is knowledge only a
+   * pull ever holds. Every other write path -- editing an item in Item Sync,
+   * registering a purchase line, a Mode A registration -- has no ERP contact
+   * and would otherwise silently reset a NonInventory item back to
+   * stock-tracked (the ERP-item edit at
+   * DashboardItemsApplicationService.updateItem re-registers with
+   * `existing.*` and would do exactly that).
+   */
+  stockTracked: boolean | null;
+  /**
+   * Whether this item requires KRA stock tracking (insertStockIO,
+   * saveStockMaster, a seeded stock row).
+   *
    * Not part of itemTyCd -- KRA's own item-type code list (cdCls 24: Raw
    * Material / Finished Product / Service) has no distinct "non-stock good"
-   * value, so this is tracked as its own flag rather than folded into
-   * productTypeCode. Fully derived from productTypeCode on every
-   * register/update via computeIsStockItem, uniformly regardless of source:
-   * '1'/'2' -> true, '3' -> false, null (pending) -> false until confirmed.
-   * No override.
+   * value, so this is its own flag. And because it is its own flag, it has
+   * its own input: `stockTracked` above, which is precisely this axis, and
+   * which productTypeCode is not. A QuickBooks NonInventory good is a
+   * Finished Product ('2') that KRA holds no stock master for; deriving this
+   * from productTypeCode alone made every one of them stock-tracked, so it
+   * got a stock row it should not have and a stock-master entry it could
+   * never legitimately hold.
+   *
+   * Derived on every register/update via computeIsStockItem, with no
+   * override -- see that function for the precedence.
    */
   isStockItem: boolean;
   registrationStatus: 'PENDING' | 'REGISTERED' | 'FAILED';
@@ -182,8 +206,30 @@ export function deriveItemType(
   return productTypeCode === '3' ? ItemType.SERVICE : ItemType.GOODS;
 }
 
-export function computeIsStockItem(productTypeCode: string | null): boolean {
-  return productTypeCode !== '3';
+/**
+ * Precedence, strongest first:
+ *
+ * 1. **A Service is never stock-tracked.** KRA holds no stock master for
+ *    itemTyCd '3', so this wins over any ERP signal -- an ERP that calls
+ *    something inventory-tracked cannot make it stockable at KRA.
+ * 2. **The ERP's own stock-tracked signal**, when we have one. This is the
+ *    same axis as the question being asked, so it is authoritative for goods:
+ *    NonInventory -> false, Inventory -> true.
+ * 3. **Default to stock-tracked.** Reached by manual items and by anything
+ *    pulled before `stockTracked` was carried through. Deliberately the
+ *    permissive answer, including for a null productTypeCode: a stock row on
+ *    an item that turns out not to need one is inert, whereas a missing one
+ *    means a sale is rejected for an item KRA has no stock master for. (The
+ *    doc comment here used to claim null -> false; the code never did that,
+ *    and true is the behaviour worth keeping.)
+ */
+export function computeIsStockItem(
+  productTypeCode: string | null,
+  stockTracked?: boolean | null,
+): boolean {
+  if (productTypeCode === '3') return false;
+  if (typeof stockTracked === 'boolean') return stockTracked;
+  return true;
 }
 
 export function computeNeedsProductType(

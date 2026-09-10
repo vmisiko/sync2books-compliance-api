@@ -329,4 +329,180 @@ describe('registerItem — catalog registration semantics', () => {
       expect(res.item.needsClassificationReview).toBe(true);
     });
   });
+
+  /**
+   * An ERP pull can't tell Raw Material from Finished Product, but leaving
+   * every pulled good at productTypeCode null meant it landed PENDING on
+   * needsProductType and couldn't be sold until someone picked one by hand.
+   * defaultProductTypeCode fills that in with '2' (Finished Product) --
+   * as a default, so it must lose to anything a human already decided,
+   * which is the whole reason it isn't just passed as productTypeCode.
+   */
+  describe('defaultProductTypeCode', () => {
+    it('fills in a brand-new item that has no product type from any other source', async () => {
+      const res = await service.registerItem({
+        merchantId: 'm10',
+        externalId: 'ext-10a',
+        name: 'Pulled Good',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+      });
+
+      expect(res.item.productTypeCode).toBe('2');
+      expect(res.item.needsProductType).toBe(false);
+      expect(res.item.isStockItem).toBe(true);
+    });
+
+    it('loses to an asserted productTypeCode on the same call', async () => {
+      const res = await service.registerItem({
+        merchantId: 'm10',
+        externalId: 'ext-10b',
+        name: 'Pulled Service',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        productTypeCode: '3',
+        defaultProductTypeCode: '2',
+      });
+
+      expect(res.item.productTypeCode).toBe('3');
+      expect(res.item.isStockItem).toBe(false);
+    });
+
+    it('never overwrites a product type a human already set -- a re-pull of an item corrected to Raw Material leaves it Raw Material', async () => {
+      await service.registerItem({
+        merchantId: 'm10',
+        externalId: 'ext-10c',
+        name: 'Corrected Item',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        productTypeCode: '1',
+      });
+
+      const repull = await service.registerItem({
+        merchantId: 'm10',
+        externalId: 'ext-10c',
+        name: 'Corrected Item',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+      });
+
+      expect(repull.created).toBe(false);
+      expect(repull.item.productTypeCode).toBe('1');
+    });
+  });
+
+  /**
+   * isStockItem answers "does KRA hold a stock master for this?", and only
+   * the ERP's Inventory/NonInventory signal is on that axis. Deriving it from
+   * productTypeCode alone made every NonInventory good stock-tracked: it got
+   * a seeded stock row and a stock-master expectation it can never satisfy,
+   * and sales of it fail for an item KRA has no stock for.
+   */
+  describe('isStockItem / stockTracked', () => {
+    it('a NonInventory good stays a Finished Product but is NOT stock-tracked', async () => {
+      const { item } = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11a',
+        name: 'Loan Facility Arrangement Fee',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+        stockTracked: false,
+      });
+
+      expect(item.productTypeCode).toBe('2');
+      expect(item.isStockItem).toBe(false);
+    });
+
+    it('an Inventory good is stock-tracked', async () => {
+      const { item } = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11b',
+        name: 'Milled Sorghum Flour 2kg Packet',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+        stockTracked: true,
+      });
+
+      expect(item.isStockItem).toBe(true);
+    });
+
+    // A Service is never stocked, whatever the ERP claims -- KRA holds no
+    // stock master for itemTyCd '3'.
+    it('a Service is never stock-tracked even if the ERP says it is', async () => {
+      const { item } = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11c',
+        name: 'Consulting',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        productTypeCode: '3',
+        stockTracked: true,
+      });
+
+      expect(item.isStockItem).toBe(false);
+    });
+
+    /**
+     * The regression this field exists to prevent. Editing an ERP-sourced
+     * item in Item Sync re-registers it through here with `existing.*` and no
+     * ERP contact of its own -- if the signal weren't persisted and
+     * preferred, that edit would quietly make a NonInventory item
+     * stock-tracked again.
+     */
+    it('a later call that carries no signal keeps the one the pull established', async () => {
+      await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11d',
+        name: 'Starter Subscription Plan',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+        stockTracked: false,
+      });
+
+      const edited = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11d',
+        name: 'Starter Subscription Plan (Monthly)',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+      });
+
+      expect(edited.created).toBe(false);
+      expect(edited.item.stockTracked).toBe(false);
+      expect(edited.item.isStockItem).toBe(false);
+    });
+
+    // Nobody has ever told us, which is not the same as "not stocked" --
+    // stay permissive rather than silently un-stocking a real good.
+    it('defaults to stock-tracked when no ERP signal has ever arrived', async () => {
+      const { item } = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11e',
+        name: 'Legacy Item',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+      });
+
+      expect(item.stockTracked).toBeNull();
+      expect(item.isStockItem).toBe(true);
+    });
+
+    it('a fresh signal can correct an item that was registered without one', async () => {
+      await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11f',
+        name: 'Was Assumed Stocked',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+      });
+
+      const repull = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11f',
+        name: 'Was Assumed Stocked',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+        stockTracked: false,
+      });
+
+      expect(repull.item.isStockItem).toBe(false);
+    });
+  });
 });

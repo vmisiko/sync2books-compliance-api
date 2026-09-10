@@ -37,6 +37,7 @@ function ormToDomain(row: CatalogItemOrmEntity): CatalogItem {
     unitPrice: row.unitPrice,
     originCountry: row.originCountry,
     sourceSystem: row.sourceSystem,
+    stockTracked: row.stockTracked ?? null,
     isStockItem: row.isStockItem,
     registrationStatus: row.registrationStatus,
     etimsItemCode: row.etimsItemCode,
@@ -67,6 +68,7 @@ function domainToOrm(item: CatalogItem): CatalogItemOrmEntity {
   e.unitPrice = item.unitPrice;
   e.originCountry = item.originCountry;
   e.sourceSystem = item.sourceSystem;
+  e.stockTracked = item.stockTracked;
   e.isStockItem = item.isStockItem;
   e.registrationStatus = item.registrationStatus;
   e.etimsItemCode = item.etimsItemCode;

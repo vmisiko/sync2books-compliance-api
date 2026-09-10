@@ -937,23 +937,6 @@ export class InventoryService {
   }
 
   /**
-   * Catches up KRA on an item's already-recorded local stock, right after
-   * that item successfully registers (saveItem) -- confirmed live
-   * 2026-09-01: any stock reconciled while an item was still PENDING (e.g.
-   * during "Pull from QuickBooks", which reconciles qtyOnHand immediately
-   * on pull, before the separate manual Item Sync step registers the item
-   * with KRA) has its saveStockMaster/insertStockIO push silently no-op'd
-   * by syncStockMasterToEtims/syncStockMovementToEtims's own etimsItemCode
-   * gate -- and nothing re-sends it once registration completes, since
-   * item-sync (sync-items.usecase.ts) has no knowledge of inventory at all.
-   * The result: local stock shows a real quantity, but KRA never learns
-   * about it unless someone happens to trigger another RECONCILE movement
-   * afterward. Call this from the item-sync success path to close that gap.
-   * A no-op if this item/branch has no stock row yet, or if
-   * ETIMS_STOCK_MASTER_SYNC isn't enabled (same env-flag gate
-   * syncStockMasterToEtims itself already applies).
-   */
-  /**
    * Brings KRA's Stock IO ledger for one item into agreement with the local
    * on-hand quantity, then declares that quantity -- **without recording a
    * local stock movement**.
@@ -1153,16 +1136,34 @@ export class InventoryService {
     return { ...base, ledgerEntry, stockMaster };
   }
 
+  /**
+   * Catches KRA up on stock an item already had locally, right after it
+   * registers (saveItem).
+   *
+   * The stock is there because "Pull from QuickBooks" reconciles the ERP's
+   * `qtyOnHand` into the local ledger at pull time -- before the separate
+   * Item Sync step registers the item with KRA. At that moment the item has
+   * no `itemCd`, so both eTIMS pushes no-op on their own `if (!itemCd)`
+   * gate, and item-sync knows nothing about inventory, so nothing re-sends
+   * them afterwards. This is the call that closes that gap.
+   *
+   * It runs the full ledger repair rather than a bare `saveStockMaster`,
+   * and that is the whole correctness of it: KRA derives the `rsdQty` it
+   * will accept from the item's Stock IO ledger, which for a just-registered
+   * item is *empty*. A lone `saveStockMaster` declaring the pulled quantity
+   * is therefore guaranteed to be rejected ("rsdQty ... does not match ...
+   * from Stock IO") -- which is exactly what this call did, silently, for
+   * as long as it has existed. Going through repairKraStockLedger sends the
+   * ledger entry the pull could never send, and then declares the quantity.
+   *
+   * Best-effort and never throws for the caller's sake; the outcome is
+   * returned so item-sync can log what actually happened.
+   */
   async pushStockMasterCatchUp(
     itemId: string,
     branchId: string,
-  ): Promise<EtimsPushOutcome> {
-    const stock = await this.stockRepo.getStock(
-      itemId,
-      await this.toCanonicalBranchId(itemId, branchId),
-    );
-    if (!stock) return pushSkipped('No stock recorded for this item/branch');
-    return this.syncStockMasterToEtims(stock);
+  ): Promise<Awaited<ReturnType<InventoryService['repairKraStockLedger']>>> {
+    return this.repairKraStockLedger({ itemId, branchId });
   }
 
   async recordMovement(params: {

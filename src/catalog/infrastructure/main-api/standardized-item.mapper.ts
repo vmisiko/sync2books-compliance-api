@@ -1,4 +1,3 @@
-import { BadRequestException } from '@nestjs/common';
 import { TaxCategory } from '../../../shared/domain/enums/tax-category.enum';
 import type { RegisterItemInput } from '../../application/use-cases/register-item.usecase';
 
@@ -6,17 +5,18 @@ import type { RegisterItemInput } from '../../application/use-cases/register-ite
  * Main API's actual, Codat-faithful item-type vocabulary — not collapsed to a GOODS/SERVICE
  * bucket there, since that collapse is a KRA-specific simplification (KRA's item-type code list
  * has no "non-stock good" concept) that doesn't belong in a shape meant to serve any consumer.
- * This repo does its own collapse — see collapseItemType() below.
+ * This repo does its own collapse — see deriveProductTypeCode() below.
  */
 export type MainApiStandardizedItemType = 'Unknown' | 'Inventory' | 'NonInventory' | 'Service';
 
 /**
  * Shape returned by MainApiPullClient.getItems() — see integration/main-api-pull. `itemType` is
  * sourced from the main API's `standardized` field (MainApiItem.standardized.itemType in
- * main-api-pull.client.ts) — main API owns ERP-shape normalization (QuickBooks Type parsing
- * etc.), but NOT tax-authority-specific categorization; that's still this repo's job, done by
- * the caller (see DashboardItemsApplicationService.pullItems) via MappingSuggestionService
- * against `defaultTaxCodeRef.name`, and passed in as `taxCategory` below.
+ * main-api-pull.client.ts) where that's available, and otherwise from the raw `itemType` column
+ * via normalizeRawItemType() below — main API owns ERP-shape normalization (QuickBooks Type
+ * parsing etc.), but NOT tax-authority-specific categorization; that's still this repo's job,
+ * done by the caller (see DashboardItemsApplicationService.pullItems) via
+ * MappingSuggestionService against `defaultTaxCodeRef.name`, and passed in as `taxCategory`.
  */
 export interface MainApiPulledItem {
   id: string;
@@ -31,23 +31,86 @@ export interface MainApiPulledItem {
   bookId?: string | null;
   bookType?: string | null;
   unitPrice?: number | null;
+  /**
+   * The ERP's on-hand quantity, where it has one. Main API returns it only
+   * for stock-tracked items (QuickBooks QtyOnHand, Odoo qty_available), so
+   * its mere presence corroborates `itemType` -- see deriveStockTracked.
+   */
+  qtyOnHand?: number | null;
 }
 
 /**
- * Only maps what the ERP's own signal actually, unambiguously tells us.
- * `Service` is confident -- KRA's itemTyCd '3'. `Inventory`/`NonInventory` is
- * an accounting distinction (stock-tracked vs not), NOT the same axis as
- * KRA's Raw Material vs Finished Product split -- no ERP here has any
- * concept of that distinction, so guessing between '1' and '2' would be
- * fabricating data KRA requires a human to actually decide. Returns
- * undefined (product type left unset, needsProductType true) for anything
- * that isn't unambiguously a service, same as a fresh manual entry with
- * nothing selected yet.
+ * Collapses main API's raw `itemType` column (the pre-standardization value: QuickBooks'
+ * 'Inventory'/'Service'/'NonInventory', Odoo's 'consu'/'service'/'combo') onto the standardized
+ * vocabulary, for rows where main API returned `standardized: null` because its own
+ * Item.toStandardized() doesn't cover that bookType yet (an ERP it hasn't implemented, or a
+ * locally-created row that hasn't synced and so carries no bookType at all). Anything
+ * unrecognized — including a row with no itemType at all — is 'Unknown', which is a real,
+ * expected value here, not a gap: see deriveProductTypeCode for what happens to it.
+ */
+export function normalizeRawItemType(
+  raw?: string | null,
+): MainApiStandardizedItemType {
+  switch ((raw ?? '').trim().toLowerCase()) {
+    case 'service':
+      return 'Service';
+    case 'inventory':
+      return 'Inventory';
+    case 'noninventory':
+    case 'non-inventory':
+    case 'consu':
+      return 'NonInventory';
+    default:
+      return 'Unknown';
+  }
+}
+
+/**
+ * The confident half of the product-type decision: `Service` is unambiguous across every ERP
+ * here and maps straight to KRA's itemTyCd '3'. `Inventory`/`NonInventory`/`Unknown` are not —
+ * that's an accounting distinction (stock-tracked vs not), NOT the same axis as KRA's Raw
+ * Material vs Finished Product split, which no ERP here models at all. So this returns
+ * undefined for them, and the caller supplies '2' (Finished Product) as a *default* via
+ * RegisterItemInput.defaultProductTypeCode instead of asserting it here — the difference
+ * matters: a default never overrides a product type a human already picked on the item
+ * (registerItem prefers `existing.productTypeCode`), whereas a value returned from here would.
  */
 function deriveProductTypeCode(
   itemType: MainApiStandardizedItemType,
 ): string | undefined {
   return itemType === 'Service' ? '3' : undefined;
+}
+
+/**
+ * The stock-tracked axis -- and unlike productTypeCode, this one the ERP
+ * genuinely knows.
+ *
+ * `Inventory` vs `NonInventory` is exactly the question `isStockItem` asks
+ * ("does KRA hold a stock master for this?"), which is why it is answered
+ * here instead of being collapsed into productTypeCode: KRA's item-type code
+ * list has no "non-stock good", so a NonInventory good is still a Finished
+ * Product ('2') and only this flag can say it isn't stocked. Dropping the
+ * distinction is what made every QuickBooks NonInventory item stock-tracked.
+ *
+ * `Unknown` falls back to the presence of `qtyOnHand`, which main API returns
+ * only for stock-tracked items -- and to `undefined` when even that is
+ * missing, so the row keeps whatever it already had rather than being
+ * downgraded on the strength of a normalization gap upstream.
+ */
+function deriveStockTracked(
+  itemType: MainApiStandardizedItemType,
+  qtyOnHand?: number | null,
+): boolean | undefined {
+  switch (itemType) {
+    case 'Service':
+      return false;
+    case 'Inventory':
+      return true;
+    case 'NonInventory':
+      return false;
+    default:
+      return qtyOnHand != null ? true : undefined;
+  }
 }
 
 export function mapMainApiItemToRegisterItemInput(params: {
@@ -57,12 +120,6 @@ export function mapMainApiItemToRegisterItemInput(params: {
   taxCategory: TaxCategory;
 }): RegisterItemInput {
   const { merchantId, item } = params;
-
-  if (!item.itemType) {
-    throw new BadRequestException(
-      `Item ${item.id} has no resolved itemType — its source ERP is not yet supported by main API's standardization layer`,
-    );
-  }
 
   // `externalId` must match InvoiceLineItem.itemRef.id from the same pull surface
   // (the raw ERP item id) so invoice lines can resolve to this catalog item later.
@@ -74,6 +131,12 @@ export function mapMainApiItemToRegisterItemInput(params: {
     name: item.name,
     sku: item.sku ?? null,
     productTypeCode: deriveProductTypeCode(item.itemType),
+    stockTracked: deriveStockTracked(item.itemType, item.qtyOnHand),
+    // Goods default to Finished Product rather than landing PENDING on
+    // needsProductType. Only ever applied when the item has no product type
+    // from any other source (no Service signal above, nothing a human already
+    // set) -- see RegisterItemInput.defaultProductTypeCode.
+    defaultProductTypeCode: '2',
     taxCategory: params.taxCategory,
     // classificationCode/unitCode/packagingUnitCode are deliberately omitted
     // here -- no ERP tells us these, and register-item.usecase.ts's

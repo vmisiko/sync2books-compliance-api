@@ -23,6 +23,7 @@ function makeItem(overrides: Partial<CatalogItem> = {}): CatalogItem {
     unitPrice: null,
     originCountry: null,
     sourceSystem: null,
+    stockTracked: null,
     isStockItem: true,
     registrationStatus: 'FAILED',
     etimsItemCode: null,

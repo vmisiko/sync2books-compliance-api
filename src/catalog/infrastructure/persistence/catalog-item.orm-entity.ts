@@ -61,6 +61,14 @@ export class CatalogItemOrmEntity {
   @Column({ type: 'varchar', nullable: true, default: 'KE' })
   originCountry!: string | null;
 
+  /**
+   * Nullable on purpose -- null is "no ERP ever told us", which is a
+   * different state from a definite false, and computeIsStockItem treats
+   * the two differently. See CatalogItem.stockTracked.
+   */
+  @Column({ type: 'boolean', nullable: true })
+  stockTracked!: boolean | null;
+
   @Column({ type: 'boolean', default: false })
   isStockItem!: boolean;
 

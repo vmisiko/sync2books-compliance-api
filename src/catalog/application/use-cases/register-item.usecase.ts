@@ -24,19 +24,38 @@ export interface RegisterItemInput {
   packagingUnitCode?: string;
   taxTyCd?: string;
   /**
-   * OSCU itemTyCd. Omit when the source doesn't unambiguously know it (e.g.
-   * an ERP pull that can't tell Raw Material from Finished Product) --
-   * NEVER guess a value here. The item registers with productTypeCode null
-   * and needsProductType true, blocked from KRA sync until a human
-   * explicitly picks one (manually or by editing the pulled item).
+   * OSCU itemTyCd, asserted -- it overrides whatever the existing row has, so
+   * only pass it when the source unambiguously knows it (e.g. a Service
+   * signal from the ERP). An ERP pull can't tell Raw Material from Finished
+   * Product, so it must NOT guess between them here; it passes
+   * defaultProductTypeCode below instead.
    */
   productTypeCode?: string;
+  /**
+   * Weak default for productTypeCode, used ONLY when the item has no product
+   * type from any stronger source -- not from `productTypeCode` above, and not
+   * already set on the existing row by a human. An ERP pull passes '2'
+   * (Finished Product) here so a pulled good registers usable instead of
+   * landing PENDING on needsProductType; passing it as `productTypeCode`
+   * instead would make every routine re-pull overwrite a Raw Material ('1')
+   * or Service ('3') someone had explicitly corrected it to.
+   */
+  defaultProductTypeCode?: string;
   /** OSCU default unit price (dftPrc). */
   unitPrice?: number | null;
   /** OSCU country of origin (orgnNatCd). Defaults to 'KE' when unset. */
   originCountry?: string | null;
   /** The ERP this item was pulled from (e.g. QUICKBOOKS, ODOO) — null for a manually-created item. */
   sourceSystem?: string | null;
+  /**
+   * The ERP's own stock-tracked signal (Inventory vs NonInventory) -- see
+   * CatalogItem.stockTracked. Only a pull can supply this; every other
+   * caller omits it, and an omission preserves whatever the row already
+   * holds rather than resetting it. Same existing-preferring rule as
+   * classificationCode/productTypeCode, and for the same reason: a write
+   * path that cannot know a value must never erase it.
+   */
+  stockTracked?: boolean | null;
 }
 
 export interface RegisterItemResult {
@@ -103,16 +122,26 @@ export async function registerItem(
   // Same existing-preferring fallback as above -- an ERP pull can only ever
   // supply a genuinely more-confident productTypeCode (e.g. a fresh
   // Service signal); when it comes back null, that must never erase a
-  // value a human already confirmed on an existing item.
+  // value a human already confirmed on an existing item. Only once both are
+  // exhausted does defaultProductTypeCode apply, which is exactly why it's a
+  // separate input from productTypeCode -- see its doc comment.
   const productTypeCode =
-    resolution.productTypeCode ?? existing?.productTypeCode ?? null;
+    resolution.productTypeCode ??
+    existing?.productTypeCode ??
+    input.defaultProductTypeCode ??
+    null;
   const needsProductType = computeNeedsProductType(productTypeCode);
-  // Stock-tracking eligibility is fully determined by productTypeCode --
-  // Goods (Raw Material/Finished Product) are stock-tracked, Service is
-  // not, and an item still pending a product-type choice is treated as
-  // not-yet-stock-tracked until confirmed. Recomputed here on every
-  // register/update call, uniformly regardless of source, with no override.
-  const isStockItem = computeIsStockItem(productTypeCode);
+  // Same existing-preferring fallback as classificationCode/productTypeCode
+  // above: only a pull knows this, so every other write path omits it and
+  // must leave what the pull already established alone. Without the
+  // fallback, editing an ERP-sourced NonInventory item in Item Sync (which
+  // re-registers through here with `existing.*`) would quietly make it
+  // stock-tracked again.
+  const stockTracked = input.stockTracked ?? existing?.stockTracked ?? null;
+  // Recomputed on every register/update, uniformly regardless of source,
+  // with no override -- see computeIsStockItem for the precedence between
+  // productTypeCode and the ERP signal.
+  const isStockItem = computeIsStockItem(productTypeCode, stockTracked);
   const now = new Date();
 
   if (existing) {
@@ -132,6 +161,7 @@ export async function registerItem(
       nextUnitPrice !== existing.unitPrice ||
       nextOriginCountry !== existing.originCountry ||
       nextSourceSystem !== existing.sourceSystem ||
+      stockTracked !== existing.stockTracked ||
       isStockItem !== existing.isStockItem;
 
     // A re-pull (main API's own item cache refreshing, or a human clicking
@@ -167,6 +197,7 @@ export async function registerItem(
       unitPrice: nextUnitPrice,
       originCountry: nextOriginCountry,
       sourceSystem: nextSourceSystem,
+      stockTracked,
       isStockItem,
       // Any change requires a resync to eTIMS (same itemCd can be reused).
       registrationStatus: 'PENDING',
@@ -212,6 +243,7 @@ export async function registerItem(
     unitPrice: input.unitPrice ?? null,
     originCountry: input.originCountry ?? 'KE',
     sourceSystem: input.sourceSystem ?? null,
+    stockTracked,
     isStockItem,
     registrationStatus: 'PENDING',
     etimsItemCode: null,

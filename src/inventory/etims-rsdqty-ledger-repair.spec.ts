@@ -656,4 +656,66 @@ describe('InventoryService -- rsdQty ledger repair', () => {
       expect(saveStockMaster).toHaveBeenCalledTimes(0);
     });
   });
+
+  /**
+   * The registration catch-up. "Pull from QuickBooks" reconciles the ERP's
+   * qtyOnHand into local stock before the item has an itemCd, so both eTIMS
+   * pushes no-op; this is what re-sends them once registration completes.
+   *
+   * It has to send the ledger entry, not just declare the quantity: KRA
+   * derives the rsdQty it accepts from the Stock IO ledger, which for a
+   * just-registered item is empty. A lone saveStockMaster here was rejected
+   * every single time, silently, for as long as the catch-up existed.
+   */
+  describe('pushStockMasterCatchUp', () => {
+    it('sends the pulled quantity as a ledger entry, then declares it', async () => {
+      withStockSyncOn();
+      const { service, insertStockIO, saveStockMaster, selectStockMoveList } =
+        await buildService({ itemUnitPrice: 120 });
+
+      // Stock reconciled at pull time, while the item had no itemCd — so
+      // nothing reached KRA and its ledger is empty.
+      selectStockMoveList.mockResolvedValue({
+        success: true,
+        rawResponse: ledgerResponse([]),
+      });
+      await service.reconcileStock({
+        itemId: 'item-catchup',
+        branchId: 'branch-1',
+        externalQtyOnHand: 45,
+      });
+      insertStockIO.mockClear();
+      saveStockMaster.mockClear();
+
+      const result = await service.pushStockMasterCatchUp(
+        'item-catchup',
+        'branch-1',
+      );
+
+      expect(result.localQtyOnHand).toBe(45);
+      expect(result.kraLedgerQty).toBe(0);
+      expect(result.gap).toBe(45);
+      expect(insertStockIO).toHaveBeenCalledTimes(1);
+      expect(insertStockIO.mock.calls[0][0].itemList[0].qty).toBe(45);
+      expect(saveStockMaster).toHaveBeenCalledTimes(1);
+      expect(saveStockMaster.mock.calls[0][0].rsdQty).toBe(45);
+      expect(result.stockMaster.status).toBe('ok');
+    });
+
+    it('is a no-op for an item with no stock recorded', async () => {
+      withStockSyncOn();
+      const { service, insertStockIO, saveStockMaster } = await buildService({
+        itemUnitPrice: 120,
+      });
+
+      const result = await service.pushStockMasterCatchUp(
+        'item-never-stocked',
+        'branch-1',
+      );
+
+      expect(insertStockIO).toHaveBeenCalledTimes(0);
+      expect(saveStockMaster).toHaveBeenCalledTimes(0);
+      expect(result.stockMaster.status).toBe('skipped');
+    });
+  });
 });

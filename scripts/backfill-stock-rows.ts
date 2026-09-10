@@ -1,9 +1,10 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { In, type Repository } from 'typeorm';
+import type { Repository } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { CatalogItemOrmEntity } from '../src/catalog/infrastructure/persistence/catalog-item.orm-entity';
+import { computeIsStockItem } from '../src/catalog/domain/entities/catalog-item.entity';
 import { ComplianceOrganizationApplicationService } from '../src/compliance-organization/application/compliance-organization.application.service';
 import { InventoryStockOrmEntity } from '../src/inventory/infrastructure/persistence/inventory-stock.orm-entity';
 import { StockMovementOrmEntity } from '../src/inventory/infrastructure/persistence/stock-movement.orm-entity';
@@ -11,16 +12,24 @@ import { STOCK_REPO } from '../src/shared/tokens';
 import type { IStockRepository } from '../src/inventory/domain/ports/stock-repository.port';
 
 /**
- * One-off backfill, three passes:
+ * One-off backfill, four passes:
  *
- * 1. Correct `isStockItem` on existing Raw Material / Finished Product rows
- *    (productTypeCode '1'/'2'). Before CatalogService.registerItem() unified
- *    the rule to "isStockItem = computeIsStockItem(productTypeCode)", Mode A
- *    registrations (RegisterCatalogItemDto has no isStockItem field at all)
- *    and strict QuickBooks-Inventory-only pulls left many real goods items
- *    stuck at isStockItem=false. Recompute them here to match the same rule
- *    registerItem() now applies on every future write.
- * 2. Retire stock rows keyed by a *non-canonical* branch id. `inventory_stock`
+ * 1. Recompute `isStockItem` from the same rule registerItem() applies --
+ *    `computeIsStockItem(productTypeCode, stockTracked)`. This corrects two
+ *    opposite historical errors at once. Goods stuck at false: Mode A
+ *    registrations (RegisterCatalogItemDto has no isStockItem field) and
+ *    strict QuickBooks-Inventory-only pulls left many real goods items
+ *    unflagged. Non-stock goods stuck at true: `isStockItem` used to be
+ *    derived from productTypeCode ALONE, so every QuickBooks NonInventory
+ *    item became stock-tracked -- KRA's item-type list has no "non-stock
+ *    good", so those are Finished Product ('2') and only `stockTracked` can
+ *    say they aren't stocked.
+ * 2. Retire stock rows on items pass 1 just turned OFF. A NonInventory item
+ *    should hold no `inventory_stock` row at all; the ones it has are
+ *    artifacts of seedZeroStockRow having believed it was stocked. Empty
+ *    rows are deleted outright; non-empty ones are reported and left, since
+ *    a real quantity is not this script's to destroy (see `--purge-nonempty`).
+ * 3. Retire stock rows keyed by a *non-canonical* branch id. `inventory_stock`
  *    is keyed by `ComplianceBranch.id`, but this script's own seeding pass and
  *    CatalogService.seedZeroStockRow both used to key by
  *    `sync2booksBranchId` ('00' for most tenants), so an item can carry two
@@ -29,23 +38,39 @@ import type { IStockRepository } from '../src/inventory/domain/ports/stock-repos
  *    resident quantity. See the DELETION SAFETY note on
  *    retireNonCanonicalRows() for exactly which rows this will and won't
  *    touch.
- * 3. Seed a 0-qty stock row (default branch, canonical id) for every item
+ * 4. Seed a 0-qty stock row (default branch, canonical id) for every item
  *    that's now isStockItem=true, via the same IStockRepository.applyDelta(id,
  *    branchId, 0) the live auto-seed in CatalogService.registerItem() uses.
  *
+ * RUN A PULL FIRST. `stockTracked` is knowledge only an ERP pull carries, so
+ * every row predating it is null and pass 1 will leave those items exactly as
+ * they are (null means "nobody ever told us", which is not the same as
+ * "not stocked"). Pull items for each tenant, then run this. The pass-1
+ * summary reports how many rows are still null so you can tell whether the
+ * pull has happened.
+ *
  * DRY RUN BY DEFAULT. Pass `--apply` to actually write:
- *   pnpm backfill:stock-rows            # report only, no writes
- *   pnpm backfill:stock-rows -- --apply # perform passes 1-3
+ *   pnpm backfill:stock-rows                            # report only, no writes
+ *   pnpm backfill:stock-rows -- --apply                 # perform passes 1-4
+ *   pnpm backfill:stock-rows -- --apply --purge-nonempty # also delete pass-2 rows holding stock
  *
  * Idempotent/safe to re-run: the isStockItem update is a no-op once
- * corrected, pass 2 finds nothing on a second run, and a 0 delta against an
- * existing stock row is a no-op too. No StockMovement/eTIMS call is ever made
- * by this script -- in particular pass 2 does NOT push a corrected rsdQty to
- * KRA. Anything it reports as needing manual attention should be settled by a
- * real reconcile against the ERP, which pushes saveStockMaster on its own.
+ * corrected, passes 2 and 3 find nothing on a second run, and a 0 delta
+ * against an existing stock row is a no-op too. No StockMovement/eTIMS call is
+ * ever made by this script -- in particular it does NOT push a corrected
+ * rsdQty to KRA. Anything it reports as needing manual attention should be
+ * settled by a real reconcile against the ERP, which pushes saveStockMaster on
+ * its own.
  */
 
 const APPLY = process.argv.includes('--apply');
+/**
+ * Opt-in for pass 2 only: delete a no-longer-stocked item's stock row even
+ * when it still holds a quantity. Off by default because that quantity is
+ * real data -- it came from an ERP pull or a human adjustment -- and being
+ * wrong about the item's type is not licence to destroy it silently.
+ */
+const PURGE_NONEMPTY = process.argv.includes('--purge-nonempty');
 
 type BranchResolution = {
   /** Canonical id (`ComplianceBranch.id`) of the tenant's default branch. */
@@ -102,6 +127,8 @@ async function main(): Promise<void> {
   };
 
   await correctIsStockItemFlags(itemRepo);
+  await retireRowsOnNonStockItems({ itemRepo, stockRowRepo, movementRepo });
+
   const items = await itemRepo.find({ where: { isStockItem: true } });
   console.log(`Found ${items.length} stock-tracked catalog item(s).\n`);
 
@@ -116,32 +143,114 @@ async function main(): Promise<void> {
   await app.close();
 }
 
-/** Pass 1 -- see the module doc comment. */
+/**
+ * Pass 1 -- see the module doc comment.
+ *
+ * Row by row through `computeIsStockItem` rather than as a pair of bulk
+ * UPDATEs, deliberately: the rule now takes two inputs and corrects in both
+ * directions, and re-expressing it as SQL predicates is how the two would
+ * drift apart. Calling the real function is also the only way this stays
+ * right the next time that function changes.
+ */
 async function correctIsStockItemFlags(
   itemRepo: Repository<CatalogItemOrmEntity>,
 ): Promise<void> {
-  const misflagged = await itemRepo.find({
-    where: { productTypeCode: In(['1', '2']), isStockItem: false },
-  });
-  if (misflagged.length === 0) return;
+  const all = await itemRepo.find();
+  const changes = all
+    .map((item) => ({
+      item,
+      want: computeIsStockItem(item.productTypeCode, item.stockTracked),
+    }))
+    .filter(({ item, want }) => want !== item.isStockItem);
 
+  const stillUnknown = all.filter((i) => i.stockTracked == null).length;
   console.log(
-    `Pass 1: correcting isStockItem on ${misflagged.length} goods item(s) that predate the unified rule:`,
+    `Pass 1: isStockItem — ${changes.length} of ${all.length} item(s) disagree with the rule`,
   );
-  for (const item of misflagged) {
-    console.log(`  FIX FLAG ${item.id} (${item.name})`);
-  }
-  if (APPLY) {
-    await itemRepo.update(
-      { productTypeCode: In(['1', '2']), isStockItem: false },
-      { isStockItem: true },
+  if (stillUnknown > 0) {
+    console.warn(
+      `  NOTE: ${stillUnknown} item(s) still have stockTracked = null (no ERP pull has ` +
+        `carried the signal yet). Those keep the permissive default and are NOT turned ` +
+        `off here. Pull items for their tenants, then re-run.`,
     );
+  }
+
+  for (const { item, want } of changes) {
+    console.log(
+      `  ${want ? 'TURN ON ' : 'TURN OFF'} ${item.id} (${item.name}) — ` +
+        `productTypeCode=${item.productTypeCode ?? 'null'} stockTracked=${
+          item.stockTracked ?? 'null'
+        }`,
+    );
+    if (APPLY) await itemRepo.update({ id: item.id }, { isStockItem: want });
   }
   console.log('');
 }
 
 /**
- * Pass 2 -- collapse the '00'-vs-UUID stock-row split onto the canonical
+ * Pass 2 -- see the module doc comment.
+ *
+ * DELETION SAFETY: only ever touches items that are now `isStockItem = false`,
+ * and by default only rows that are provably inert (no quantity, no
+ * reservation, no movement history). A row holding stock, or one with a
+ * movement ledger behind it, is reported and left alone unless
+ * `--purge-nonempty` is passed -- an item being the wrong type is a reason to
+ * look at its quantity, not to delete it unseen. StockMovement rows are never
+ * deleted either way: they are the audit trail of what was believed at the
+ * time.
+ */
+async function retireRowsOnNonStockItems(deps: {
+  itemRepo: Repository<CatalogItemOrmEntity>;
+  stockRowRepo: Repository<InventoryStockOrmEntity>;
+  movementRepo: Repository<StockMovementOrmEntity>;
+}): Promise<void> {
+  const { itemRepo, stockRowRepo, movementRepo } = deps;
+  console.log('Pass 2: stock rows on items that are no longer stock-tracked');
+
+  const nonStock = await itemRepo.find({ where: { isStockItem: false } });
+  let deleted = 0;
+  let kept = 0;
+
+  for (const item of nonStock) {
+    const rows = await stockRowRepo.find({ where: { itemId: item.id } });
+    for (const row of rows) {
+      const movements = await movementRepo.count({
+        where: { itemId: item.id, branchId: row.branchId },
+      });
+      const inert =
+        row.quantityOnHand === 0 &&
+        row.reservedQuantity === 0 &&
+        movements === 0;
+
+      if (!inert && !PURGE_NONEMPTY) {
+        kept++;
+        console.warn(
+          `  HOLDS STOCK ${item.id} (${item.name}) — branch ${row.branchId} ` +
+            `qty=${row.quantityOnHand} reserved=${row.reservedQuantity} ` +
+            `movements=${movements}. Left in place: this item is not stock-tracked ` +
+            `any more, so the quantity is stale rather than wrong — check it against ` +
+            `the ERP, then re-run with --purge-nonempty to drop it.`,
+        );
+        continue;
+      }
+
+      deleted++;
+      console.log(
+        `  ${APPLY ? 'DELETED ' : 'WOULD DELETE'} ${item.id} (${item.name}) — ` +
+          `branch ${row.branchId} qty=${row.quantityOnHand} movements=${movements}` +
+          `${inert ? '' : ' (--purge-nonempty)'}`,
+      );
+      if (APPLY) await stockRowRepo.delete({ id: row.id });
+    }
+  }
+
+  console.log(
+    `  ${APPLY ? 'Deleted' : 'Would delete'}: ${deleted}   Left in place: ${kept}\n`,
+  );
+}
+
+/**
+ * Pass 3 -- collapse the '00'-vs-UUID stock-row split onto the canonical
  * branch id.
  *
  * DELETION SAFETY. A non-canonical row is only ever deleted when it is
@@ -165,7 +274,7 @@ async function retireNonCanonicalRows(deps: {
   resolveBranches: (merchantId: string) => Promise<BranchResolution>;
 }): Promise<void> {
   const { items, stockRowRepo, movementRepo, resolveBranches } = deps;
-  console.log('Pass 2: stock rows keyed by a non-canonical branch id');
+  console.log('Pass 3: stock rows keyed by a non-canonical branch id');
 
   let deleted = 0;
   let needsReconcile = 0;
@@ -229,14 +338,14 @@ async function retireNonCanonicalRows(deps: {
   );
 }
 
-/** Pass 3 -- see the module doc comment. */
+/** Pass 4 -- see the module doc comment. */
 async function seedMissingRows(deps: {
   items: CatalogItemOrmEntity[];
   stockRepo: IStockRepository;
   resolveBranches: (merchantId: string) => Promise<BranchResolution>;
 }): Promise<void> {
   const { items, stockRepo, resolveBranches } = deps;
-  console.log('Pass 3: seeding 0-qty rows on the canonical default branch');
+  console.log('Pass 4: seeding 0-qty rows on the canonical default branch');
 
   let seeded = 0;
   let alreadyHadRow = 0;

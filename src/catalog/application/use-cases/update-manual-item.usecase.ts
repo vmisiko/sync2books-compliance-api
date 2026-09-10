@@ -102,9 +102,14 @@ export async function updateManualItem(
     internalTaxCategory: taxCategory,
   });
 
-  // Stock-tracking eligibility and the "needs a product type" gate both
-  // follow the resolved productTypeCode, same rule as registerItem.
-  const isStockItem = computeIsStockItem(resolution.productTypeCode);
+  // Same rule as registerItem, including the ERP's stock-tracked signal:
+  // this edit has no ERP contact of its own, so it carries the row's
+  // existing signal forward rather than dropping it and letting a
+  // NonInventory item silently become stock-tracked again.
+  const isStockItem = computeIsStockItem(
+    resolution.productTypeCode,
+    existing.stockTracked,
+  );
   const needsProductType = computeNeedsProductType(resolution.productTypeCode);
   // Same '' sentinel as registerItem -- resolveClassification never throws
   // for these three, see its doc comment.
