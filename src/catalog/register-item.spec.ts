@@ -329,4 +329,226 @@ describe('registerItem — catalog registration semantics', () => {
       expect(res.item.needsClassificationReview).toBe(true);
     });
   });
+
+  /**
+   * An ERP pull can't tell Raw Material from Finished Product, but leaving
+   * every pulled good at productTypeCode null meant it landed PENDING on
+   * needsProductType and couldn't be sold until someone picked one by hand.
+   * defaultProductTypeCode fills that in with '2' (Finished Product) --
+   * as a default, so it must lose to anything a human already decided,
+   * which is the whole reason it isn't just passed as productTypeCode.
+   */
+  describe('defaultProductTypeCode', () => {
+    it('fills in a brand-new item that has no product type from any other source', async () => {
+      const res = await service.registerItem({
+        merchantId: 'm10',
+        externalId: 'ext-10a',
+        name: 'Pulled Good',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+      });
+
+      expect(res.item.productTypeCode).toBe('2');
+      expect(res.item.needsProductType).toBe(false);
+      expect(res.item.isStockItem).toBe(true);
+    });
+
+    it('loses to an asserted productTypeCode on the same call', async () => {
+      const res = await service.registerItem({
+        merchantId: 'm10',
+        externalId: 'ext-10b',
+        name: 'Pulled Service',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        productTypeCode: '3',
+        defaultProductTypeCode: '2',
+      });
+
+      expect(res.item.productTypeCode).toBe('3');
+      expect(res.item.isStockItem).toBe(false);
+    });
+
+    it('never overwrites a product type a human already set -- a re-pull of an item corrected to Raw Material leaves it Raw Material', async () => {
+      await service.registerItem({
+        merchantId: 'm10',
+        externalId: 'ext-10c',
+        name: 'Corrected Item',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        productTypeCode: '1',
+      });
+
+      const repull = await service.registerItem({
+        merchantId: 'm10',
+        externalId: 'ext-10c',
+        name: 'Corrected Item',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+      });
+
+      expect(repull.created).toBe(false);
+      expect(repull.item.productTypeCode).toBe('1');
+    });
+  });
+
+  /**
+   * The two questions this pair keeps apart. `isStockItem` is "does KRA need
+   * a stock master?" -- true for every Good. `stockTracked` is "does the ERP
+   * maintain a quantity?" -- and it must NOT drive the first, because
+   * inventory-tracking in QuickBooks needs an asset account and a start date
+   * that plenty of merchants never set up, so a NonInventory item is
+   * routinely a real good KRA still rejects sales of without a stock master.
+   * Coupling them un-stocked four genuine goods on the dev tenant
+   * (2026-09-10) before this was reverted.
+   */
+  describe('isStockItem / stockTracked', () => {
+    it('a NonInventory good is still stock-tracked for KRA', async () => {
+      const { item } = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11a',
+        name: 'Milled Sorghum Flour 2kg Packet',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+        stockTracked: false,
+      });
+
+      expect(item.productTypeCode).toBe('2');
+      expect(item.stockTracked).toBe(false);
+      expect(item.isStockItem).toBe(true);
+    });
+
+    it('an Inventory good is stock-tracked', async () => {
+      const { item } = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11b',
+        name: 'Sugar 2kg',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+        stockTracked: true,
+      });
+
+      expect(item.isStockItem).toBe(true);
+    });
+
+    // KRA holds no stock master for itemTyCd '3', whatever the ERP claims.
+    it('a Service is never stock-tracked even if the ERP inventory-tracks it', async () => {
+      const { item } = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11c',
+        name: 'Consulting',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        productTypeCode: '3',
+        stockTracked: true,
+      });
+
+      expect(item.isStockItem).toBe(false);
+    });
+
+    /**
+     * Why the signal is persisted at all. Editing an ERP-sourced item in Item
+     * Sync re-registers it through here with `existing.*` and no ERP contact,
+     * so a non-persisted signal would be lost on the first edit -- and with
+     * it the only record of why this item's stock never reconciles.
+     */
+    it('a later call that carries no signal keeps the one the pull established', async () => {
+      await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11d',
+        name: 'Starter Subscription Plan',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+        stockTracked: false,
+      });
+
+      const edited = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11d',
+        name: 'Starter Subscription Plan (Monthly)',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+      });
+
+      expect(edited.created).toBe(false);
+      expect(edited.item.stockTracked).toBe(false);
+    });
+
+    /**
+     * The `changed` check decides whether an item needs re-registering with
+     * KRA. stockTracked never reaches KRA, so learning it must not demote a
+     * REGISTERED item to PENDING and wipe its sync history -- the exact
+     * regression test 8) guards against, which putting stockTracked in
+     * `changed` quietly reintroduced for the first pull after deploy.
+     */
+    it('learning stockTracked persists it without re-staging a REGISTERED item', async () => {
+      const first = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11g',
+        name: 'Already Registered Good',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        classificationCode: '14111400',
+        unitCode: 'NO',
+        packagingUnitCode: 'NT',
+        defaultProductTypeCode: '2',
+      });
+      const registered = await itemRepo.save({
+        ...first.item,
+        registrationStatus: 'REGISTERED' as const,
+        etimsItemCode: 'KE2NTNO0000099',
+        lastSyncedAt: new Date('2026-09-01T00:00:00Z'),
+      });
+
+      const repull = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11g',
+        name: 'Already Registered Good',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        classificationCode: '14111400',
+        unitCode: 'NO',
+        packagingUnitCode: 'NT',
+        defaultProductTypeCode: '2',
+        stockTracked: false,
+      });
+
+      expect(repull.item.stockTracked).toBe(false);
+      expect(repull.item.registrationStatus).toBe('REGISTERED');
+      expect(repull.item.etimsItemCode).toBe('KE2NTNO0000099');
+      expect(repull.item.lastSyncedAt).toEqual(registered.lastSyncedAt);
+      expect(repull.item.version).toBe(registered.version);
+    });
+
+    it('records null when no ERP signal has ever arrived', async () => {
+      const { item } = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11e',
+        name: 'Legacy Item',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+      });
+
+      expect(item.stockTracked).toBeNull();
+      expect(item.isStockItem).toBe(true);
+    });
+
+    // The regression guard. A pull saying "I don't inventory-track this"
+    // must not be able to take a Good out of KRA stock tracking.
+    it('a fresh NonInventory signal never turns an existing good non-stock', async () => {
+      await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11f',
+        name: 'Farm Fresh Milk 500ml',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+      });
+
+      const repull = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11f',
+        name: 'Farm Fresh Milk 500ml',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        defaultProductTypeCode: '2',
+        stockTracked: false,
+      });
+
+      expect(repull.item.stockTracked).toBe(false);
+      expect(repull.item.isStockItem).toBe(true);
+    });
+  });
 });

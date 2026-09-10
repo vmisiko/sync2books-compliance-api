@@ -37,6 +37,7 @@ import { MailerService } from '../../mailer/mailer.service';
 import { EmailReceiptDto } from './dto/email-receipt.dto';
 import { renderReceiptEmailHtml } from '../application/receipt/receipt-email.renderer';
 import { ItemNotReadyForEtimsError } from '../domain/errors/item-not-ready-for-etims.error';
+import { InvoiceReceiptPushbackService } from '../../integration/platform-outbound/invoice-receipt-pushback.service';
 
 /**
  * Guarded (previously open to any caller). Still trusts merchantId/branchId
@@ -52,6 +53,7 @@ export class DashboardSalesController {
   constructor(
     private readonly salesService: SalesService,
     private readonly mailer: MailerService,
+    private readonly receiptPushback: InvoiceReceiptPushbackService,
   ) {}
 
   @Get()
@@ -298,6 +300,22 @@ export class DashboardSalesController {
       merchantId: body.merchantId,
       documentIds: body.documentIds?.length ? body.documentIds : undefined,
     });
+
+    // A retry is the *other* way a sale reaches ACCEPTED -- and until now the
+    // only one that never pushed its eTIMS receipt back to the ERP invoice,
+    // because the push-back was wired solely into createSaleFromInvoice's
+    // first-submit path. Any sale KRA rejected once (then accepted on retry
+    // after the underlying cause was fixed) silently ended up with no receipt
+    // attached in QuickBooks/Odoo. Best-effort and awaited only so failures
+    // land in the same request's logs: the retry itself has already succeeded
+    // regardless of what happens here.
+    await this.receiptPushback.notifyForRetriedDocuments(
+      body.merchantId,
+      result.results
+        .filter((r) => r.success && r.status === ComplianceStatus.ACCEPTED)
+        .map((r) => r.documentId),
+    );
+
     return { success: true, message: 'Sales retried', data: result };
   }
 

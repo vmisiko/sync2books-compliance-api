@@ -34,6 +34,18 @@ export interface ComplianceItem {
   productTypeCode: string | null;
   /** eTIMS/OSCU item code (`itemCd`) used for submissions. */
   etimsItemCode?: string | null;
+  /**
+   * The item's own catalog price, used as the fallback amount when a stock
+   * movement reaches eTIMS without one -- KRA rejects a zero `totAmt` on
+   * insertStockIO, so a movement with no price at all is simply not sent
+   * (see InventoryService.syncStockMovementToEtims).
+   *
+   * Optional here rather than required because this interface is the narrow
+   * compliance-side view of CatalogItem, which has carried `unitPrice` all
+   * along -- CatalogItemTypeOrmRepository implements both ports off the same
+   * `findByIds`, so every real caller already receives it.
+   */
+  unitPrice?: number | null;
   version: number;
   createdAt: Date;
   updatedAt: Date;

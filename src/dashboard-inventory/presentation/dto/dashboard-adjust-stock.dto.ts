@@ -21,9 +21,11 @@ export class DashboardAdjustStockDto {
   @ApiProperty({
     required: false,
     description:
-      'Unit price, required for the eTIMS insertStockIO sync to succeed. Without it the ' +
-      'adjustment still records locally and still pushes the new on-hand quantity to KRA ' +
-      'via saveStockMaster, which needs no amount -- only the ledger entry is skipped.',
+      "Unit price. Optional -- omit it and the item's own catalog price is used, which " +
+      "is what lets the dashboard's inline stock edit (which has nowhere to type one) " +
+      'reach KRA. With no price anywhere the insertStockIO ledger entry is skipped, and ' +
+      'because KRA derives the expected rsdQty from that ledger, the saveStockMaster that ' +
+      "follows is then rejected too. The response's `etims` block reports both halves.",
   })
   unitPrice?: number;
 }

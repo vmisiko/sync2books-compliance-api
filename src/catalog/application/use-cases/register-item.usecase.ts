@@ -24,19 +24,38 @@ export interface RegisterItemInput {
   packagingUnitCode?: string;
   taxTyCd?: string;
   /**
-   * OSCU itemTyCd. Omit when the source doesn't unambiguously know it (e.g.
-   * an ERP pull that can't tell Raw Material from Finished Product) --
-   * NEVER guess a value here. The item registers with productTypeCode null
-   * and needsProductType true, blocked from KRA sync until a human
-   * explicitly picks one (manually or by editing the pulled item).
+   * OSCU itemTyCd, asserted -- it overrides whatever the existing row has, so
+   * only pass it when the source unambiguously knows it (e.g. a Service
+   * signal from the ERP). An ERP pull can't tell Raw Material from Finished
+   * Product, so it must NOT guess between them here; it passes
+   * defaultProductTypeCode below instead.
    */
   productTypeCode?: string;
+  /**
+   * Weak default for productTypeCode, used ONLY when the item has no product
+   * type from any stronger source -- not from `productTypeCode` above, and not
+   * already set on the existing row by a human. An ERP pull passes '2'
+   * (Finished Product) here so a pulled good registers usable instead of
+   * landing PENDING on needsProductType; passing it as `productTypeCode`
+   * instead would make every routine re-pull overwrite a Raw Material ('1')
+   * or Service ('3') someone had explicitly corrected it to.
+   */
+  defaultProductTypeCode?: string;
   /** OSCU default unit price (dftPrc). */
   unitPrice?: number | null;
   /** OSCU country of origin (orgnNatCd). Defaults to 'KE' when unset. */
   originCountry?: string | null;
   /** The ERP this item was pulled from (e.g. QUICKBOOKS, ODOO) — null for a manually-created item. */
   sourceSystem?: string | null;
+  /**
+   * The ERP's own stock-tracked signal (Inventory vs NonInventory) -- see
+   * CatalogItem.stockTracked. Only a pull can supply this; every other
+   * caller omits it, and an omission preserves whatever the row already
+   * holds rather than resetting it. Same existing-preferring rule as
+   * classificationCode/productTypeCode, and for the same reason: a write
+   * path that cannot know a value must never erase it.
+   */
+  stockTracked?: boolean | null;
 }
 
 export interface RegisterItemResult {
@@ -103,15 +122,22 @@ export async function registerItem(
   // Same existing-preferring fallback as above -- an ERP pull can only ever
   // supply a genuinely more-confident productTypeCode (e.g. a fresh
   // Service signal); when it comes back null, that must never erase a
-  // value a human already confirmed on an existing item.
+  // value a human already confirmed on an existing item. Only once both are
+  // exhausted does defaultProductTypeCode apply, which is exactly why it's a
+  // separate input from productTypeCode -- see its doc comment.
   const productTypeCode =
-    resolution.productTypeCode ?? existing?.productTypeCode ?? null;
+    resolution.productTypeCode ??
+    existing?.productTypeCode ??
+    input.defaultProductTypeCode ??
+    null;
   const needsProductType = computeNeedsProductType(productTypeCode);
-  // Stock-tracking eligibility is fully determined by productTypeCode --
-  // Goods (Raw Material/Finished Product) are stock-tracked, Service is
-  // not, and an item still pending a product-type choice is treated as
-  // not-yet-stock-tracked until confirmed. Recomputed here on every
-  // register/update call, uniformly regardless of source, with no override.
+  // Same existing-preferring fallback as classificationCode/productTypeCode
+  // above: only a pull knows this, so every other write path omits it and
+  // must leave what the pull already established alone.
+  const stockTracked = input.stockTracked ?? existing?.stockTracked ?? null;
+  // Deliberately NOT a function of stockTracked -- see
+  // CatalogItem.isStockItem. What the ERP inventory-tracks and what KRA
+  // needs a stock master for are different questions.
   const isStockItem = computeIsStockItem(productTypeCode);
   const now = new Date();
 
@@ -134,6 +160,15 @@ export async function registerItem(
       nextSourceSystem !== existing.sourceSystem ||
       isStockItem !== existing.isStockItem;
 
+    // stockTracked deliberately NOT in `changed`: it never appears in a
+    // saveItem payload -- it records what the ERP does with quantities, which
+    // KRA never sees -- so a change to it is not a reason to resync. Putting
+    // it there re-staged every ERP item as PENDING on the first pull after
+    // deploy and wiped its sync history, which is precisely the incident the
+    // comment below describes. It still has to be *persisted*, though, and
+    // the early return would drop it; hence the metadata-only branch.
+    const metadataChanged = stockTracked !== existing.stockTracked;
+
     // A re-pull (main API's own item cache refreshing, or a human clicking
     // "Pull from ERP" again) reprocesses every item every time, including
     // ones that already registered successfully with KRA. Previously this
@@ -147,7 +182,16 @@ export async function registerItem(
     // re-staged unconditionally below -- re-pulling has always been the way
     // to retry those, and that's preserved.
     if (!changed && existing.registrationStatus === 'REGISTERED') {
-      return { item: existing, created: false };
+      if (!metadataChanged) return { item: existing, created: false };
+      // Record the new signal and nothing else: registrationStatus,
+      // lastSyncedAt, the sync result and `version` all stay exactly as they
+      // were, because as far as KRA is concerned nothing happened.
+      const saved = await itemRepo.save({
+        ...existing,
+        stockTracked,
+        updatedAt: now,
+      });
+      return { item: saved, created: false };
     }
 
     const updated: CatalogItem = {
@@ -167,6 +211,7 @@ export async function registerItem(
       unitPrice: nextUnitPrice,
       originCountry: nextOriginCountry,
       sourceSystem: nextSourceSystem,
+      stockTracked,
       isStockItem,
       // Any change requires a resync to eTIMS (same itemCd can be reused).
       registrationStatus: 'PENDING',
@@ -212,6 +257,7 @@ export async function registerItem(
     unitPrice: input.unitPrice ?? null,
     originCountry: input.originCountry ?? 'KE',
     sourceSystem: input.sourceSystem ?? null,
+    stockTracked,
     isStockItem,
     registrationStatus: 'PENDING',
     etimsItemCode: null,

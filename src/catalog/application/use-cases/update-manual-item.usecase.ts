@@ -102,8 +102,9 @@ export async function updateManualItem(
     internalTaxCategory: taxCategory,
   });
 
-  // Stock-tracking eligibility and the "needs a product type" gate both
-  // follow the resolved productTypeCode, same rule as registerItem.
+  // Same rule as registerItem: KRA needs a stock master for every Good, and
+  // the ERP's own inventory-tracking flag has no say in that (see
+  // CatalogItem.isStockItem).
   const isStockItem = computeIsStockItem(resolution.productTypeCode);
   const needsProductType = computeNeedsProductType(resolution.productTypeCode);
   // Same '' sentinel as registerItem -- resolveClassification never throws

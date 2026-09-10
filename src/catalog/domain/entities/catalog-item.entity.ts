@@ -92,14 +92,48 @@ export interface CatalogItem {
    */
   sourceSystem: string | null;
   /**
-   * Whether this item requires KRA stock tracking (insertStockIO etc).
-   * Not part of itemTyCd -- KRA's own item-type code list (cdCls 24: Raw
-   * Material / Finished Product / Service) has no distinct "non-stock good"
-   * value, so this is tracked as its own flag rather than folded into
-   * productTypeCode. Fully derived from productTypeCode on every
-   * register/update via computeIsStockItem, uniformly regardless of source:
-   * '1'/'2' -> true, '3' -> false, null (pending) -> false until confirmed.
-   * No override.
+   * Whether the ERP maintains a quantity for this item -- QuickBooks
+   * Inventory vs NonInventory, Odoo `is_storable`, Xero
+   * `IsTrackedAsInventory`, all normalised to one vocabulary by the main API
+   * (see MainApiStandardizedItemType). Null means nobody has ever told us: a
+   * manually-created item, or a pull predating this field.
+   *
+   * INFORMATION, NOT A DECISION. It deliberately does NOT feed
+   * {@link isStockItem} -- see that field for why the two are different
+   * questions. What it is good for is explaining an item whose stock never
+   * moves on its own: `false` means the ERP has no `qtyOnHand` to give, so
+   * reconcile can never maintain this item and its stock only ever changes
+   * by manual adjustment. That is a real and confusing situation to be in
+   * without a field that says so.
+   *
+   * Persisted rather than recomputed per call because only a pull ever knows
+   * it. Every other write path -- editing an item in Item Sync, registering
+   * a purchase line, a Mode A registration -- has no ERP contact, and
+   * DashboardItemsApplicationService.updateItem re-registers an ERP item
+   * with `existing.*`, so a non-persisted signal would be lost on the first
+   * edit.
+   */
+  stockTracked: boolean | null;
+  /**
+   * Whether KRA requires a stock master for this item (insertStockIO,
+   * saveStockMaster, a seeded stock row).
+   *
+   * Derived from productTypeCode alone, on every register/update, with no
+   * override -- see computeIsStockItem.
+   *
+   * It is NOT the ERP's Inventory-vs-NonInventory flag, however similar the
+   * two sound. That was tried and reverted on 2026-09-10 against live data:
+   * whether a business inventory-tracks something in QuickBooks is an
+   * accounting choice (real inventory items need an asset account and an
+   * inventory start date, so plenty of merchants simply don't), while KRA's
+   * rule is about the goods themselves -- sell a Good with no stock master
+   * and sendSalesTransaction is rejected with "Item <itemCd> does not exist
+   * in your stock master". Deriving this from `stockTracked` un-stocked four
+   * genuine QuickBooks goods on the dev tenant, including the very item that
+   * rejection was first traced on.
+   *
+   * So: `stockTracked` records what the ERP does; this records what KRA
+   * needs. Keep them apart.
    */
   isStockItem: boolean;
   registrationStatus: 'PENDING' | 'REGISTERED' | 'FAILED';
@@ -182,6 +216,20 @@ export function deriveItemType(
   return productTypeCode === '3' ? ItemType.SERVICE : ItemType.GOODS;
 }
 
+/**
+ * A Service (itemTyCd '3') has no KRA stock master; everything else does.
+ *
+ * Single-input on purpose. It briefly also took the ERP's `stockTracked`
+ * signal, and that was wrong -- see CatalogItem.isStockItem for the incident.
+ * Leaving the parameter out is what stops the two from being re-coupled by
+ * someone reading only the field names.
+ *
+ * A null productTypeCode (nobody has chosen one yet) resolves to true, the
+ * permissive answer: a stock row on an item that turns out not to need one is
+ * inert, whereas a missing one gets a sale rejected. The doc comment on the
+ * field used to claim null -> false; the code never did that, and true is the
+ * behaviour worth keeping.
+ */
 export function computeIsStockItem(productTypeCode: string | null): boolean {
   return productTypeCode !== '3';
 }

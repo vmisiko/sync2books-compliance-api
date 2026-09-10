@@ -16,6 +16,7 @@ import { ComplianceDocumentTypeOrmRepository } from './infrastructure/persistenc
 import { ComplianceEventTypeOrmRepository } from './infrastructure/persistence/compliance-event-typeorm.repository';
 import { ComplianceServiceAuthModule } from '../integration/compliance-service-auth.module';
 import { PlatformCorrelationModule } from '../integration/platform-correlation.module';
+import { InvoiceReceiptPushbackModule } from '../integration/invoice-receipt-pushback.module';
 import { OscuSyncStateOrmEntity } from '../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
 import { MailerModule } from '../mailer/mailer.module';
 
@@ -23,6 +24,9 @@ import { MailerModule } from '../mailer/mailer.module';
   imports: [
     ComplianceServiceAuthModule,
     PlatformCorrelationModule,
+    // DashboardSalesController pushes the eTIMS receipt back to the ERP
+    // invoice after a successful retry (POST /dashboard-api/sales/sync).
+    InvoiceReceiptPushbackModule,
     CatalogModule,
     InventoryModule,
     ComplianceOrganizationModule,

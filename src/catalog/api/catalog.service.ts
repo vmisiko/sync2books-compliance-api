@@ -95,10 +95,14 @@ export class CatalogService {
     packagingUnitCode?: string;
     taxTyCd?: string;
     productTypeCode?: string;
+    /** See RegisterItemInput.defaultProductTypeCode -- only applied when nothing stronger set one. */
+    defaultProductTypeCode?: string;
     classificationTypeHint?: string;
     unitPrice?: number | null;
     originCountry?: string | null;
     sourceSystem?: string | null;
+    /** See RegisterItemInput.stockTracked -- only a pull ever supplies this. */
+    stockTracked?: boolean | null;
   }) {
     const result = await registerItem(
       params,
@@ -198,10 +202,27 @@ export class CatalogService {
     for (const item of result.results) {
       if (!item.success) continue;
       try {
-        await this.inventory.pushStockMasterCatchUp(
+        const catchUp = await this.inventory.pushStockMasterCatchUp(
           item.itemId,
           params.branchId,
         );
+        // Say what reached KRA. This used to be fire-and-forget, and since
+        // the push it made could never succeed (see
+        // pushStockMasterCatchUp), the silence was the reason nobody noticed.
+        if (catchUp.stockMaster.status === 'failed') {
+          this.logger.warn(
+            `Stock master catch-up rejected for item ${item.itemId}: ` +
+              `local=${catchUp.localQtyOnHand} kraLedger=${catchUp.kraLedgerQty ?? '?'} ` +
+              `gap=${catchUp.gap ?? '?'} ledgerEntry=${catchUp.ledgerEntry.status} ` +
+              `-- ${catchUp.stockMaster.reason ?? 'no reason given'}`,
+          );
+        } else if (catchUp.stockMaster.status === 'ok' && catchUp.gap) {
+          this.logger.log(
+            `Stock master catch-up for item ${item.itemId}: pushed ` +
+              `${catchUp.gap > 0 ? '+' : ''}${catchUp.gap} to KRA's ledger, ` +
+              `declared rsdQty=${catchUp.localQtyOnHand}`,
+          );
+        }
       } catch (error) {
         this.logger.warn(
           `Stock master catch-up failed for item ${item.itemId}: ${

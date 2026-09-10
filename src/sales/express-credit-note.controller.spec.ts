@@ -9,6 +9,7 @@ import { SourceSystem } from '../shared/domain/enums/source-system.enum';
 import type { Request } from 'express';
 import { PlatformOscuCallbackService } from '../integration/platform-outbound/platform-oscu-callback.service';
 import { Sync2BooksCorrelationPersistenceService } from '../integration/platform-outbound/sync2books-correlation-persistence.service';
+import { InvoiceReceiptPushbackService } from '../integration/platform-outbound/invoice-receipt-pushback.service';
 import { MailerService } from '../mailer/mailer.service';
 
 describe('Express credit note controllers', () => {
@@ -105,6 +106,15 @@ describe('Express credit note controllers', () => {
         {
           provide: MailerService,
           useValue: { send: jest.fn().mockResolvedValue({ sent: false, reason: 'stub' }) },
+        },
+        {
+          // DashboardSalesController fires the eTIMS receipt push-back after a
+          // retry (POST /dashboard-api/sales/sync); nothing in this spec's
+          // credit-note scenarios reaches it.
+          provide: InvoiceReceiptPushbackService,
+          useValue: {
+            notifyForRetriedDocuments: jest.fn().mockResolvedValue(undefined),
+          },
         },
       ],
     }).compile();
