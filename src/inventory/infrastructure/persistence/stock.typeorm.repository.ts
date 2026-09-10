@@ -153,6 +153,11 @@ export class StockTypeOrmRepository
     return rows.map(toDomainStock);
   }
 
+  async listByItem(itemId: string): Promise<InventoryStock[]> {
+    const rows = await this.stockRepo.find({ where: { itemId } });
+    return rows.map(toDomainStock);
+  }
+
   async append(movement: StockMovement): Promise<StockMovement> {
     const row = this.movementRepo.create({
       id: movement.id,

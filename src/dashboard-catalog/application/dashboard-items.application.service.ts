@@ -6,7 +6,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CatalogService } from '../../catalog/api/catalog.service';
-import type { CatalogItem } from '../../catalog/domain/entities/catalog-item.entity';
+import {
+  normalizeItemName,
+  type CatalogItem,
+} from '../../catalog/domain/entities/catalog-item.entity';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { InventoryService } from '../../inventory/api/inventory.service';
 import {
@@ -232,7 +235,10 @@ export class DashboardItemsApplicationService {
           // set, so a PENDING item's stock is tracked locally without
           // anything reaching KRA before it's accepted.
           let warning: string | undefined;
-          if (branchId && mainApiItem.qtyOnHand != null) {
+          // A deleted duplicate stays deleted, stock included -- reconciling
+          // the ERP's quantity into it would put stock back on a row nobody
+          // can see or sell.
+          if (branchId && mainApiItem.qtyOnHand != null && !result.deleted) {
             try {
               warning = await this.reconcilePulledQuantity({
                 itemId: result.item.id,
@@ -351,6 +357,64 @@ export class DashboardItemsApplicationService {
   }
 
   /**
+   * Deletes a same-named duplicate from this tenant's catalog -- REGISTERED
+   * ones included, which is the whole point: a product created twice (once by
+   * hand, again when it reached the ERP) ends up as two KRA items, and stock
+   * adjusted on the wrong one silently doesn't count toward sales.
+   *
+   * Soft delete (see CatalogItem.deletedAt), so history and open drafts that
+   * reference the item by id keep working, and a later pull leaves it deleted.
+   * KRA is not touched -- OSCU has no way to unregister an itemCd, and the
+   * itemCd sequence never reuses one, so the orphaned registration is inert.
+   *
+   * Refused unless:
+   * - another live item in this catalog has the same name, so this can only
+   *   ever remove a duplicate, never a product's only row; and
+   * - the item holds no stock in any branch. Deleting it with stock on hand
+   *   would strand that quantity (and KRA's rsdQty for its itemCd) where
+   *   nothing can move it -- move it to the twin with Adjust Stock first.
+   */
+  async deleteDuplicateItem(
+    complianceTenantId: string,
+    itemId: string,
+  ): Promise<CatalogItem> {
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+    const item = await this.catalog.getItemById(itemId);
+    if (!item || item.merchantId !== merchantId || item.deletedAt) {
+      throw new NotFoundException(`Item ${itemId} not found`);
+    }
+
+    const name = normalizeItemName(item.name);
+    const { items } = await this.catalog.listItems(merchantId);
+    const twins = items.filter(
+      (other) => other.id !== item.id && normalizeItemName(other.name) === name,
+    );
+    if (twins.length === 0) {
+      throw new BadRequestException(
+        `"${item.name}" is the only catalog item with this name -- only a duplicate can be deleted.`,
+      );
+    }
+
+    const rows = await this.inventory.listStockForItem(item.id);
+    const onHand = rows.reduce((sum, row) => sum + row.quantityOnHand, 0);
+    const reserved = rows.reduce((sum, row) => sum + row.reservedQuantity, 0);
+    if (onHand !== 0 || reserved !== 0) {
+      throw new BadRequestException(
+        `"${item.name}" (${item.etimsItemCode ?? 'not registered'}) still holds ${onHand} in stock` +
+          (reserved ? ` (${reserved} reserved)` : '') +
+          ` -- move it to the item you're keeping with Adjust Stock, then delete this one.`,
+      );
+    }
+
+    const deleted = await this.catalog.deleteItem(item.id);
+    this.logger.log(
+      `Deleted duplicate catalog item ${item.id} (${item.etimsItemCode ?? 'unregistered'}) ` +
+        `for merchant ${merchantId}; kept ${twins.map((t) => t.id).join(', ')}`,
+    );
+    return deleted as CatalogItem;
+  }
+
+  /**
    * Sync selected (or all PENDING/FAILED) catalog items to KRA eTIMS via
    * OSCU saveItem. Registering an item (pull/override) only ever writes
    * the local catalog row with status PENDING — this is the step that
@@ -431,7 +495,7 @@ export class DashboardItemsApplicationService {
 
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const existing = await this.catalog.getItemById(itemId);
-    if (!existing || existing.merchantId !== merchantId) {
+    if (!existing || existing.merchantId !== merchantId || existing.deletedAt) {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
 

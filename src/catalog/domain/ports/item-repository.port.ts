@@ -4,7 +4,15 @@ export interface ICatalogItemRepository {
   save(item: CatalogItem): Promise<CatalogItem>;
   findById(id: string): Promise<CatalogItem | null>;
   findByIds(ids: string[]): Promise<CatalogItem[]>;
-  findByMerchant(merchantId: string): Promise<CatalogItem[]>;
+  /**
+   * Excludes deleted rows (see CatalogItem.deletedAt) unless
+   * `includeDeleted` is set. findById/findByIds never exclude them -- sale
+   * lines and drafts still resolve their item by id.
+   */
+  findByMerchant(
+    merchantId: string,
+    options?: { includeDeleted?: boolean },
+  ): Promise<CatalogItem[]>;
   /**
    * `sourceSystem`, when passed, scopes the match so two ERPs sharing the
    * same small numeric externalId for this merchant don't resolve to each
@@ -12,11 +20,16 @@ export interface ICatalogItemRepository {
    * same reasoning). Omit only for pre-existing call sites that haven't
    * been updated to track their item's source yet -- new call sites should
    * always pass it when known.
+   *
+   * Excludes deleted rows unless `includeDeleted` is set -- only
+   * registerItem's upsert needs them, so a pull can see a deleted row and
+   * leave it deleted instead of inserting over its (deterministic) id.
    */
   findByMerchantAndExternalId(
     merchantId: string,
     externalId: string,
     sourceSystem?: string | null,
+    options?: { includeDeleted?: boolean },
   ): Promise<CatalogItem | null>;
   /**
    * Exact, case-insensitive name match within a merchant's catalog. Used to

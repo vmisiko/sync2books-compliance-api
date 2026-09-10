@@ -109,10 +109,23 @@ export class CatalogService {
       this.itemRepo,
       this.classificationResolver,
     );
-    if (result.item.isStockItem) {
+    if (result.item.isStockItem && !result.deleted) {
       await this.seedZeroStockRow(params.merchantId, result.item.id);
     }
     return result;
+  }
+
+  /**
+   * Marks a catalog item deleted (see CatalogItem.deletedAt). No guards here
+   * -- tenancy, the duplicate rule and the zero-stock rule live in the one
+   * caller, DashboardItemsApplicationService.deleteDuplicateItem. KRA is not
+   * called: OSCU cannot unregister an itemCd.
+   */
+  async deleteItem(itemId: string) {
+    const item = await this.itemRepo.findById(itemId);
+    if (!item) return null;
+    const now = new Date();
+    return this.itemRepo.save({ ...item, deletedAt: now, updatedAt: now });
   }
 
   /**

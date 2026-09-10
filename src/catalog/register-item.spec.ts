@@ -287,6 +287,40 @@ describe('registerItem — catalog registration semantics', () => {
     expect(rePulledChanged.item.version).toBe(registered.version + 1);
   });
 
+  it('9) a deleted duplicate stays deleted on re-pull -- not revived, and no fresh row inserted over its id', async () => {
+    const input: RegisterItemInput = {
+      merchantId: 'm9',
+      externalId: 'ext-9',
+      sourceSystem: SourceSystem.QUICKBOOKS,
+      name: 'Deleted Twin',
+      taxCategory: TaxCategory.VAT_STANDARD,
+      classificationCode: '14111400',
+      unitCode: 'NO',
+      packagingUnitCode: 'NT',
+    };
+    const created = await service.registerItem(input);
+    await service.deleteItem(created.item.id);
+
+    // Even a pull carrying KRA-relevant changes must leave it alone.
+    const rePulled = await service.registerItem({
+      ...input,
+      name: 'Deleted Twin (renamed)',
+    });
+    expect(rePulled.deleted).toBe(true);
+    expect(rePulled.created).toBe(false);
+    expect(rePulled.item.id).toBe(created.item.id);
+    expect(rePulled.item.name).toBe('Deleted Twin');
+    expect(rePulled.item.deletedAt).toBeTruthy();
+
+    // Gone from every merchant-wide lookup...
+    expect((await service.listItems('m9')).items).toHaveLength(0);
+    expect(
+      await service.findByExternalId('m9', 'ext-9', SourceSystem.QUICKBOOKS),
+    ).toBeNull();
+    // ...but still resolvable by id, which sale lines and drafts rely on.
+    expect(await service.getItemById(created.item.id)).not.toBeNull();
+  });
+
   /**
    * classificationMethod/needsClassificationReview (see
    * classification-resolver.port.ts's ClassificationMethod and

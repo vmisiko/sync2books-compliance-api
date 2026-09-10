@@ -136,6 +136,18 @@ export interface CatalogItem {
    * needs. Keep them apart.
    */
   isStockItem: boolean;
+  /**
+   * Set when this row was deleted from the catalog as a same-named duplicate
+   * (DashboardItemsApplicationService.deleteDuplicateItem). Deleted rows drop
+   * out of every merchant-wide lookup -- lists, sync-all, invoice/purchase
+   * matching -- but findById still returns them, because sale lines and
+   * drafts reference items by id. Their KRA registration is untouched: OSCU
+   * has no way to unregister an itemCd, and the itemCd sequence never reuses
+   * one. A pull that meets a deleted row leaves it deleted rather than
+   * reviving it (see registerItem). Optional so literals predating the field
+   * still type-check; absent reads the same as null.
+   */
+  deletedAt?: Date | null;
   registrationStatus: 'PENDING' | 'REGISTERED' | 'FAILED';
   /**
    * The eTIMS/OSCU item code (`itemCd`) assigned/managed by this system.
@@ -230,6 +242,16 @@ export function deriveItemType(
  * field used to claim null -> false; the code never did that, and true is the
  * behaviour worth keeping.
  */
+/**
+ * The name two catalog rows are compared on to decide they're duplicates --
+ * trimmed, whitespace collapsed, case-folded. Must stay identical to the
+ * dashboard's normalizeItemName (catalogDuplicates.ts), or the UI would offer
+ * to delete a row this service then refuses as "not a duplicate".
+ */
+export function normalizeItemName(name: string | null | undefined): string {
+  return (name ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+
 export function computeIsStockItem(productTypeCode: string | null): boolean {
   return productTypeCode !== '3';
 }

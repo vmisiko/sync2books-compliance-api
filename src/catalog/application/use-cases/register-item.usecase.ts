@@ -76,6 +76,14 @@ export interface RegisterItemResult {
    * there is no prior quantity to lose.
    */
   erpBeganTrackingStock: boolean;
+  /**
+   * True when the matching row was deleted from the catalog as a duplicate
+   * (see CatalogItem.deletedAt). It is returned untouched: a pull must not
+   * revive it, and must not insert a fresh row either -- the new row would
+   * take the same deterministic id, and syncing it would register the product
+   * with KRA yet again. Callers should skip any follow-up work for it.
+   */
+  deleted?: boolean;
 }
 
 /**
@@ -95,8 +103,18 @@ export async function registerItem(
         input.merchantId,
         input.externalId,
         input.sourceSystem ?? null,
+        { includeDeleted: true },
       )
     : null;
+
+  if (existing?.deletedAt) {
+    return {
+      item: existing,
+      created: false,
+      erpBeganTrackingStock: false,
+      deleted: true,
+    };
+  }
 
   const resolution = await classificationResolver.resolveClassification({
     merchantId: input.merchantId,

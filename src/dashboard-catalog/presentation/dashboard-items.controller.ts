@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -105,6 +106,22 @@ export class DashboardItemsController {
       productTypeCode: body.productTypeCode,
     });
     return { success: true, message: 'Item updated', data: { item } };
+  }
+
+  @Delete(':id')
+  @ApiOperation({
+    summary:
+      "Delete a same-named duplicate catalog item, even one already REGISTERED with KRA. Soft delete: it drops out of lists and invoice matching, pulls leave it deleted, and its KRA registration is untouched (OSCU can't unregister an itemCd). Refused if no other item shares its name, or if it still holds stock.",
+  })
+  @ApiResponse({ status: 200, description: 'Item deleted' })
+  @ApiResponse({
+    status: 400,
+    description: 'Not a duplicate, or still holds stock',
+  })
+  @ApiResponse({ status: 404, description: 'No such item for this tenant' })
+  async remove(@ActiveTenant() tenantId: string, @Param('id') id: string) {
+    const item = await this.items.deleteDuplicateItem(tenantId, id);
+    return { success: true, message: 'Item deleted', data: { item } };
   }
 
   @Patch('bulk-classification')

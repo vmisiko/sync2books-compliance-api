@@ -1268,6 +1268,11 @@ export class InventoryService {
     return this.stockRepo.listByBranch(branchId);
   }
 
+  /** Every stock row for one item across all branches -- including any row still keyed by a non-canonical branch id. */
+  async listStockForItem(itemId: string) {
+    return this.stockRepo.listByItem(itemId);
+  }
+
   async listMovements(params: {
     itemId?: string;
     branchId?: string;
