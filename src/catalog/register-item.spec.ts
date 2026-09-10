@@ -390,32 +390,36 @@ describe('registerItem — catalog registration semantics', () => {
   });
 
   /**
-   * isStockItem answers "does KRA hold a stock master for this?", and only
-   * the ERP's Inventory/NonInventory signal is on that axis. Deriving it from
-   * productTypeCode alone made every NonInventory good stock-tracked: it got
-   * a seeded stock row and a stock-master expectation it can never satisfy,
-   * and sales of it fail for an item KRA has no stock for.
+   * The two questions this pair keeps apart. `isStockItem` is "does KRA need
+   * a stock master?" -- true for every Good. `stockTracked` is "does the ERP
+   * maintain a quantity?" -- and it must NOT drive the first, because
+   * inventory-tracking in QuickBooks needs an asset account and a start date
+   * that plenty of merchants never set up, so a NonInventory item is
+   * routinely a real good KRA still rejects sales of without a stock master.
+   * Coupling them un-stocked four genuine goods on the dev tenant
+   * (2026-09-10) before this was reverted.
    */
   describe('isStockItem / stockTracked', () => {
-    it('a NonInventory good stays a Finished Product but is NOT stock-tracked', async () => {
+    it('a NonInventory good is still stock-tracked for KRA', async () => {
       const { item } = await service.registerItem({
         merchantId: 'm11',
         externalId: 'ext-11a',
-        name: 'Loan Facility Arrangement Fee',
+        name: 'Milled Sorghum Flour 2kg Packet',
         taxCategory: TaxCategory.VAT_STANDARD,
         defaultProductTypeCode: '2',
         stockTracked: false,
       });
 
       expect(item.productTypeCode).toBe('2');
-      expect(item.isStockItem).toBe(false);
+      expect(item.stockTracked).toBe(false);
+      expect(item.isStockItem).toBe(true);
     });
 
     it('an Inventory good is stock-tracked', async () => {
       const { item } = await service.registerItem({
         merchantId: 'm11',
         externalId: 'ext-11b',
-        name: 'Milled Sorghum Flour 2kg Packet',
+        name: 'Sugar 2kg',
         taxCategory: TaxCategory.VAT_STANDARD,
         defaultProductTypeCode: '2',
         stockTracked: true,
@@ -424,9 +428,8 @@ describe('registerItem — catalog registration semantics', () => {
       expect(item.isStockItem).toBe(true);
     });
 
-    // A Service is never stocked, whatever the ERP claims -- KRA holds no
-    // stock master for itemTyCd '3'.
-    it('a Service is never stock-tracked even if the ERP says it is', async () => {
+    // KRA holds no stock master for itemTyCd '3', whatever the ERP claims.
+    it('a Service is never stock-tracked even if the ERP inventory-tracks it', async () => {
       const { item } = await service.registerItem({
         merchantId: 'm11',
         externalId: 'ext-11c',
@@ -440,11 +443,10 @@ describe('registerItem — catalog registration semantics', () => {
     });
 
     /**
-     * The regression this field exists to prevent. Editing an ERP-sourced
-     * item in Item Sync re-registers it through here with `existing.*` and no
-     * ERP contact of its own -- if the signal weren't persisted and
-     * preferred, that edit would quietly make a NonInventory item
-     * stock-tracked again.
+     * Why the signal is persisted at all. Editing an ERP-sourced item in Item
+     * Sync re-registers it through here with `existing.*` and no ERP contact,
+     * so a non-persisted signal would be lost on the first edit -- and with
+     * it the only record of why this item's stock never reconciles.
      */
     it('a later call that carries no signal keeps the one the pull established', async () => {
       await service.registerItem({
@@ -466,12 +468,9 @@ describe('registerItem — catalog registration semantics', () => {
 
       expect(edited.created).toBe(false);
       expect(edited.item.stockTracked).toBe(false);
-      expect(edited.item.isStockItem).toBe(false);
     });
 
-    // Nobody has ever told us, which is not the same as "not stocked" --
-    // stay permissive rather than silently un-stocking a real good.
-    it('defaults to stock-tracked when no ERP signal has ever arrived', async () => {
+    it('records null when no ERP signal has ever arrived', async () => {
       const { item } = await service.registerItem({
         merchantId: 'm11',
         externalId: 'ext-11e',
@@ -484,11 +483,13 @@ describe('registerItem — catalog registration semantics', () => {
       expect(item.isStockItem).toBe(true);
     });
 
-    it('a fresh signal can correct an item that was registered without one', async () => {
+    // The regression guard. A pull saying "I don't inventory-track this"
+    // must not be able to take a Good out of KRA stock tracking.
+    it('a fresh NonInventory signal never turns an existing good non-stock', async () => {
       await service.registerItem({
         merchantId: 'm11',
         externalId: 'ext-11f',
-        name: 'Was Assumed Stocked',
+        name: 'Farm Fresh Milk 500ml',
         taxCategory: TaxCategory.VAT_STANDARD,
         defaultProductTypeCode: '2',
       });
@@ -496,13 +497,14 @@ describe('registerItem — catalog registration semantics', () => {
       const repull = await service.registerItem({
         merchantId: 'm11',
         externalId: 'ext-11f',
-        name: 'Was Assumed Stocked',
+        name: 'Farm Fresh Milk 500ml',
         taxCategory: TaxCategory.VAT_STANDARD,
         defaultProductTypeCode: '2',
         stockTracked: false,
       });
 
-      expect(repull.item.isStockItem).toBe(false);
+      expect(repull.item.stockTracked).toBe(false);
+      expect(repull.item.isStockItem).toBe(true);
     });
   });
 });

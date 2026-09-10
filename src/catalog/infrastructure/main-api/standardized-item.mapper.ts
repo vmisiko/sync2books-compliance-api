@@ -82,20 +82,21 @@ function deriveProductTypeCode(
 }
 
 /**
- * The stock-tracked axis -- and unlike productTypeCode, this one the ERP
- * genuinely knows.
+ * Records whether the ERP maintains a quantity for this item. Informational
+ * only -- see CatalogItem.stockTracked, and note in particular that it does
+ * NOT decide `isStockItem`: a QuickBooks NonInventory item is very often a
+ * real good that KRA still needs a stock master for, because inventory
+ * tracking there requires an asset account and a start date that plenty of
+ * merchants never set up.
  *
- * `Inventory` vs `NonInventory` is exactly the question `isStockItem` asks
- * ("does KRA hold a stock master for this?"), which is why it is answered
- * here instead of being collapsed into productTypeCode: KRA's item-type code
- * list has no "non-stock good", so a NonInventory good is still a Finished
- * Product ('2') and only this flag can say it isn't stocked. Dropping the
- * distinction is what made every QuickBooks NonInventory item stock-tracked.
+ * What it is for: `false` means no `qtyOnHand` will ever arrive for this
+ * item, so reconcile cannot maintain its stock and someone has to adjust it
+ * by hand. Worth knowing, and otherwise invisible.
  *
  * `Unknown` falls back to the presence of `qtyOnHand`, which main API returns
- * only for stock-tracked items -- and to `undefined` when even that is
- * missing, so the row keeps whatever it already had rather than being
- * downgraded on the strength of a normalization gap upstream.
+ * only for quantity-tracked items -- and to `undefined` when even that is
+ * missing, so the row keeps whatever it already had rather than recording a
+ * definite `false` on the strength of a normalization gap upstream.
  */
 function deriveStockTracked(
   itemType: MainApiStandardizedItemType,

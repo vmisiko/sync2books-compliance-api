@@ -78,11 +78,11 @@ describe('mapMainApiItemToRegisterItemInput', () => {
   });
 
   /**
-   * The distinction productTypeCode deliberately refuses to carry. A
-   * NonInventory good is still a Finished Product ('2') -- KRA has no
-   * "non-stock good" item type -- so if this signal is dropped, nothing is
-   * left to say KRA holds no stock master for it, and it gets a stock row
-   * and a stock-master expectation it can never satisfy.
+   * Records what the ERP does with quantities, and nothing more. It is
+   * explicitly NOT the input to isStockItem -- see CatalogItem.isStockItem
+   * -- because a QuickBooks NonInventory item is routinely a real good KRA
+   * still needs a stock master for. Its use is explaining an item whose
+   * stock never reconciles: false means no qtyOnHand will ever arrive.
    */
   describe('stockTracked derivation', () => {
     it.each([

@@ -15,15 +15,15 @@ import type { IStockRepository } from '../src/inventory/domain/ports/stock-repos
  * One-off backfill, four passes:
  *
  * 1. Recompute `isStockItem` from the same rule registerItem() applies --
- *    `computeIsStockItem(productTypeCode, stockTracked)`. This corrects two
- *    opposite historical errors at once. Goods stuck at false: Mode A
- *    registrations (RegisterCatalogItemDto has no isStockItem field) and
- *    strict QuickBooks-Inventory-only pulls left many real goods items
- *    unflagged. Non-stock goods stuck at true: `isStockItem` used to be
- *    derived from productTypeCode ALONE, so every QuickBooks NonInventory
- *    item became stock-tracked -- KRA's item-type list has no "non-stock
- *    good", so those are Finished Product ('2') and only `stockTracked` can
- *    say they aren't stocked.
+ *    `computeIsStockItem(productTypeCode)`. Corrects rows in both
+ *    directions. Goods stuck at false: Mode A registrations
+ *    (RegisterCatalogItemDto has no isStockItem field) and strict
+ *    QuickBooks-Inventory-only pulls left many real goods unflagged; also
+ *    every item written while `isStockItem` briefly took the ERP's
+ *    `stockTracked` signal (reverted 2026-09-10 -- see
+ *    CatalogItem.isStockItem), which un-stocked real QuickBooks goods.
+ *    Services stuck at true: anything registered before the rule was
+ *    unified.
  * 2. Retire stock rows on items pass 1 just turned OFF. A NonInventory item
  *    should hold no `inventory_stock` row at all; the ones it has are
  *    artifacts of seedZeroStockRow having believed it was stocked. Empty
@@ -41,13 +41,6 @@ import type { IStockRepository } from '../src/inventory/domain/ports/stock-repos
  * 4. Seed a 0-qty stock row (default branch, canonical id) for every item
  *    that's now isStockItem=true, via the same IStockRepository.applyDelta(id,
  *    branchId, 0) the live auto-seed in CatalogService.registerItem() uses.
- *
- * RUN A PULL FIRST. `stockTracked` is knowledge only an ERP pull carries, so
- * every row predating it is null and pass 1 will leave those items exactly as
- * they are (null means "nobody ever told us", which is not the same as
- * "not stocked"). Pull items for each tenant, then run this. The pass-1
- * summary reports how many rows are still null so you can tell whether the
- * pull has happened.
  *
  * SCOPE TO ONE TENANT ON A SHARED ENVIRONMENT. `--merchant=<merchantId>`
  * restricts every pass; without it the script walks every tenant in the
@@ -152,12 +145,25 @@ async function main(): Promise<void> {
     return resolution;
   };
 
-  await correctIsStockItemFlags(itemRepo);
-  await retireRowsOnNonStockItems({ itemRepo, stockRowRepo, movementRepo });
+  // Passes 2-4 all key off "is this item stock-tracked", and pass 1 is what
+  // decides that. In APPLY mode pass 1 has already written by the time they
+  // run, but in DRY RUN it has not -- so re-reading the column here would
+  // make the dry run describe the OLD world while claiming to preview the
+  // new one. It did exactly that: an item pass 1 was about to turn back ON
+  // was simultaneously reported by pass 2 as "no longer stock-tracked, holds
+  // stock, re-run with --purge-nonempty to drop it". Acting on that reading
+  // would have deleted the stock pass 1 existed to rescue. So pass 1 hands
+  // down its resolved verdict and nobody re-queries.
+  const { all, resolved } = await correctIsStockItemFlags(itemRepo);
+  const nonStockItems = all.filter((i) => !resolved.get(i.id));
+  const items = all.filter((i) => resolved.get(i.id));
 
-  const items = await itemRepo.find({
-    where: { ...merchantScope, isStockItem: true },
+  await retireRowsOnNonStockItems({
+    items: nonStockItems,
+    stockRowRepo,
+    movementRepo,
   });
+
   console.log(`Found ${items.length} stock-tracked catalog item(s).\n`);
 
   await retireNonCanonicalRows({
@@ -182,26 +188,22 @@ async function main(): Promise<void> {
  */
 async function correctIsStockItemFlags(
   itemRepo: Repository<CatalogItemOrmEntity>,
-): Promise<void> {
+): Promise<{
+  all: CatalogItemOrmEntity[];
+  /** itemId -> isStockItem AFTER this pass, whether or not it was written. */
+  resolved: Map<string, boolean>;
+}> {
   const all = await itemRepo.find({ where: merchantScope });
   const changes = all
     .map((item) => ({
       item,
-      want: computeIsStockItem(item.productTypeCode, item.stockTracked),
+      want: computeIsStockItem(item.productTypeCode),
     }))
     .filter(({ item, want }) => want !== item.isStockItem);
 
-  const stillUnknown = all.filter((i) => i.stockTracked == null).length;
   console.log(
     `Pass 1: isStockItem — ${changes.length} of ${all.length} item(s) disagree with the rule`,
   );
-  if (stillUnknown > 0) {
-    console.warn(
-      `  NOTE: ${stillUnknown} item(s) still have stockTracked = null (no ERP pull has ` +
-        `carried the signal yet). Those keep the permissive default and are NOT turned ` +
-        `off here. Pull items for their tenants, then re-run.`,
-    );
-  }
 
   for (const { item, want } of changes) {
     console.log(
@@ -213,6 +215,13 @@ async function correctIsStockItemFlags(
     if (APPLY) await itemRepo.update({ id: item.id }, { isStockItem: want });
   }
   console.log('');
+
+  return {
+    all,
+    resolved: new Map(
+      all.map((item) => [item.id, computeIsStockItem(item.productTypeCode)]),
+    ),
+  };
 }
 
 /**
@@ -228,16 +237,14 @@ async function correctIsStockItemFlags(
  * time.
  */
 async function retireRowsOnNonStockItems(deps: {
-  itemRepo: Repository<CatalogItemOrmEntity>;
+  /** Already filtered to items pass 1 resolved as NOT stock-tracked. */
+  items: CatalogItemOrmEntity[];
   stockRowRepo: Repository<InventoryStockOrmEntity>;
   movementRepo: Repository<StockMovementOrmEntity>;
 }): Promise<void> {
-  const { itemRepo, stockRowRepo, movementRepo } = deps;
+  const { items: nonStock, stockRowRepo, movementRepo } = deps;
   console.log('Pass 2: stock rows on items that are no longer stock-tracked');
 
-  const nonStock = await itemRepo.find({
-    where: { ...merchantScope, isStockItem: false },
-  });
   let deleted = 0;
   let kept = 0;
 

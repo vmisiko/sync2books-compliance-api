@@ -133,15 +133,12 @@ export async function registerItem(
   const needsProductType = computeNeedsProductType(productTypeCode);
   // Same existing-preferring fallback as classificationCode/productTypeCode
   // above: only a pull knows this, so every other write path omits it and
-  // must leave what the pull already established alone. Without the
-  // fallback, editing an ERP-sourced NonInventory item in Item Sync (which
-  // re-registers through here with `existing.*`) would quietly make it
-  // stock-tracked again.
+  // must leave what the pull already established alone.
   const stockTracked = input.stockTracked ?? existing?.stockTracked ?? null;
-  // Recomputed on every register/update, uniformly regardless of source,
-  // with no override -- see computeIsStockItem for the precedence between
-  // productTypeCode and the ERP signal.
-  const isStockItem = computeIsStockItem(productTypeCode, stockTracked);
+  // Deliberately NOT a function of stockTracked -- see
+  // CatalogItem.isStockItem. What the ERP inventory-tracks and what KRA
+  // needs a stock master for are different questions.
+  const isStockItem = computeIsStockItem(productTypeCode);
   const now = new Date();
 
   if (existing) {

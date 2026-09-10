@@ -102,14 +102,10 @@ export async function updateManualItem(
     internalTaxCategory: taxCategory,
   });
 
-  // Same rule as registerItem, including the ERP's stock-tracked signal:
-  // this edit has no ERP contact of its own, so it carries the row's
-  // existing signal forward rather than dropping it and letting a
-  // NonInventory item silently become stock-tracked again.
-  const isStockItem = computeIsStockItem(
-    resolution.productTypeCode,
-    existing.stockTracked,
-  );
+  // Same rule as registerItem: KRA needs a stock master for every Good, and
+  // the ERP's own inventory-tracking flag has no say in that (see
+  // CatalogItem.isStockItem).
+  const isStockItem = computeIsStockItem(resolution.productTypeCode);
   const needsProductType = computeNeedsProductType(resolution.productTypeCode);
   // Same '' sentinel as registerItem -- resolveClassification never throws
   // for these three, see its doc comment.
