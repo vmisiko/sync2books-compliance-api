@@ -193,11 +193,12 @@ async function isValidPdf(buffer: Buffer): Promise<void> {
 }
 
 describe('generateEtimsReceiptPdf', () => {
-  it('renders a sale receipt with only category A used -- must not crash, tax bucket B (the only rate > 0) is still eligible even when unused', async () => {
-    // taxBuckets here has taxableAmountB=0/taxAmountB=0 but taxRateB=16 (>0) -- TIS
-    // §6.21 requires this row to print regardless. This test only proves the
-    // generator survives that all-exempt case end-to-end; the always-shown rule
-    // itself is exercised structurally by the ALWAYS_SHOWN filter in the generator.
+  it('renders a sale receipt with only category A used -- must not crash; all five tax rows (A-E) always print, zero by default, per the page 8 sample', async () => {
+    // No text-extraction library is available in this repo to assert the rendered
+    // rows directly (see the PDF-text-extraction note in this file's history) -- this
+    // proves the generator survives the all-exempt case end-to-end. The "print all
+    // five unconditionally" behavior itself lives in the unfiltered `buckets` array
+    // in generateEtimsReceiptPdf -- confirmed against a live KRA-certified receipt.
     const buffer = await generateEtimsReceiptPdf(
       baseData({
         taxBuckets: { ...zeroTaxBuckets(), taxableAmountA: 2400, taxAmountA: 0 },

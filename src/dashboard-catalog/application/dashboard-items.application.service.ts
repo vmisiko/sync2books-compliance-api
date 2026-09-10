@@ -15,7 +15,10 @@ import {
   type SupportedIntegrationKey,
 } from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
-import { mapMainApiItemToRegisterItemInput } from '../../catalog/infrastructure/main-api/standardized-item.mapper';
+import {
+  mapMainApiItemToRegisterItemInput,
+  normalizeRawItemType,
+} from '../../catalog/infrastructure/main-api/standardized-item.mapper';
 import { MappingSuggestionService } from '../../regulatory/oscu/application/mapping-suggestion.service';
 import { TAX_CATEGORY_BY_TAX_TY_CD } from '../../regulatory/oscu/mapping/oscu-tax-rates';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
@@ -173,15 +176,18 @@ export class DashboardItemsApplicationService {
           const externalId = mainApiItem.bookId ?? mainApiItem.itemCode;
           // Main API resolves itemType (ERP-shape normalization) itself, but
           // not tax category — that's KRA-specific classification, still
-          // this repo's job. A null `standardized` means this item's source
-          // ERP isn't supported by main API's standardization layer yet, so
-          // surface a clear per-item error instead of silently registering
-          // with an undefined itemType.
-          if (!mainApiItem.standardized) {
-            throw new Error(
-              `Item ${mainApiItem.id} has no standardized itemType — its source ERP is not yet supported by main API's standardization layer`,
-            );
-          }
+          // this repo's job. A null `standardized` means main API's
+          // Item.toStandardized() doesn't cover this row's bookType yet (an
+          // ERP it hasn't implemented, or a locally-created row that hasn't
+          // synced and so has no bookType at all). That used to hard-fail the
+          // item, which left whole catalogues unpullable for a normalization
+          // gap upstream; fall back to the raw `itemType` column the same
+          // pull already carries instead — a Service still resolves to a
+          // Service, and anything else takes the mapper's Finished Product
+          // default like any other pulled good.
+          const itemType =
+            mainApiItem.standardized?.itemType ??
+            normalizeRawItemType(mainApiItem.itemType);
           const sourceSystem =
             mainApiItem.standardized?.sourceSystem ??
             mainApiItem.bookType?.toUpperCase() ??
@@ -205,7 +211,7 @@ export class DashboardItemsApplicationService {
               merchantId,
               item: {
                 ...mainApiItem,
-                itemType: mainApiItem.standardized.itemType,
+                itemType,
               },
               taxCategory,
             }),

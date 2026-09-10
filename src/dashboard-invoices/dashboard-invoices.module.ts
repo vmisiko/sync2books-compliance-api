@@ -5,6 +5,7 @@ import { DashboardCustomersModule } from '../dashboard-customers/dashboard-custo
 import { DashboardIdentityModule } from '../dashboard-identity/dashboard-identity.module';
 import { MainApiPullModule } from '../integration/main-api-pull/main-api-pull.module';
 import { PlatformCorrelationModule } from '../integration/platform-correlation.module';
+import { InvoiceReceiptPushbackModule } from '../integration/invoice-receipt-pushback.module';
 import { SalesModule } from '../sales/sales.module';
 import { OscuMappingModule } from '../regulatory/oscu/oscu-mapping.module';
 import { DashboardInvoicesApplicationService } from './application/dashboard-invoices.application.service';
@@ -16,6 +17,7 @@ import { DashboardInvoicesController } from './presentation/dashboard-invoices.c
     ComplianceOrganizationModule,
     DashboardCustomersModule,
     DashboardIdentityModule,
+    InvoiceReceiptPushbackModule,
     MainApiPullModule,
     PlatformCorrelationModule,
     SalesModule,

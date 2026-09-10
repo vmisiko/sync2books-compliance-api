@@ -46,7 +46,7 @@ import { InventoryService } from '../../inventory/api/inventory.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { MovementType } from '../../inventory/domain/enums/movement-type.enum';
 import { DocumentType } from '../../shared/domain/enums/document-type.enum';
-import { generateEtimsReceiptPdf } from './receipt/etims-receipt-pdf.generator';
+import { generateEtimsReceiptPdf, dashEvery4, formatScuDateTime } from './receipt/etims-receipt-pdf.generator';
 import { buildEtimsReceiptUrl } from './receipt/etims-receipt-url';
 import type {
   IComplianceConnectionRepository,
@@ -401,10 +401,32 @@ export class SalesService {
 
     const rcptSign = safeString(kraData?.rcptSign);
     const intrlData = safeString(kraData?.intrlData);
+    const totRcptNoRaw =
+      kraData?.totRcptNo ??
+      (kraData as Record<string, unknown>)?.['totRcptNo '];
+    const totRcptNo =
+      (totRcptNoRaw != null ? String(totRcptNoRaw) : null) ??
+      document.totRcptNo;
 
     const etimsUrl = buildEtimsReceiptUrl(connection, rcptSign);
 
     const taxBuckets = computeTaxBuckets(document);
+
+    const originalCuInvoiceNo = await this.resolveOriginalCuInvoiceNo(
+      document,
+      connection,
+    );
+    const scu = buildScuFields({
+      document,
+      connection,
+      kraData,
+      receiptNumber,
+      rcptSign,
+      intrlData,
+      totRcptNo,
+      originalCuInvoiceNo,
+    });
+    const sign = (n: number): number => (scu.isCreditNote ? -Math.abs(n) : n);
 
     return {
       id: document.id,
@@ -421,9 +443,21 @@ export class SalesService {
       customerTin: document.customerPin,
       customerPhoneNumber: document.customerPhoneNumber,
       customerEmail: document.customerEmail,
-      internalData: intrlData || null,
-      receiptSignature: rcptSign || null,
+      internalData: scu.internalDataFormatted,
+      receiptSignature: scu.receiptSignatureFormatted,
       etimsUrl,
+      scuId: scu.scuId,
+      cuInvoiceNo: scu.cuInvoiceNo,
+      totRcptNo: scu.totRcptNo,
+      scuDate: scu.scuDate,
+      scuTime: scu.scuTime,
+      receiptLabel: scu.receiptLabel,
+      isCreditNote: scu.isCreditNote,
+      originalCuInvoiceNo: scu.originalCuInvoiceNo,
+      itemsNumber: scu.itemsNumber,
+      tradeAddress: scu.tradeAddress,
+      receiptHeaderMessage: scu.receiptHeaderMessage,
+      receiptFooterMessage: scu.receiptFooterMessage,
       originalSaleId: document.originalSaleId,
       sourceInvoiceId: document.sourceInvoiceId,
       syncErrorMessage,
@@ -437,21 +471,21 @@ export class SalesService {
       paymentTypeCode: document.paymentTypeCode,
       paymentTypeDescription: paymentTypeDescription(document.paymentTypeCode),
       salesTaxSummary: {
-        taxableAmountA: taxBuckets.taxableAmountA,
-        taxableAmountB: taxBuckets.taxableAmountB,
-        taxableAmountC: taxBuckets.taxableAmountC,
-        taxableAmountD: taxBuckets.taxableAmountD,
-        taxableAmountE: taxBuckets.taxableAmountE,
+        taxableAmountA: sign(taxBuckets.taxableAmountA),
+        taxableAmountB: sign(taxBuckets.taxableAmountB),
+        taxableAmountC: sign(taxBuckets.taxableAmountC),
+        taxableAmountD: sign(taxBuckets.taxableAmountD),
+        taxableAmountE: sign(taxBuckets.taxableAmountE),
         taxRateA: taxBuckets.taxRateA,
         taxRateB: taxBuckets.taxRateB,
         taxRateC: taxBuckets.taxRateC,
         taxRateD: taxBuckets.taxRateD,
         taxRateE: taxBuckets.taxRateE,
-        taxAmountA: taxBuckets.taxAmountA,
-        taxAmountB: taxBuckets.taxAmountB,
-        taxAmountC: taxBuckets.taxAmountC,
-        taxAmountD: taxBuckets.taxAmountD,
-        taxAmountE: taxBuckets.taxAmountE,
+        taxAmountA: sign(taxBuckets.taxAmountA),
+        taxAmountB: sign(taxBuckets.taxAmountB),
+        taxAmountC: sign(taxBuckets.taxAmountC),
+        taxAmountD: sign(taxBuckets.taxAmountD),
+        taxAmountE: sign(taxBuckets.taxAmountE),
         cateringLevyRate: 0,
         serviceChargeRate: 0,
         cateringLevyAmount: 0,
@@ -469,9 +503,9 @@ export class SalesService {
           id: l.id,
           quantity: l.quantity,
           unitPrice: l.unitPrice,
-          totalAmount: totAmt,
-          taxableAmount: splyAmt,
-          taxAmount: taxAmt,
+          totalAmount: sign(totAmt),
+          taxableAmount: sign(splyAmt),
+          taxAmount: sign(taxAmt),
           taxRate,
           taxTypeCode: taxTyCd,
           discountRate: 0,
@@ -486,6 +520,27 @@ export class SalesService {
         };
       }),
     };
+  }
+
+  /**
+   * Credit note only: resolves the original sale's own CU Invoice No. for the
+   * page 10 "ORIGINAL CU INVOICE NO.#" field -- same connection (same scuId),
+   * original document's own curRcptNo/receiptLabel. Mirrors getEtimsReceiptPdf's
+   * equivalent resolution.
+   */
+  private async resolveOriginalCuInvoiceNo(
+    document: ComplianceDocument,
+    connection: ComplianceConnection | null,
+  ): Promise<string | null> {
+    if (!document.originalSaleId) return null;
+    const originalDoc = await this.documentRepo.findById(
+      document.originalSaleId,
+    );
+    if (!originalDoc?.etimsReceiptNumber) return null;
+    const originalScuId = connection?.sdcId ?? connection?.deviceId ?? '-';
+    return `${originalScuId}/${originalDoc.etimsReceiptNumber} ${
+      originalDoc.receiptLabel ?? 'NS'
+    }`;
   }
 
   /**
@@ -532,21 +587,10 @@ export class SalesService {
 
     const taxBuckets = computeTaxBuckets(document);
 
-    // Credit note: resolve the original sale's own CU Invoice No. for the page 10
-    // "ORIGINAL CU INVOICE NO.#" field -- same connection (same sdcId), original
-    // document's own curRcptNo/receiptLabel.
-    let originalCuInvoiceNo: string | null = null;
-    if (document.originalSaleId) {
-      const originalDoc = await this.documentRepo.findById(
-        document.originalSaleId,
-      );
-      if (originalDoc?.etimsReceiptNumber) {
-        const originalCuId = connection?.sdcId ?? connection?.deviceId ?? '-';
-        originalCuInvoiceNo = `${originalCuId}/${originalDoc.etimsReceiptNumber} ${
-          originalDoc.receiptLabel ?? 'NS'
-        }`;
-      }
-    }
+    const originalCuInvoiceNo = await this.resolveOriginalCuInvoiceNo(
+      document,
+      connection,
+    );
 
     return generateEtimsReceiptPdf({
       document,
@@ -779,6 +823,71 @@ function round2(n: number): number {
 }
 
 /**
+ * TIS §6.23 fields shared by the PDF generator and the dashboard's own receipt view --
+ * kept in one place so the two stop drifting the way the pre-2026-09 renderers did (see
+ * `.docs/TIS_TEMPLATE_CONFORMANCE_PLAN.md`). Internal data/signature come back already
+ * dash-every-4-formatted (§6.23.6/§6.23.7) so neither consumer needs its own copy of that
+ * rule; the dashboard has no reason to see the raw, undashed value.
+ */
+function buildScuFields(input: {
+  document: ComplianceDocument;
+  connection: ComplianceConnection | null;
+  kraData: Record<string, unknown> | null;
+  receiptNumber: number | null;
+  rcptSign: string;
+  intrlData: string;
+  totRcptNo: string | null;
+  originalCuInvoiceNo: string | null;
+}): {
+  scuId: string | null;
+  cuInvoiceNo: string | null;
+  totRcptNo: string | null;
+  scuDate: string | null;
+  scuTime: string | null;
+  receiptLabel: string | null;
+  isCreditNote: boolean;
+  internalDataFormatted: string | null;
+  receiptSignatureFormatted: string | null;
+  originalCuInvoiceNo: string | null;
+  itemsNumber: number;
+  tradeAddress: string | null;
+  receiptHeaderMessage: string | null;
+  receiptFooterMessage: string | null;
+} {
+  const { document, connection, kraData } = input;
+  const isCreditNote =
+    document.documentType === DocumentType.CREDIT_NOTE ||
+    document.documentType === DocumentType.REVERSE_INVOICE;
+  const scuId = connection?.sdcId ?? connection?.deviceId ?? null;
+  const receiptLabel = document.receiptLabel ?? (isCreditNote ? 'NC' : 'NS');
+  const cuInvoiceNo =
+    input.receiptNumber != null ? `${scuId ?? '-'}/${input.receiptNumber} ${receiptLabel}` : null;
+  const sdcDateTime =
+    safeString(kraData?.sdcDateTime) || document.sdcDateTime || null;
+  const { date: scuDate, time: scuTime } = formatScuDateTime(sdcDateTime);
+  const tradeAddress = [connection?.tradeAddressLine1, connection?.tradeCity]
+    .filter(Boolean)
+    .join(', ') || null;
+
+  return {
+    scuId,
+    cuInvoiceNo,
+    totRcptNo: input.totRcptNo,
+    scuDate: sdcDateTime ? scuDate : null,
+    scuTime: sdcDateTime ? scuTime : null,
+    receiptLabel,
+    isCreditNote,
+    internalDataFormatted: input.intrlData ? dashEvery4(input.intrlData) : null,
+    receiptSignatureFormatted: input.rcptSign ? dashEvery4(input.rcptSign) : null,
+    originalCuInvoiceNo: input.originalCuInvoiceNo,
+    itemsNumber: document.lines.length,
+    tradeAddress,
+    receiptHeaderMessage: connection?.receiptHeaderMessage ?? null,
+    receiptFooterMessage: connection?.receiptFooterMessage ?? null,
+  };
+}
+
+/**
  * Maps a document's internal state machine (DRAFT/VALIDATED/READY_FOR_SUBMISSION/
  * SUBMITTED/ACCEPTED/REJECTED/FAILED/RETRYING/CANCELLED) onto the coarser,
  * Digitax-like status the dashboard shows. `DRAFT`/`VALIDATED`/
@@ -944,10 +1053,29 @@ function buildNormalizedSaleReport(input: {
 
   const rcptSign = safeString(kraData?.rcptSign);
   const intrlData = safeString(kraData?.intrlData);
+  const totRcptNoRaw =
+    kraData?.totRcptNo ?? (kraData as Record<string, unknown>)?.['totRcptNo '];
+  const totRcptNo =
+    (totRcptNoRaw != null ? String(totRcptNoRaw) : null) ?? document.totRcptNo;
 
   const etimsUrl = buildEtimsReceiptUrl(connection, rcptSign);
 
   const taxBuckets = computeTaxBuckets(document);
+
+  // Original CU invoice no. needs a document lookup -- not batched for the list
+  // view (same reasoning as syncErrorMessage below), so a credit note row here
+  // only gets it from the single-document detail fetch.
+  const scu = buildScuFields({
+    document,
+    connection,
+    kraData,
+    receiptNumber,
+    rcptSign,
+    intrlData,
+    totRcptNo,
+    originalCuInvoiceNo: null,
+  });
+  const sign = (n: number): number => (scu.isCreditNote ? -Math.abs(n) : n);
 
   return {
     id: document.id,
@@ -964,9 +1092,21 @@ function buildNormalizedSaleReport(input: {
     customerTin: document.customerPin,
     customerPhoneNumber: document.customerPhoneNumber,
     customerEmail: document.customerEmail,
-    internalData: intrlData || null,
-    receiptSignature: rcptSign || null,
+    internalData: scu.internalDataFormatted,
+    receiptSignature: scu.receiptSignatureFormatted,
     etimsUrl,
+    scuId: scu.scuId,
+    cuInvoiceNo: scu.cuInvoiceNo,
+    totRcptNo: scu.totRcptNo,
+    scuDate: scu.scuDate,
+    scuTime: scu.scuTime,
+    receiptLabel: scu.receiptLabel,
+    isCreditNote: scu.isCreditNote,
+    originalCuInvoiceNo: scu.originalCuInvoiceNo,
+    itemsNumber: scu.itemsNumber,
+    tradeAddress: scu.tradeAddress,
+    receiptHeaderMessage: scu.receiptHeaderMessage,
+    receiptFooterMessage: scu.receiptFooterMessage,
     originalSaleId: document.originalSaleId,
     sourceInvoiceId: document.sourceInvoiceId,
     // Not batched for the list view (would add an events-table query per row) --
@@ -986,11 +1126,11 @@ function buildNormalizedSaleReport(input: {
     paymentTypeCode: document.paymentTypeCode,
     paymentTypeDescription: paymentTypeDescription(document.paymentTypeCode),
     salesTaxSummary: {
-      taxableAmountA: taxBuckets.taxableAmountA,
-      taxableAmountB: taxBuckets.taxableAmountB,
-      taxableAmountC: taxBuckets.taxableAmountC,
-      taxableAmountD: taxBuckets.taxableAmountD,
-      taxableAmountE: taxBuckets.taxableAmountE,
+      taxableAmountA: sign(taxBuckets.taxableAmountA),
+      taxableAmountB: sign(taxBuckets.taxableAmountB),
+      taxableAmountC: sign(taxBuckets.taxableAmountC),
+      taxableAmountD: sign(taxBuckets.taxableAmountD),
+      taxableAmountE: sign(taxBuckets.taxableAmountE),
       taxRateA: taxBuckets.taxRateA,
       taxRateB: taxBuckets.taxRateB,
       taxRateC: taxBuckets.taxRateC,
@@ -998,11 +1138,11 @@ function buildNormalizedSaleReport(input: {
       taxRateE: taxBuckets.taxRateE,
       cateringLevyRate: 0,
       serviceChargeRate: 0,
-      taxAmountA: taxBuckets.taxAmountA,
-      taxAmountB: taxBuckets.taxAmountB,
-      taxAmountC: taxBuckets.taxAmountC,
-      taxAmountD: taxBuckets.taxAmountD,
-      taxAmountE: taxBuckets.taxAmountE,
+      taxAmountA: sign(taxBuckets.taxAmountA),
+      taxAmountB: sign(taxBuckets.taxAmountB),
+      taxAmountC: sign(taxBuckets.taxAmountC),
+      taxAmountD: sign(taxBuckets.taxAmountD),
+      taxAmountE: sign(taxBuckets.taxAmountE),
       cateringLevyAmount: 0,
       serviceChargeAmount: 0,
     },
@@ -1018,9 +1158,9 @@ function buildNormalizedSaleReport(input: {
         id: l.id,
         quantity: l.quantity,
         unitPrice: l.unitPrice,
-        totalAmount: totAmt,
-        taxableAmount: splyAmt,
-        taxAmount: taxAmt,
+        totalAmount: sign(totAmt),
+        taxableAmount: sign(splyAmt),
+        taxAmount: sign(taxAmt),
         taxRate,
         taxTypeCode: taxTyCd,
         discountRate: 0,

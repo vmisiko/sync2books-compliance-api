@@ -22,7 +22,7 @@ function mainApiItem(id: string) {
 
 function makeService(overrides: {
   syncItemsFromBookkeeping: jest.Mock;
-  items: ReturnType<typeof mainApiItem>[];
+  items: Record<string, unknown>[];
 }) {
   const mainApiConnections = {
     getForTenant: jest.fn().mockResolvedValue({
@@ -48,7 +48,7 @@ function makeService(overrides: {
       .mockResolvedValue({ item: { id: 'catalog-1' }, created: true }),
   };
 
-  return new DashboardItemsApplicationService(
+  const service = new DashboardItemsApplicationService(
     catalog as unknown as CatalogService,
     {
       resolveDashboardBranchId: jest.fn().mockResolvedValue(null),
@@ -60,6 +60,7 @@ function makeService(overrides: {
     } as unknown as MappingSuggestionService,
     { reconcileStock: jest.fn() } as unknown as InventoryService,
   );
+  return { service, catalog };
 }
 
 /**
@@ -69,7 +70,7 @@ function makeService(overrides: {
  */
 describe('DashboardItemsApplicationService.pullItems -- failed ERP refresh', () => {
   it('throws with the underlying reason when the refresh failed and nothing was cached', async () => {
-    const service = makeService({
+    const { service } = makeService({
       syncItemsFromBookkeeping: jest
         .fn()
         .mockRejectedValue(new Error('401 token expired')),
@@ -85,7 +86,7 @@ describe('DashboardItemsApplicationService.pullItems -- failed ERP refresh', () 
   });
 
   it('still registers cached items when the refresh failed, and reports a warning', async () => {
-    const service = makeService({
+    const { service } = makeService({
       syncItemsFromBookkeeping: jest
         .fn()
         .mockRejectedValue(new Error('401 token expired')),
@@ -99,7 +100,7 @@ describe('DashboardItemsApplicationService.pullItems -- failed ERP refresh', () 
   });
 
   it('reports no warning on a clean pull', async () => {
-    const service = makeService({
+    const { service } = makeService({
       syncItemsFromBookkeeping: jest.fn().mockResolvedValue(undefined),
       items: [mainApiItem('QB_1')],
     });
@@ -108,5 +109,93 @@ describe('DashboardItemsApplicationService.pullItems -- failed ERP refresh', () 
 
     expect(result.succeeded).toBe(1);
     expect(result.warning).toBeUndefined();
+  });
+});
+
+/**
+ * Main API's Item.toStandardized() covers QuickBooks and Odoo only, so a row from any other ERP
+ * -- or one created locally that hasn't synced and so carries no bookType -- comes back with
+ * `standardized: null`. That used to throw per item, failing the whole catalogue over a
+ * normalization gap upstream (54 items at once, live, 2026-09-10). The raw `itemType` column is
+ * on the same payload, so use it.
+ */
+describe('DashboardItemsApplicationService.pullItems -- items with no standardized shape', () => {
+  it('registers a raw service item as a Service rather than failing it', async () => {
+    const { service, catalog } = makeService({
+      syncItemsFromBookkeeping: jest.fn().mockResolvedValue(undefined),
+      items: [
+        {
+          id: 'x-1',
+          bookId: '1',
+          itemCode: 'X_1',
+          name: 'Consulting',
+          bookType: 'xero',
+          itemType: 'service',
+          standardized: null,
+        },
+      ],
+    });
+
+    const result = await service.pullItems(TENANT_ID);
+
+    expect(result.succeeded).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(catalog.registerItem).toHaveBeenCalledWith(
+      expect.objectContaining({ productTypeCode: '3', sourceSystem: 'XERO' }),
+    );
+  });
+
+  it('registers a raw good with the Finished Product default instead of failing it', async () => {
+    const { service, catalog } = makeService({
+      syncItemsFromBookkeeping: jest.fn().mockResolvedValue(undefined),
+      items: [
+        {
+          id: 'x-2',
+          bookId: '2',
+          itemCode: 'X_2',
+          name: 'Widget',
+          bookType: 'xero',
+          itemType: 'Inventory',
+          standardized: null,
+        },
+      ],
+    });
+
+    const result = await service.pullItems(TENANT_ID);
+
+    expect(result.succeeded).toBe(1);
+    expect(catalog.registerItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        productTypeCode: undefined,
+        defaultProductTypeCode: '2',
+      }),
+    );
+  });
+
+  it('registers an item with no itemType at all, rather than failing it', async () => {
+    const { service, catalog } = makeService({
+      syncItemsFromBookkeeping: jest.fn().mockResolvedValue(undefined),
+      items: [
+        {
+          id: 'x-3',
+          bookId: '3',
+          itemCode: 'X_3',
+          name: 'Locally created, never synced',
+          standardized: null,
+        },
+      ],
+    });
+
+    const result = await service.pullItems(TENANT_ID);
+
+    expect(result.succeeded).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(catalog.registerItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        productTypeCode: undefined,
+        defaultProductTypeCode: '2',
+        sourceSystem: null,
+      }),
+    );
   });
 });

@@ -11,6 +11,9 @@ import type {
 import type { PlatformOscuCallbackService } from '../../integration/platform-outbound/platform-oscu-callback.service';
 import type { Sync2BooksCorrelationPersistenceService } from '../../integration/platform-outbound/sync2books-correlation-persistence.service';
 import type { Sync2BooksMainApiOscuClient } from '../../integration/platform-outbound/sync2books-main-api-oscu.client';
+import { InvoiceReceiptPushbackService } from '../../integration/platform-outbound/invoice-receipt-pushback.service';
+import type { ComplianceDocumentOrmEntity } from '../../sales/infrastructure/persistence/compliance-document.orm-entity';
+import type { Repository } from 'typeorm';
 import type { SalesService } from '../../sales/application/sales.service';
 import type { IPaymentTypeResolver } from '../../regulatory/oscu/domain/ports/payment-type-resolver.port';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
@@ -70,7 +73,12 @@ type Deps = {
   customers: Pick<DashboardCustomersApplicationService, 'findByExternalId'>;
   organization: Pick<
     ComplianceOrganizationApplicationService,
-    'getTenantById' | 'listBranches' | 'resolveDashboardBranchId'
+    | 'getTenantById'
+    | 'listBranches'
+    | 'resolveDashboardBranchId'
+    // Reverse lookup used only by the retry push-back path (merchantId is all
+    // POST /dashboard-api/sales/sync carries -- no tenant id).
+    | 'getTenantBySync2booksCompanyId'
   >;
   mainApiConnections: Pick<
     MainApiConnectionApplicationService,
@@ -95,8 +103,30 @@ type Deps = {
     | 'patchAttachmentSyncStatus'
   >;
   mainApiOscuClient: Pick<Sync2BooksMainApiOscuClient, 'postInvoiceReceipt'>;
+  /**
+   * Backs `InvoiceReceiptPushbackService`'s own read of the document's
+   * *current* status. Deliberately separate from `sales.createDocument`'s
+   * returned snapshot: the bug this covers was the service trusting that
+   * snapshot after having just submitted the document.
+   */
+  documents: Pick<Repository<ComplianceDocumentOrmEntity>, 'findOne'>;
   paymentTypeResolver: IPaymentTypeResolver;
 };
+
+/**
+ * The real `InvoiceReceiptPushbackService`, not a stub -- it owns the ACCEPTED
+ * gate and the already-notified guard, so stubbing it out would test nothing
+ * about when a receipt actually gets pushed back.
+ */
+function makePushback(deps: Deps): InvoiceReceiptPushbackService {
+  return new InvoiceReceiptPushbackService(
+    deps.documents as Repository<ComplianceDocumentOrmEntity>,
+    deps.organization as ComplianceOrganizationApplicationService,
+    deps.mainApiConnections as MainApiConnectionApplicationService,
+    deps.mainApiOscuClient as Sync2BooksMainApiOscuClient,
+    deps.correlationPersistence as Sync2BooksCorrelationPersistenceService,
+  );
+}
 
 function makeService(deps: Deps): DashboardInvoicesApplicationService {
   return new DashboardInvoicesApplicationService(
@@ -108,7 +138,7 @@ function makeService(deps: Deps): DashboardInvoicesApplicationService {
     deps.sales as SalesService,
     deps.oscuCallback as PlatformOscuCallbackService,
     deps.correlationPersistence as Sync2BooksCorrelationPersistenceService,
-    deps.mainApiOscuClient as Sync2BooksMainApiOscuClient,
+    makePushback(deps),
     deps.paymentTypeResolver,
   );
 }
@@ -120,6 +150,7 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
   submitDraftDocument: jest.Mock;
   prepareDocument: jest.Mock;
   submitDocument: jest.Mock;
+  findOne: jest.Mock;
 } {
   const postInvoiceReceipt = jest.fn().mockResolvedValue({
     syncItemId: 'sync-item-1',
@@ -130,6 +161,15 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
   const submitDraftDocument = jest.fn().mockResolvedValue({});
   const prepareDocument = jest.fn().mockResolvedValue({});
   const submitDocument = jest.fn().mockResolvedValue({});
+  // The DB's view of the document after submission: ACCEPTED, no Main API
+  // sync item recorded yet. Tests that need a different current status
+  // override `findOne` per-case.
+  const findOne = jest.fn().mockResolvedValue({
+    id: 'doc-1',
+    complianceStatus: ComplianceStatus.ACCEPTED,
+    sourceInvoiceId: 'invoice-1',
+    mainApiSyncItemId: null,
+  });
 
   return {
     catalog: {
@@ -164,6 +204,12 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
           ReturnType<ComplianceOrganizationApplicationService['listBranches']>
         >,
       resolveDashboardBranchId: async () => 'branch-1',
+      getTenantBySync2booksCompanyId: async () =>
+        ({ id: 'tenant-1', sync2booksCompanyId: 'merchant-1' }) as Awaited<
+          ReturnType<
+            ComplianceOrganizationApplicationService['getTenantBySync2booksCompanyId']
+          >
+        >,
     },
     mainApiConnections: {
       getForTenant: async () => makeConnection(autoUploadReceiptToSource),
@@ -199,6 +245,7 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
     mainApiOscuClient: {
       postInvoiceReceipt,
     },
+    documents: { findOne },
     paymentTypeResolver: {
       resolve: async () => '02',
     },
@@ -207,6 +254,7 @@ function defaultDeps(autoUploadReceiptToSource: boolean): Deps & {
     submitDraftDocument,
     prepareDocument,
     submitDocument,
+    findOne,
   };
 }
 
@@ -708,5 +756,162 @@ describe('DashboardInvoicesApplicationService — idempotency self-heal resumpti
     expect(deps.submitDraftDocument).not.toHaveBeenCalled();
     expect(deps.prepareDocument).not.toHaveBeenCalled();
     expect(deps.submitDocument).not.toHaveBeenCalled();
+  });
+});
+
+describe('DashboardInvoicesApplicationService — receipt push-back gating', () => {
+  /**
+   * The dashboard's two-step flow: "Save as Draft" creates the document, then
+   * "Submit to eTIMS" calls create-sale again, so the second call lands in the
+   * idempotency self-heal branch with a *pre-submit* DRAFT snapshot even
+   * though the submit it performs gets the sale ACCEPTED. Gating the
+   * notification on that snapshot meant the receipt never reached the ERP
+   * invoice for anything submitted this way.
+   */
+  function makeTwoStepDeps(
+    dbStatus: ComplianceStatus,
+  ): ReturnType<typeof defaultDeps> {
+    const deps = defaultDeps(true);
+    deps.sales.createDocument = async () =>
+      ({
+        created: false,
+        document: {
+          id: 'doc-1',
+          sourceInvoiceId: 'invoice-1',
+          complianceStatus: ComplianceStatus.DRAFT,
+        },
+      }) as Awaited<ReturnType<SalesService['createDocument']>>;
+    deps.findOne.mockResolvedValue({
+      id: 'doc-1',
+      complianceStatus: dbStatus,
+      sourceInvoiceId: 'invoice-1',
+      mainApiSyncItemId: null,
+    });
+    return deps;
+  }
+
+  it('notifies after a "Save as Draft" then "Submit to eTIMS" submit, despite the pre-submit DRAFT snapshot', async () => {
+    const deps = makeTwoStepDeps(ComplianceStatus.ACCEPTED);
+    const service = makeService(deps);
+
+    await service.createSaleFromInvoice('tenant-1', 'invoice-1');
+
+    expect(deps.submitDraftDocument).toHaveBeenCalledWith('doc-1');
+    expect(deps.postInvoiceReceipt).toHaveBeenCalledTimes(1);
+    expect(deps.postInvoiceReceipt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceInvoiceId: 'invoice-1',
+        complianceDocumentId: 'doc-1',
+      }),
+    );
+  });
+
+  it('does not notify when the submission was rejected by KRA', async () => {
+    // submitDocument records REJECTED rather than throwing, so the caller
+    // can't tell from control flow alone -- notifying anyway made Main API
+    // record complianceDocumentId against an invoice whose receipt PDF
+    // doesn't exist, which then blocked every later genuine push.
+    const deps = makeTwoStepDeps(ComplianceStatus.REJECTED);
+    const service = makeService(deps);
+
+    await service.createSaleFromInvoice('tenant-1', 'invoice-1');
+
+    expect(deps.postInvoiceReceipt).not.toHaveBeenCalled();
+    expect(deps.patchMainApiSyncRef).not.toHaveBeenCalled();
+  });
+
+  it('does not notify twice for a document that already has a Main API sync item', async () => {
+    const deps = makeTwoStepDeps(ComplianceStatus.ACCEPTED);
+    deps.findOne.mockResolvedValue({
+      id: 'doc-1',
+      complianceStatus: ComplianceStatus.ACCEPTED,
+      sourceInvoiceId: 'invoice-1',
+      mainApiSyncItemId: 'sync-item-existing',
+    });
+    const service = makeService(deps);
+
+    await service.createSaleFromInvoice('tenant-1', 'invoice-1');
+
+    expect(deps.postInvoiceReceipt).not.toHaveBeenCalled();
+  });
+
+  it('the manual upload-receipt route re-notifies even when a sync item is already recorded', async () => {
+    const deps = defaultDeps(true);
+    deps.findOne.mockResolvedValue({
+      id: 'doc-1',
+      complianceStatus: ComplianceStatus.ACCEPTED,
+      sourceInvoiceId: 'invoice-1',
+      mainApiSyncItemId: 'sync-item-existing',
+    });
+    deps.sales.getDocumentBySourceInvoiceId = async () =>
+      ({ id: 'doc-1' }) as Awaited<
+        ReturnType<SalesService['getDocumentBySourceInvoiceId']>
+      >;
+    const service = makeService(deps);
+
+    await service.uploadReceiptToSource('tenant-1', 'invoice-1');
+
+    expect(deps.postInvoiceReceipt).toHaveBeenCalledTimes(1);
+  });
+
+  it('the manual upload-receipt route reports a 400 instead of silently skipping when the sale is not ACCEPTED', async () => {
+    const deps = defaultDeps(true);
+    deps.findOne.mockResolvedValue({
+      id: 'doc-1',
+      complianceStatus: ComplianceStatus.REJECTED,
+      sourceInvoiceId: 'invoice-1',
+      mainApiSyncItemId: null,
+    });
+    deps.sales.getDocumentBySourceInvoiceId = async () =>
+      ({ id: 'doc-1' }) as Awaited<
+        ReturnType<SalesService['getDocumentBySourceInvoiceId']>
+      >;
+    const service = makeService(deps);
+
+    await expect(
+      service.uploadReceiptToSource('tenant-1', 'invoice-1'),
+    ).rejects.toThrow(BadRequestException);
+    expect(deps.postInvoiceReceipt).not.toHaveBeenCalled();
+  });
+});
+
+describe('InvoiceReceiptPushbackService — retry path', () => {
+  it('notifies for a retried document that is now ACCEPTED and came from an ERP invoice', async () => {
+    const deps = defaultDeps(true);
+    const pushback = makePushback(deps);
+
+    await pushback.notifyForRetriedDocuments('merchant-1', ['doc-1']);
+
+    expect(deps.postInvoiceReceipt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceInvoiceId: 'invoice-1',
+        complianceDocumentId: 'doc-1',
+      }),
+    );
+  });
+
+  it('skips a manually entered sale, which has no source invoice to attach to', async () => {
+    const deps = defaultDeps(true);
+    deps.findOne.mockResolvedValue({
+      id: 'doc-1',
+      complianceStatus: ComplianceStatus.ACCEPTED,
+      sourceInvoiceId: null,
+      mainApiSyncItemId: null,
+    });
+    const pushback = makePushback(deps);
+
+    await pushback.notifyForRetriedDocuments('merchant-1', ['doc-1']);
+
+    expect(deps.postInvoiceReceipt).not.toHaveBeenCalled();
+  });
+
+  it('skips everything when the merchant has no compliance tenant', async () => {
+    const deps = defaultDeps(true);
+    deps.organization.getTenantBySync2booksCompanyId = async () => null;
+    const pushback = makePushback(deps);
+
+    await pushback.notifyForRetriedDocuments('merchant-1', ['doc-1']);
+
+    expect(deps.postInvoiceReceipt).not.toHaveBeenCalled();
   });
 });

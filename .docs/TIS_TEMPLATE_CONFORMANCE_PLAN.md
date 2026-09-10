@@ -54,7 +54,7 @@ Legend: ✅ present · ⚠️ present but wrong · ❌ absent
 | TOTAL | ✅ | |
 | **Payment method + amount** (`CASH  6340.00`) | ⚠️ | We print the description with no amount |
 | **ITEMS NUMBER** | ❌ | §6.25 makes the item counter an explicit TIS obligation |
-| **Tax table — all programmed rates** | ⚠️ **spec violation** | We `.filter(b => b.taxable !== 0 \|\| b.amt !== 0)` (generator L165, and the same filter in `sale-invoice-receipt.tsx:33`). §6.21: *every rate programmed with value > 0 must print on every receipt even when unused*; §6.22: zero-rate rows print only when used. With our rate map (`A0 B16 C0 D0 E0` — E is 0, sandbox-confirmed in `oscu-tax-rates.ts`), **row B must always print**; A/C/D/E only when used. Also print the label row set `EX / 16% / 0% / Non-VAT / 8%`. |
+| **Tax table — all programmed rates** | ✅ FIXED 2026-09-10 | **Corrected against a live KRA-certified receipt (DigiTax) the user provided as a reference, which supersedes the original textual reading below:** all five rows (A/B/C/D/E) print unconditionally on every receipt, zero by default. Original (superseded) reading: §6.21 *every rate programmed with value > 0 must print even when unused*; §6.22 zero-rate rows print only when used — with our rate map (`A0 B16 C0 D0 E0`) that would have meant only row B always prints. The empirical DigiTax reference overrides that reading. Also corrected: totals/payment/ITEMS NUMBER print **before** the tax table (page 8 order), not after. |
 | `SCU INFORMATION` heading | ❌ | §6.23.1 names the literal designation |
 | **SCU date/time** (`Date: dd/mm/yyyy  Time: hh:mm:ss`) | ⚠️ | We print `document.saleDate`. Spec wants the OSCU's own clock — `sdcDateTime` from the sales response. It's parsed in `kra-sales-save-response.mapper.ts:46` but never rendered. |
 | **SCU ID** (`KRACU04XXXXXXXX`) | ❌ **real data gap** | We print `connection.deviceId` (`450682`, the `dvcId`). The spec's SCU ID is `sdcId` — `KRACU0400001074` for our go-live device, confirmed by the live KRA portal receipt in `go-live-evidence/README.md`. `sdcId` is returned by `/selectInitOsdcInfo` and **we do not persist it**. |
@@ -388,16 +388,22 @@ until this lands or someone re-enters it by hand.
 
 ## Phase 3 — Rewrite the renderer
 
-**3.1/3.2/3.3 DONE (2026-09-09)** — `etims-receipt-pdf.generator.ts` rewritten in place against the page 8
-and page 10 samples, in spec order: logo placeholder → trade name/address/PIN → title → QR → header
-commercial message → (credit note: original CU invoice no. + verbatim approval statement) → invoice/buyer/
-supplier details → lines (tax-designation-suffixed amount, goods/service marker) → ITEMS NUMBER → totals →
-payment method → tax table (§6.21/§6.22 rule: B always shown since it's the only rate >0 in this deployment,
-A/C/D/E only when used — this replaces the old "only non-zero" filter that could hide B entirely) → SCU
-INFORMATION (real `sdcId`, dash-every-4 internal data/signature) → TIS INFORMATION → footer message. Credit
-notes render every amount negated at the presentation layer (`Math.abs` first, so it's correct regardless of
-the sign the domain model happens to store) and use `TOTAL {rate}-{pct}%` / `TOTAL TAX {rate}` labels per
-the page 10 sample instead of the sale's per-category labels.
+**3.1/3.2/3.3 DONE (2026-09-09, corrected 2026-09-10)** — `etims-receipt-pdf.generator.ts` rewritten in
+place against the page 8 and page 10 samples, in spec order: logo placeholder → trade name/address/PIN →
+title → QR → header commercial message → (credit note: original CU invoice no. + verbatim approval
+statement) → invoice/buyer/supplier details → lines (tax-designation-suffixed amount, goods/service
+marker) → totals → payment method (with amount) → ITEMS NUMBER → tax table → SCU INFORMATION (real
+`sdcId`, dash-every-4 internal data/signature) → TIS INFORMATION → footer message. Credit notes render
+every amount negated at the presentation layer (`Math.abs` first, so it's correct regardless of the sign
+the domain model happens to store) and use `TOTAL {rate}-{pct}%` / `TOTAL TAX {rate}` labels per the page
+10 sample instead of the sale's per-category labels.
+
+**2026-09-10 correction:** the first pass (a) put ITEMS NUMBER and the tax table *before* the totals
+block instead of after, and (b) only guaranteed row B always prints (others only when used), per a
+textual reading of §6.21/§6.22. The user supplied a live KRA-certified receipt (DigiTax) as ground truth,
+which shows both **all five rows (A-E) always printing, zero by default** and **totals/payment/ITEMS
+NUMBER before the tax table**. Both are now fixed to match; treat the empirical reference as
+authoritative over the standalone spec-text reading wherever they'd otherwise disagree.
 
 Deviated from the original 3.1 plan of a separate `receipt-view-model.ts` module — the formatting logic
 lives inline in the generator instead (helper functions `dashEvery4`/`formatScuDateTime`, exported for
@@ -421,8 +427,38 @@ end-to-end smoke tests for a sale, a credit note, and a connection-less document
 one original may print and every reprint must be watermarked, and our Download/Print buttons currently
 reprint the original unmarked. **KRA will test this.**
 
-**3.5** Propagate to the other three renderers from the same view model — dashboard dialog, POS 80mm print,
-email body. The POS layout is the natural home for the page 8 sample's exact column arithmetic.
+**3.5 PARTIAL (2026-09-10)** — dashboard dialog and its POS 80mm print block
+(`sale-invoice-receipt.tsx`) rewritten to match: all-five-rows-always tax table (matching the
+corrected PDF rule above; the POS print block previously had no tax table at all), correct
+page-8 ordering (totals/payment/ITEMS NUMBER before the tax table), SCU ID (`scuId`, not
+`serialNumber`/`deviceId`), composed CU Invoice No. with receipt label, a TIS INFORMATION block, trade
+address/commercial messages, credit-note original-invoice banner + verbatim approval
+statement, goods/service marker per line. `credit-note-content.tsx`'s list filter now
+prefers `isCreditNote` over the old `receiptTypeCode === "R"` check, with that check kept
+as a fallback for a sale fetched before the new field existed.
+
+Backing DTO (`SaleReportDto`/`SaleReport`) extended with `scuId`/`cuInvoiceNo`/`totRcptNo`/
+`scuDate`/`scuTime`/`receiptLabel`/`isCreditNote`/`originalCuInvoiceNo`/`itemsNumber`/
+`tradeAddress`/`receiptHeaderMessage`/`receiptFooterMessage`, computed by one shared
+`buildScuFields()` helper in `sales.service.ts` used by both the list and detail builders
+(previously two independently-duplicated functions — the same drift class this whole plan
+exists to stop). `internalData`/`receiptSignature` now arrive already dash-every-4-formatted;
+`salesTaxSummary`/`itemList` amounts arrive already negative for a credit note, so neither
+frontend consumer needs its own copy of either rule. The list view deliberately does not
+resolve `originalCuInvoiceNo` (would add a document lookup per row) — same tradeoff already
+made for `syncErrorMessage`; only the single-sale detail fetch resolves it.
+
+Compliance-api: `tsc --noEmit` clean, full suite green (40/307). Dashboard-ui: `tsc --noEmit`
+clean on every file this touched (2 pre-existing, unrelated errors remain in
+`erp-connection-content.tsx`). No test runner exists in this repo (see this repo's own
+CLAUDE.md) and no live visual verification was possible this session -- the compliance-api
+dashboard login needed to actually load this page is still the open blocker from Phase 1's
+[[project_tis_template_golive_rejection]] update. Verify visually once that's unblocked.
+
+**Not yet touched:** `sale-detail-panel.tsx`'s "eTIMS Metadata" card (a technical inspector,
+not a receipt replica -- already shows the now-correctly-dashed signature/internal data for
+free, no code change needed there) and `receipt-email.renderer.ts`'s email body (still the
+old un-TIS-ified HTML).
 
 ## Phase 4 — Fresh end-to-end test and resubmission
 

@@ -24,7 +24,7 @@ import {
 } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { PlatformOscuCallbackService } from '../../integration/platform-outbound/platform-oscu-callback.service';
 import { Sync2BooksCorrelationPersistenceService } from '../../integration/platform-outbound/sync2books-correlation-persistence.service';
-import { Sync2BooksMainApiOscuClient } from '../../integration/platform-outbound/sync2books-main-api-oscu.client';
+import { InvoiceReceiptPushbackService } from '../../integration/platform-outbound/invoice-receipt-pushback.service';
 import { parseSync2BooksCorrelation } from '../../integration/platform-outbound/sync2books-request-headers.util';
 import { SalesService } from '../../sales/application/sales.service';
 import { expectedTaxAmount } from '../../sales/domain/rules/tax-rule.engine';
@@ -113,7 +113,7 @@ export class DashboardInvoicesApplicationService {
     private readonly sales: SalesService,
     private readonly oscuCallback: PlatformOscuCallbackService,
     private readonly correlationPersistence: Sync2BooksCorrelationPersistenceService,
-    private readonly mainApiOscuClient: Sync2BooksMainApiOscuClient,
+    private readonly receiptPushback: InvoiceReceiptPushbackService,
     @Inject(PAYMENT_TYPE_RESOLVER)
     private readonly paymentTypeResolver: IPaymentTypeResolver,
   ) {}
@@ -498,12 +498,16 @@ export class DashboardInvoicesApplicationService {
         });
       }
 
-      // Unconditional, separate from the opportunistic block above: notifies
-      // Main API of this eTIMS submission via the new invoice-receipt route,
-      // which needs no correlation headers/pre-existing sync_item — just the
-      // tenant's Main-API company/application ids. Best-effort: a failure
-      // here must not fail the sale-creation flow.
-      await this.notifyMainApiOfReceipt(
+      // Separate from the opportunistic block above: notifies Main API of this
+      // eTIMS submission via the invoice-receipt route, which needs no
+      // correlation headers/pre-existing sync_item — just the tenant's
+      // Main-API company/application ids. Best-effort: a failure here must not
+      // fail the sale-creation flow. Fires unconditionally *as a call*, but
+      // `notify` itself only pushes when the document actually reached
+      // ACCEPTED — `submitDocument` records a REJECTED outcome rather than
+      // throwing, so this used to notify Main API for rejected sales too,
+      // which left them permanently stuck (see the service's doc comment).
+      await this.receiptPushback.notify(
         complianceTenantId,
         documentId,
         pulled.mainApiInvoiceId,
@@ -519,7 +523,6 @@ export class DashboardInvoicesApplicationService {
       // since there's no ERP invoice to attach a receipt to).
       const existing = createResult.document as {
         sourceInvoiceId: string | null;
-        mainApiSyncItemId: string | null;
         complianceStatus: ComplianceStatus;
       };
 
@@ -556,71 +559,18 @@ export class DashboardInvoicesApplicationService {
         }
       }
 
-      const alreadyAccepted =
-        existing.complianceStatus === ComplianceStatus.ACCEPTED ||
-        existing.complianceStatus === ComplianceStatus.SUBMITTED;
-      if (alreadyAccepted && !existing.mainApiSyncItemId) {
-        await this.notifyMainApiOfReceipt(
-          complianceTenantId,
-          documentId,
-          pulled.mainApiInvoiceId,
-        );
-      }
-    }
-  }
-
-  /**
-   * Notifies Main API of a successful eTIMS submission via
-   * `POST /internal/compliance/invoice-receipt` and records the returned
-   * sync-item reference. Best-effort: a failure here must never fail the
-   * caller's overall flow (sale creation or backfill). Shared by the
-   * fresh-document path and the idempotency-match self-heal path in
-   * `createSaleFromInvoice`, and by the manual `uploadReceiptToSource` route
-   * (via `force: true`, which bypasses the tenant's `autoUploadReceiptToSource`
-   * toggle so a user can always trigger it on demand).
-   */
-  private async notifyMainApiOfReceipt(
-    complianceTenantId: string,
-    documentId: string,
-    sourceInvoiceId: string,
-    options: { force?: boolean } = {},
-  ): Promise<void> {
-    try {
-      const connection =
-        await this.mainApiConnections.getForTenant(complianceTenantId);
-      if (!options.force && connection.autoUploadReceiptToSource === false) {
-        this.logger.log(
-          `Auto receipt upload is disabled for tenant ${complianceTenantId} — skipping automatic invoice-receipt notification for document ${documentId}`,
-        );
-        return;
-      }
-      if (!connection.mainApiCompanyId) {
-        this.logger.warn(
-          `Tenant ${complianceTenantId} has no mainApiCompanyId yet — skipping invoice-receipt notification for document ${documentId}`,
-        );
-        return;
-      }
-      const receipt = await this.mainApiOscuClient.postInvoiceReceipt({
-        sourceInvoiceId,
-        companyId: connection.mainApiCompanyId,
-        applicationId: connection.mainApiApplicationId,
-        complianceDocumentId: documentId,
-      });
-      await this.correlationPersistence.patchMainApiSyncRef(
+      // Always ask; never decide here. `existing.complianceStatus` is the
+      // status as it was *before* the switch above submitted the document, so
+      // gating on it meant the dashboard's two-step "Save as Draft" then
+      // "Submit to eTIMS" flow (two create-sale calls, the second landing in
+      // this branch with a DRAFT snapshot) submitted to KRA successfully and
+      // then never notified Main API — the receipt never reached QuickBooks.
+      // `notify` re-reads the row and owns both the ACCEPTED requirement and
+      // the already-notified guard.
+      await this.receiptPushback.notify(
+        complianceTenantId,
         documentId,
-        receipt.syncItemId,
-        receipt.syncBatchId,
-      );
-      await this.correlationPersistence.patchAttachmentSyncStatus(
-        documentId,
-        receipt.status,
-        null,
-      );
-    } catch (error) {
-      this.logger.warn(
-        `invoice-receipt notification failed for document ${documentId} (invoice ${sourceInvoiceId}): ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        pulled.mainApiInvoiceId,
       );
     }
   }
@@ -632,6 +582,11 @@ export class DashboardInvoicesApplicationService {
    * .updateReceiptSettings`). Exists so a tenant that has turned auto-upload
    * off can still push a specific receipt on demand. Reuses
    * `getReceiptAttachmentStatus` for the response shape.
+   *
+   * Unlike the automatic paths this one is user-initiated, so a skipped push
+   * is reported rather than only logged -- silently returning "not yet
+   * acknowledged" made a sale that simply isn't ACCEPTED indistinguishable
+   * from one whose notification had genuinely never been attempted.
    */
   async uploadReceiptToSource(
     complianceTenantId: string,
@@ -648,12 +603,17 @@ export class DashboardInvoicesApplicationService {
       );
     }
 
-    await this.notifyMainApiOfReceipt(
+    const result = await this.receiptPushback.notify(
       complianceTenantId,
       document.id,
       mainApiInvoiceId,
       { force: true },
     );
+    if (!result.notified && result.reason === 'NOT_ACCEPTED') {
+      throw new BadRequestException(
+        'This sale has not been accepted by KRA yet — there is no eTIMS receipt to upload. Submit or retry it first.',
+      );
+    }
 
     return this.getReceiptAttachmentStatus(
       complianceTenantId,
@@ -664,7 +624,7 @@ export class DashboardInvoicesApplicationService {
   /**
    * Reads the Main-API sync-item status for the sale created from a pulled
    * invoice, via the `mainApiSyncItemId` stored on its `ComplianceDocument`
-   * by the unconditional invoice-receipt notification above.
+   * by `InvoiceReceiptPushbackService.notify`.
    */
   async getReceiptAttachmentStatus(
     complianceTenantId: string,

@@ -146,14 +146,50 @@ export class SaleReportDto {
   @ApiProperty({ nullable: true })
   customerEmail!: string | null;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ nullable: true, description: 'Dash-every-4-formatted (TIS §6.23.6), e.g. "TE68-SLA2-34J5"' })
   internalData!: string | null;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ nullable: true, description: 'Dash-every-4-formatted (TIS §6.23.7), e.g. "V249-J39C-FJ48"' })
   receiptSignature!: string | null;
 
   @ApiProperty({ nullable: true })
   etimsUrl!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'OSCU/SCU id (`sdcId`, e.g. "KRACU0400001074") -- the TIS "CU ID"/"SCU ID", distinct from serialNumber (deviceId).' })
+  scuId!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'Composed `{scuId}/{receiptNumber} {receiptLabel}`, TIS "CU Invoice No."' })
+  cuInvoiceNo!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'OSCU `totRcptNo` -- receipt counter across all receipt types (TIS §6.23.5).' })
+  totRcptNo!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'SCU\'s own clock, DD/MM/YYYY (TIS §6.23.2) -- distinct from `date`, which is the document\'s saleDate.' })
+  scuDate!: string | null;
+
+  @ApiProperty({ nullable: true, description: "SCU's own clock, hh:mm:ss (TIS §6.23.2)." })
+  scuTime!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'Receipt label per TIS §4.3, e.g. "NS"/"NC".' })
+  receiptLabel!: string | null;
+
+  @ApiProperty({ description: 'True for CREDIT_NOTE/REVERSE_INVOICE -- amounts in salesTaxSummary/itemList are already negative for these.' })
+  isCreditNote!: boolean;
+
+  @ApiProperty({ nullable: true, description: 'Credit note only: the original sale\'s own CU Invoice No., TIS page 10 "ORIGINAL CU INVOICE NO.#".' })
+  originalCuInvoiceNo!: string | null;
+
+  @ApiProperty({ description: 'Number of lines on the receipt, excluding voids (TIS §6.25 "ITEMS NUMBER").' })
+  itemsNumber!: number;
+
+  @ApiProperty({ nullable: true, description: 'Trade address line + city for the receipt header (TIS page 8 "Shop address").' })
+  tradeAddress!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'Commercial message above the item list (TIS page 8 sample). Null falls back to a generic default client-side.' })
+  receiptHeaderMessage!: string | null;
+
+  @ApiProperty({ nullable: true, description: "Commercial message in the footer (TIS page 8 sample). Null falls back to a generic default client-side." })
+  receiptFooterMessage!: string | null;
 
   @ApiProperty({ nullable: true })
   originalSaleId!: string | null;

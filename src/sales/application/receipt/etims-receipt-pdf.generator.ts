@@ -262,12 +262,9 @@ export async function generateEtimsReceiptPdf(
     doc.moveTo(leftX, doc.y).lineTo(pageRight, doc.y).strokeColor('#ccc').stroke();
     doc.moveDown(0.4);
 
-    // Item counter (TIS §6.25) -- number of lines shown, excludes voids (voided lines never persist here).
-    doc.fontSize(8).fillColor('#555').text(`ITEMS NUMBER: ${document.lines.length}`, leftX, doc.y);
-    doc.fillColor('#000');
-    doc.moveDown(0.5);
-
-    // --- Totals block ---
+    // --- Totals block -- page 8 order: totals, then payment, then ITEMS NUMBER, THEN the
+    // tax table (not the other way around -- an earlier version of this file put ITEMS
+    // NUMBER and the tax table before the totals block). ---
     doc.font('Helvetica-Bold');
     doc.text(`${isCreditNote ? 'TOTAL' : 'SUB TOTAL'}: ${money(document.subtotalAmount)}`, { align: 'right' });
     doc.text(`${isCreditNote ? 'TOTAL TAX' : 'TAX'}: ${money(document.totalTax)}`, { align: 'right' });
@@ -278,28 +275,30 @@ export async function generateEtimsReceiptPdf(
     doc.moveDown(0.6);
 
     if (data.paymentTypeDescription) {
-      doc.font('Helvetica-Bold').fontSize(9).text(data.paymentTypeDescription, leftX, doc.y, { continued: false });
-      doc.font('Helvetica');
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text(data.paymentTypeDescription, leftX, doc.y, { width: 200, continued: true });
+      doc.font('Helvetica').text(`  ${money(document.totalAmount)}`, { align: 'right' });
     }
-    doc.moveDown(0.6);
 
-    // --- Tax category table -- TIS §6.21/§6.22: the rate actually programmed above 0 (B,
-    // 16% in this deployment) prints on EVERY receipt whether used or not; the others
-    // print only when an item on this document used them. This intentionally differs
-    // from the previous DigiTax-style "only non-zero buckets" filter, which hid B on an
-    // all-exempt/all-zero-rated receipt -- a real spec violation, not a display choice. ---
-    const ALWAYS_SHOWN: Array<'A' | 'B' | 'C' | 'D' | 'E'> = ['B'];
-    const buckets = (
-      [
-        { key: 'A', taxable: taxBuckets.taxableAmountA, rate: taxBuckets.taxRateA, amt: taxBuckets.taxAmountA },
-        { key: 'B', taxable: taxBuckets.taxableAmountB, rate: taxBuckets.taxRateB, amt: taxBuckets.taxAmountB },
-        { key: 'C', taxable: taxBuckets.taxableAmountC, rate: taxBuckets.taxRateC, amt: taxBuckets.taxAmountC },
-        { key: 'D', taxable: taxBuckets.taxableAmountD, rate: taxBuckets.taxRateD, amt: taxBuckets.taxAmountD },
-        { key: 'E', taxable: taxBuckets.taxableAmountE, rate: taxBuckets.taxRateE, amt: taxBuckets.taxAmountE },
-      ] as const
-    ).filter((b) => ALWAYS_SHOWN.includes(b.key) || b.taxable !== 0 || b.amt !== 0);
+    // Item counter (TIS §6.25) -- number of lines shown, excludes voids (voided lines never persist here).
+    doc.fontSize(9).text(`ITEMS NUMBER  ${document.lines.length}`, leftX, doc.y, { width: pageRight - leftX });
+    doc.moveDown(0.4);
+    doc.moveTo(leftX, doc.y).lineTo(pageRight, doc.y).strokeColor('#ccc').stroke();
+    doc.moveDown(0.5);
 
+    // --- Tax category table -- TIS §6.21/§6.22 and the page 8 sample: every programmed
+    // rate (A/B/C/D/E) prints on every receipt, unconditionally, defaulting to 0.00 when
+    // unused -- confirmed against a live KRA-certified receipt (DigiTax), which is more
+    // authoritative here than a stricter reading of the spec text alone. This replaces an
+    // earlier version of this file that only guaranteed row B and hid the rest when unused. ---
     doc.font('Helvetica-Bold').fontSize(9);
+    const buckets = [
+      { key: 'A', taxable: taxBuckets.taxableAmountA, rate: taxBuckets.taxRateA, amt: taxBuckets.taxAmountA },
+      { key: 'B', taxable: taxBuckets.taxableAmountB, rate: taxBuckets.taxRateB, amt: taxBuckets.taxAmountB },
+      { key: 'C', taxable: taxBuckets.taxableAmountC, rate: taxBuckets.taxRateC, amt: taxBuckets.taxAmountC },
+      { key: 'D', taxable: taxBuckets.taxableAmountD, rate: taxBuckets.taxRateD, amt: taxBuckets.taxAmountD },
+      { key: 'E', taxable: taxBuckets.taxableAmountE, rate: taxBuckets.taxRateE, amt: taxBuckets.taxAmountE },
+    ] as const;
     {
       const taxHeaderY = doc.y;
       doc.text('Tax Category', leftX, taxHeaderY, { width: 130 });
