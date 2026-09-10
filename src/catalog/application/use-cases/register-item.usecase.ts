@@ -158,8 +158,16 @@ export async function registerItem(
       nextUnitPrice !== existing.unitPrice ||
       nextOriginCountry !== existing.originCountry ||
       nextSourceSystem !== existing.sourceSystem ||
-      stockTracked !== existing.stockTracked ||
       isStockItem !== existing.isStockItem;
+
+    // stockTracked deliberately NOT in `changed`: it never appears in a
+    // saveItem payload -- it records what the ERP does with quantities, which
+    // KRA never sees -- so a change to it is not a reason to resync. Putting
+    // it there re-staged every ERP item as PENDING on the first pull after
+    // deploy and wiped its sync history, which is precisely the incident the
+    // comment below describes. It still has to be *persisted*, though, and
+    // the early return would drop it; hence the metadata-only branch.
+    const metadataChanged = stockTracked !== existing.stockTracked;
 
     // A re-pull (main API's own item cache refreshing, or a human clicking
     // "Pull from ERP" again) reprocesses every item every time, including
@@ -174,7 +182,16 @@ export async function registerItem(
     // re-staged unconditionally below -- re-pulling has always been the way
     // to retry those, and that's preserved.
     if (!changed && existing.registrationStatus === 'REGISTERED') {
-      return { item: existing, created: false };
+      if (!metadataChanged) return { item: existing, created: false };
+      // Record the new signal and nothing else: registrationStatus,
+      // lastSyncedAt, the sync result and `version` all stay exactly as they
+      // were, because as far as KRA is concerned nothing happened.
+      const saved = await itemRepo.save({
+        ...existing,
+        stockTracked,
+        updatedAt: now,
+      });
+      return { item: saved, created: false };
     }
 
     const updated: CatalogItem = {

@@ -470,6 +470,50 @@ describe('registerItem — catalog registration semantics', () => {
       expect(edited.item.stockTracked).toBe(false);
     });
 
+    /**
+     * The `changed` check decides whether an item needs re-registering with
+     * KRA. stockTracked never reaches KRA, so learning it must not demote a
+     * REGISTERED item to PENDING and wipe its sync history -- the exact
+     * regression test 8) guards against, which putting stockTracked in
+     * `changed` quietly reintroduced for the first pull after deploy.
+     */
+    it('learning stockTracked persists it without re-staging a REGISTERED item', async () => {
+      const first = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11g',
+        name: 'Already Registered Good',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        classificationCode: '14111400',
+        unitCode: 'NO',
+        packagingUnitCode: 'NT',
+        defaultProductTypeCode: '2',
+      });
+      const registered = await itemRepo.save({
+        ...first.item,
+        registrationStatus: 'REGISTERED' as const,
+        etimsItemCode: 'KE2NTNO0000099',
+        lastSyncedAt: new Date('2026-09-01T00:00:00Z'),
+      });
+
+      const repull = await service.registerItem({
+        merchantId: 'm11',
+        externalId: 'ext-11g',
+        name: 'Already Registered Good',
+        taxCategory: TaxCategory.VAT_STANDARD,
+        classificationCode: '14111400',
+        unitCode: 'NO',
+        packagingUnitCode: 'NT',
+        defaultProductTypeCode: '2',
+        stockTracked: false,
+      });
+
+      expect(repull.item.stockTracked).toBe(false);
+      expect(repull.item.registrationStatus).toBe('REGISTERED');
+      expect(repull.item.etimsItemCode).toBe('KE2NTNO0000099');
+      expect(repull.item.lastSyncedAt).toEqual(registered.lastSyncedAt);
+      expect(repull.item.version).toBe(registered.version);
+    });
+
     it('records null when no ERP signal has ever arrived', async () => {
       const { item } = await service.registerItem({
         merchantId: 'm11',
