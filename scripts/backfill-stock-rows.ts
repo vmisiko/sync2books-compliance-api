@@ -49,10 +49,19 @@ import type { IStockRepository } from '../src/inventory/domain/ports/stock-repos
  * summary reports how many rows are still null so you can tell whether the
  * pull has happened.
  *
+ * SCOPE TO ONE TENANT ON A SHARED ENVIRONMENT. `--merchant=<merchantId>`
+ * restricts every pass; without it the script walks every tenant in the
+ * database at once, which is not what you want on production.
+ *
  * DRY RUN BY DEFAULT. Pass `--apply` to actually write:
  *   pnpm backfill:stock-rows                            # report only, no writes
  *   pnpm backfill:stock-rows -- --apply                 # perform passes 1-4
  *   pnpm backfill:stock-rows -- --apply --purge-nonempty # also delete pass-2 rows holding stock
+ *   pnpm backfill:stock-rows -- --merchant=<id> --apply  # one tenant only
+ *
+ * NOT TRANSACTIONAL. Each row is written on its own, so an interrupted run
+ * leaves the work partly done -- which is safe precisely because every pass
+ * is idempotent: re-run it and it picks up where it stopped.
  *
  * Idempotent/safe to re-run: the isStockItem update is a no-op once
  * corrected, passes 2 and 3 find nothing on a second run, and a 0 delta
@@ -71,6 +80,18 @@ const APPLY = process.argv.includes('--apply');
  * wrong about the item's type is not licence to destroy it silently.
  */
 const PURGE_NONEMPTY = process.argv.includes('--purge-nonempty');
+/**
+ * Restrict every pass to one merchant (`CatalogItem.merchantId`, i.e. the
+ * tenant's sync2booksCompanyId). Omitted, the script walks the whole
+ * database -- fine for a single-tenant dev box, wrong as a default on a
+ * shared environment, where a migration should be landed and checked one
+ * tenant at a time rather than across everyone's data in one shot.
+ */
+const MERCHANT_ID =
+  process.argv.find((a) => a.startsWith('--merchant='))?.split('=')[1] ?? null;
+
+/** Tenant filter for every `itemRepo` query below -- see MERCHANT_ID. */
+const merchantScope = MERCHANT_ID ? { merchantId: MERCHANT_ID } : {};
 
 type BranchResolution = {
   /** Canonical id (`ComplianceBranch.id`) of the tenant's default branch. */
@@ -100,8 +121,13 @@ async function main(): Promise<void> {
 
   console.log(
     APPLY
-      ? 'Running in APPLY mode -- rows will be written and deleted.\n'
-      : 'Running in DRY RUN mode -- nothing will be written. Re-run with --apply to commit.\n',
+      ? 'Running in APPLY mode -- rows will be written and deleted.'
+      : 'Running in DRY RUN mode -- nothing will be written. Re-run with --apply to commit.',
+  );
+  console.log(
+    MERCHANT_ID
+      ? `Scoped to merchant ${MERCHANT_ID}.\n`
+      : 'Scope: EVERY tenant in this database. Pass --merchant=<id> to do one at a time.\n',
   );
 
   const branchesByMerchant = new Map<string, BranchResolution>();
@@ -129,7 +155,9 @@ async function main(): Promise<void> {
   await correctIsStockItemFlags(itemRepo);
   await retireRowsOnNonStockItems({ itemRepo, stockRowRepo, movementRepo });
 
-  const items = await itemRepo.find({ where: { isStockItem: true } });
+  const items = await itemRepo.find({
+    where: { ...merchantScope, isStockItem: true },
+  });
   console.log(`Found ${items.length} stock-tracked catalog item(s).\n`);
 
   await retireNonCanonicalRows({
@@ -155,7 +183,7 @@ async function main(): Promise<void> {
 async function correctIsStockItemFlags(
   itemRepo: Repository<CatalogItemOrmEntity>,
 ): Promise<void> {
-  const all = await itemRepo.find();
+  const all = await itemRepo.find({ where: merchantScope });
   const changes = all
     .map((item) => ({
       item,
@@ -207,7 +235,9 @@ async function retireRowsOnNonStockItems(deps: {
   const { itemRepo, stockRowRepo, movementRepo } = deps;
   console.log('Pass 2: stock rows on items that are no longer stock-tracked');
 
-  const nonStock = await itemRepo.find({ where: { isStockItem: false } });
+  const nonStock = await itemRepo.find({
+    where: { ...merchantScope, isStockItem: false },
+  });
   let deleted = 0;
   let kept = 0;
 
