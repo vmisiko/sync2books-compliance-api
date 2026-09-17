@@ -202,11 +202,19 @@ export async function submitDocument(
     // For CREDIT_NOTE: orgInvcNo must be the original sale's real allocated invcNo,
     // not anything parsed out of its human-readable documentNumber -- KRA rejects a
     // wrong value with "orgInvcNo does not exist" (confirmed live 2026-08-11).
-    if (doc.originalSaleId) {
-      const original = await documentRepo.findById(doc.originalSaleId);
-      if (original?.oscuInvcNo != null) {
-        p.originalInvoiceSequence = original.oscuInvcNo;
-      }
+    // Documents created before the originalSaleId link was resolved at creation
+    // time only carry the trader number -- resolve it here too so a retry works.
+    const original = doc.originalSaleId
+      ? await documentRepo.findById(doc.originalSaleId)
+      : doc.documentType === DocumentType.CREDIT_NOTE &&
+          doc.originalDocumentNumber
+        ? await documentRepo.findSaleByDocumentNumber(
+            doc.merchantId,
+            doc.originalDocumentNumber,
+          )
+        : null;
+    if (original?.oscuInvcNo != null) {
+      p.originalInvoiceSequence = original.oscuInvcNo;
     }
     return p;
   };

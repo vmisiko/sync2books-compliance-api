@@ -10,6 +10,7 @@ import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/per
 import {
   OSCU_TAX_RATE_BY_TAX_TY_CD,
   oscuTaxRateForCode,
+  splitTaxInclusiveAmount,
 } from '../../regulatory/oscu/mapping/oscu-tax-rates';
 import type {
   CreateDocumentInput,
@@ -492,9 +493,13 @@ export class SalesService {
         serviceChargeAmount: 0,
       },
       itemList: document.lines.map((l) => {
-        const splyAmt = round2(l.quantity * l.unitPrice);
-        const taxAmt = round2(l.taxAmount);
-        const totAmt = round2(splyAmt + taxAmt);
+        // Same split as the OSCU request builder, so the receipt shows exactly
+        // what KRA recorded: qty x unitPrice is tax-inclusive, VAT comes out of it.
+        const totAmt = round2(l.quantity * l.unitPrice);
+        const { taxblAmt: splyAmt, taxAmt } = splitTaxInclusiveAmount(
+          totAmt,
+          resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory),
+        );
         const taxTyCd = resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory);
         const taxRate = taxRateByTaxTypeCode(taxTyCd);
         const item = itemsById.get(l.itemId);
@@ -989,8 +994,12 @@ function computeTaxBuckets(document: ComplianceDocument): {
 
   for (const l of document.lines) {
     const code = resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory);
-    const taxable = round2(l.quantity * l.unitPrice);
-    const taxAmt = round2(l.taxAmount);
+    // KRA treats qty x unitPrice as tax-inclusive (oscu-sales-request.builder.ts);
+    // the stored line taxAmount is on top of that and would overstate the receipt.
+    const { taxblAmt: taxable, taxAmt } = splitTaxInclusiveAmount(
+      round2(l.quantity * l.unitPrice),
+      code,
+    );
     switch (code) {
       case 'A':
         buckets.taxableAmountA += taxable;
@@ -1147,9 +1156,12 @@ function buildNormalizedSaleReport(input: {
       serviceChargeAmount: 0,
     },
     itemList: document.lines.map((l) => {
-      const splyAmt = round2(l.quantity * l.unitPrice);
-      const taxAmt = round2(l.taxAmount);
-      const totAmt = round2(splyAmt + taxAmt);
+      // Same tax-inclusive split as the OSCU request builder -- see buildSaleReport.
+      const totAmt = round2(l.quantity * l.unitPrice);
+      const { taxblAmt: splyAmt, taxAmt } = splitTaxInclusiveAmount(
+        totAmt,
+        resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory),
+      );
       const taxTyCd = resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory);
       const taxRate = taxRateByTaxTypeCode(taxTyCd);
       const item = itemsById.get(l.itemId);

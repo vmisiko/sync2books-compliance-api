@@ -63,6 +63,28 @@ export interface CreateDocumentResult {
   created: boolean;
 }
 
+/**
+ * A credit note created by trader invoice number alone (manual / API path) still
+ * needs the original sale's document id: submit reads the sale's allocated
+ * `oscuInvcNo` from it for `orgInvcNo`. Without the link the builder falls back
+ * to parsing digits out of the trader number ("INV-260917-03" -> 260917), which
+ * KRA rejects with "orgInvcNo does not exist" (confirmed live 2026-09-17).
+ */
+async function resolveOriginalSaleId(
+  input: CreateDocumentInput,
+  documentRepo: IComplianceDocumentRepository,
+): Promise<string | null> {
+  if (input.originalSaleId) return input.originalSaleId;
+  if (input.documentType !== DocumentType.CREDIT_NOTE) return null;
+  const number = input.originalDocumentNumber?.trim();
+  if (!number) return null;
+  const original = await documentRepo.findSaleByDocumentNumber(
+    input.merchantId,
+    number,
+  );
+  return original?.id ?? null;
+}
+
 export async function createDocument(
   input: CreateDocumentInput,
   documentRepo: IComplianceDocumentRepository,
@@ -129,7 +151,7 @@ export async function createDocument(
     documentType: input.documentType,
     documentNumber: input.documentNumber,
     originalDocumentNumber: input.originalDocumentNumber ?? null,
-    originalSaleId: input.originalSaleId ?? null,
+    originalSaleId: await resolveOriginalSaleId(input, documentRepo),
     sourceInvoiceId: input.sourceInvoiceId ?? null,
     mainApiSyncItemId: null,
     mainApiSyncBatchId: null,

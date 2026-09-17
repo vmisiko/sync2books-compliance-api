@@ -90,6 +90,7 @@ function makeDocumentRepo(initial: ComplianceDocument[]) {
       ),
     findByIdempotencyKey: jest.fn().mockResolvedValue(null),
     findBySourceInvoiceId: jest.fn().mockResolvedValue(null),
+    findSaleByDocumentNumber: jest.fn().mockResolvedValue(null),
     findByMerchant: jest
       .fn()
       .mockImplementation((merchantId: string) =>

@@ -557,3 +557,14 @@ error. Please ask administrator"`. Payload was verified correct (`imptItemSttsCd
 against the cached `cdCls=26` code list). Didn't chase further this session — if you hit this, don't assume
 it's a payload bug; try once or twice with a longer gap, and if it persists, treat it like the `insertStockIO`
 issue (a KRA sandbox-side problem, not something fixable from our side).
+
+
+## Credit note: `orgInvcNo` and `custNm` (confirmed live 2026-09-17)
+
+- `orgInvcNo` must be the original sale's **KRA `invcNo`**, not anything parsed from its trader number. A credit
+  note created with only `originalTraderInvoiceNumber` used to fall back to digit-parsing
+  (`"INV-260917-03"` → `260917`) → *"orgInvcNo does not exist"*. `createDocument` now links `originalSaleId`
+  by trader number (merchant-scoped), and submit resolves it too for older documents.
+- `custNm` must be non-null (*"getCustNm() is null"* NPE) **and equal the original sale's `custNm`**
+  (*"custNm provided in the request body does not match custNm from the orgInvcNo"*). So every sale that might
+  ever be credited needs `customerName` at submission time — a nameless sale can't be credited at all.

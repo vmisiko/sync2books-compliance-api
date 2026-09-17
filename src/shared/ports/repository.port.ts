@@ -15,6 +15,10 @@ export interface IComplianceDocumentRepository {
     sourceInvoiceId: string,
   ): Promise<ComplianceDocument | null>;
   findByMerchant(merchantId: string): Promise<ComplianceDocument[]>;
+  findSaleByDocumentNumber(
+    merchantId: string,
+    documentNumber: string,
+  ): Promise<ComplianceDocument | null>;
 }
 
 export interface IComplianceEventRepository {

@@ -2,6 +2,7 @@ import {
   generateEtimsReceiptPdf,
   dashEvery4,
   formatScuDateTime,
+  totalsFromTaxBuckets,
   type EtimsReceiptData,
   type TaxBuckets,
 } from './etims-receipt-pdf.generator';
@@ -24,6 +25,31 @@ describe('dashEvery4', () => {
 
   it('passes through empty input', () => {
     expect(dashEvery4('')).toBe('');
+  });
+});
+
+describe('totalsFromTaxBuckets', () => {
+  it('sums SUB TOTAL / VAT / TOTAL from the per-rate buckets, matching the tax table', () => {
+    // Live INV-260917-03 shape: B 29000 + 11136 incl., D 500.
+    expect(
+      totalsFromTaxBuckets({
+        taxableAmountA: 0,
+        taxableAmountB: 34600,
+        taxableAmountC: 0,
+        taxableAmountD: 500,
+        taxableAmountE: 0,
+        taxAmountA: 0,
+        taxAmountB: 5536,
+        taxAmountC: 0,
+        taxAmountD: 0,
+        taxAmountE: 0,
+        taxRateA: 0,
+        taxRateB: 16,
+        taxRateC: 0,
+        taxRateD: 0,
+        taxRateE: 0,
+      }),
+    ).toEqual({ taxable: 35100, tax: 5536, total: 40636 });
   });
 });
 

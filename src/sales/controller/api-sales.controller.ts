@@ -128,6 +128,12 @@ export class ApiSalesController {
           0,
         ),
         customerPin: body.customerTin ?? null,
+        // Same as the dashboard route: without these the receipt's Buyer Details is
+        // blank and a credit note is rejected by KRA (custNm null NPE, live 2026-09-17).
+        customerId: body.customerId ?? null,
+        customerName: body.customerName ?? null,
+        customerPhoneNumber: body.customerPhoneNumber ?? null,
+        customerEmail: body.customerEmail ?? null,
         lines: items.map((i) => ({
           itemId: i.id,
           description: i.itemDescription ?? '',

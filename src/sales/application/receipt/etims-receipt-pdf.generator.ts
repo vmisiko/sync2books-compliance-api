@@ -50,6 +50,14 @@ export interface EtimsReceiptData {
   originalCuInvoiceNo?: string | null;
 }
 
+/** Receipt SUB TOTAL / VAT / TOTAL, summed from the per-rate buckets so they always agree with the tax table. */
+export function totalsFromTaxBuckets(b: TaxBuckets): { taxable: number; tax: number; total: number } {
+  const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
+  const taxable = round2(b.taxableAmountA + b.taxableAmountB + b.taxableAmountC + b.taxableAmountD + b.taxableAmountE);
+  const tax = round2(b.taxAmountA + b.taxAmountB + b.taxAmountC + b.taxAmountD + b.taxAmountE);
+  return { taxable, tax, total: round2(taxable + tax) };
+}
+
 const TAX_CATEGORY_LABELS: Record<'A' | 'B' | 'C' | 'D' | 'E', string> = {
   A: 'A-Exempt',
   B: 'B-VAT',
@@ -59,7 +67,8 @@ const TAX_CATEGORY_LABELS: Record<'A' | 'B' | 'C' | 'D' | 'E', string> = {
 };
 
 const DOCUMENT_TITLE: Record<DocumentType, string> = {
-  [DocumentType.SALE]: 'TAX RECEIPT',
+  // TIS page 8: a Normal Sale (NS) is titled TAX INVOICE.
+  [DocumentType.SALE]: 'TAX INVOICE',
   [DocumentType.SALE_INVOICE]: 'TAX INVOICE',
   [DocumentType.CREDIT_NOTE]: 'CREDIT NOTE',
   [DocumentType.PURCHASE]: 'PURCHASE RECEIPT',
@@ -157,7 +166,7 @@ export async function generateEtimsReceiptPdf(
     doc.text(`PIN: ${connection?.kraPin ?? '-'}`, nameX, doc.y, { width: 300 });
 
     doc.fontSize(16).font('Helvetica-Bold');
-    doc.text(DOCUMENT_TITLE[document.documentType] ?? 'TAX RECEIPT', nameX, doc.y + 4, { width: 300 });
+    doc.text(DOCUMENT_TITLE[document.documentType] ?? 'TAX INVOICE', nameX, doc.y + 4, { width: 300 });
     doc.font('Helvetica');
 
     if (qrPngBuffer) {
@@ -241,7 +250,8 @@ export async function generateEtimsReceiptPdf(
 
     for (const line of document.lines) {
       const item = itemsById.get(line.itemId);
-      const total = line.quantity * line.unitPrice + line.taxAmount;
+      // qty x unitPrice is the tax-inclusive line total KRA recorded (taxTyCd suffix per page 8).
+      const total = line.quantity * line.unitPrice;
       const y = doc.y;
       const name = item?.name || line.itemId;
       const isService = item?.productTypeCode === '3';
@@ -265,11 +275,17 @@ export async function generateEtimsReceiptPdf(
     // --- Totals block -- page 8 order: totals, then payment, then ITEMS NUMBER, THEN the
     // tax table (not the other way around -- an earlier version of this file put ITEMS
     // NUMBER and the tax table before the totals block). ---
+    // Derived from the tax buckets (the same tax-inclusive split sent to KRA), not the
+    // document's stored subtotal/tax/total, which add line tax on top and overstate it.
+    const receiptTotals = totalsFromTaxBuckets(taxBuckets);
     doc.font('Helvetica-Bold');
-    doc.text(`${isCreditNote ? 'TOTAL' : 'SUB TOTAL'}: ${money(document.subtotalAmount)}`, { align: 'right' });
-    doc.text(`${isCreditNote ? 'TOTAL TAX' : 'TAX'}: ${money(document.totalTax)}`, { align: 'right' });
-    if (!isCreditNote) {
-      doc.text(`TOTAL: ${money(document.totalAmount)} ${document.currency}`, { align: 'right' });
+    if (isCreditNote) {
+      doc.text(`TOTAL: ${money(receiptTotals.total)}`, { align: 'right' });
+      doc.text(`TOTAL TAX: ${money(receiptTotals.tax)}`, { align: 'right' });
+    } else {
+      doc.text(`SUB TOTAL: ${money(receiptTotals.taxable)}`, { align: 'right' });
+      doc.text(`VAT: ${money(receiptTotals.tax)}`, { align: 'right' });
+      doc.text(`TOTAL: ${money(receiptTotals.total)} ${document.currency}`, { align: 'right' });
     }
     doc.font('Helvetica');
     doc.moveDown(0.6);
@@ -277,7 +293,7 @@ export async function generateEtimsReceiptPdf(
     if (data.paymentTypeDescription) {
       doc.font('Helvetica-Bold').fontSize(9);
       doc.text(data.paymentTypeDescription, leftX, doc.y, { width: 200, continued: true });
-      doc.font('Helvetica').text(`  ${money(document.totalAmount)}`, { align: 'right' });
+      doc.font('Helvetica').text(`  ${money(receiptTotals.total)}`, { align: 'right' });
     }
 
     // Item counter (TIS §6.25) -- number of lines shown, excludes voids (voided lines never persist here).
