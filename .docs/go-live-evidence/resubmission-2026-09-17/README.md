@@ -6,7 +6,7 @@ After KRA rejected the first application on the TIS page 8 / page 10 invoice and
 - Integrator: THIRDPARTY, integrator PIN `P052581715V`, device `SYNCP052581715V`, SCU ID `KRACU0400001214`
 - Environment: KRA sandbox
 
-`invoice-copy.pdf` and `credit-note-copy.pdf` are COPY receipts (TIS §11): COPY heading + watermark, "THIS IS NOT AN OFFICIAL RECEIPT", receipt counter label CS/CC. `INV-260917-10.pdf` / `CN-260917-02.pdf` are the originals.
+`invoice-copy.pdf` and `credit-note-copy.pdf` are COPY receipts (TIS §11): COPY heading + watermark, receipt counter label CS/CC (the §11 "THIS IS NOT AN OFFICIAL RECEIPT" line is deliberately left off). `INV-260917-10.pdf` / `CN-260917-02.pdf` are the originals.
 
 | File | CU invoice no. | TOTAL (KES) | Shows |
 |---|---|---|---|

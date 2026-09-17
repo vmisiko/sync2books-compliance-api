@@ -279,7 +279,7 @@ describe('generateEtimsReceiptPdf', () => {
     const copy = await generateEtimsReceiptPdf(baseData({ copy: true }));
     await isValidPdf(copy);
     // Byte inequality alone proves nothing (CreationDate differs per render); the
-    // watermark + COPY + "THIS IS NOT AN OFFICIAL RECEIPT" add content.
+    // COPY heading + watermark add content.
     expect(copy.length).toBeGreaterThan(original.length);
 
     const creditCopy = await generateEtimsReceiptPdf(

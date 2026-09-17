@@ -352,7 +352,7 @@ export class ApiSalesController {
   @Get(':id/receipt')
   @ApiOperation({
     summary:
-      'Download the KRA eTIMS receipt PDF for an ACCEPTED sale. Pass copy=true for a reprint: marked COPY / "THIS IS NOT AN OFFICIAL RECEIPT" per TIS §11.',
+      'Download the KRA eTIMS receipt PDF for an ACCEPTED sale. Pass copy=true for a reprint: marked COPY (heading + watermark) per TIS §11.',
   })
   @ApiResponse({ status: 200, description: 'Receipt PDF' })
   async getReceipt(

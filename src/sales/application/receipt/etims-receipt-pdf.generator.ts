@@ -50,8 +50,9 @@ export interface EtimsReceiptData {
   originalCuInvoiceNo?: string | null;
   /**
    * TIS §11 / §6.17: a reprint of an already-issued receipt. Adds the COPY
-   * designation and watermark and "THIS IS NOT AN OFFICIAL RECEIPT", and uses the
-   * copy receipt label (CS/CC, §4.3) on the receipt counter.
+   * designation and watermark, and uses the copy receipt label (CS/CC, §4.3) on
+   * the receipt counter. §11's "THIS IS NOT AN OFFICIAL RECEIPT" line is
+   * deliberately omitted (product decision, 2026-09-17).
    */
   copy?: boolean;
 }
@@ -336,17 +337,6 @@ export async function generateEtimsReceiptPdf(
     doc.font('Helvetica');
     doc.moveDown(0.6);
 
-    // §11: below the totals, at least twice the amount text size.
-    if (isCopy) {
-      doc.font('Helvetica-Bold').fontSize(20).text(
-        'THIS IS NOT AN OFFICIAL RECEIPT',
-        leftX,
-        doc.y,
-        { width: pageRight - leftX, align: 'center' },
-      );
-      doc.font('Helvetica').fontSize(9);
-      doc.moveDown(0.6);
-    }
 
     if (data.paymentTypeDescription) {
       doc.font('Helvetica-Bold').fontSize(9);
