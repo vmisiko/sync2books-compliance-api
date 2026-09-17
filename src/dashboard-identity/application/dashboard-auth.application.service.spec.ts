@@ -317,6 +317,109 @@ describe('DashboardAuthApplicationService password reset flow', () => {
       service.resetPassword(foreignTicket, 'BrandNewPass123'),
     ).rejects.toThrow(NotFoundException);
   });
+
+  it('a reset link works once -- reusing it after the password changed is rejected', async () => {
+    const member = makeUser();
+    const { service } = makeService(makeUsersRepo([member]));
+    const reset = await service.createPasswordReset('org-1', member.id);
+
+    await service.resetPassword(reset.resetToken, 'BrandNewPass123');
+
+    await expect(
+      service.resetPassword(reset.resetToken, 'AnotherPass456'),
+    ).rejects.toThrow(NotFoundException);
+    await expect(
+      service.getPasswordResetPreview(reset.resetToken),
+    ).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('DashboardAuthApplicationService self-service forgot password', () => {
+  const organizations = {
+    getById: jest
+      .fn()
+      .mockResolvedValue({ id: 'org-1', displayName: 'Acme Ltd' }),
+    create: jest.fn(),
+  };
+
+  function makeService(usersRepo = makeUsersRepo()) {
+    const jwt = new JwtService({ secret: 'test-secret' });
+    const mailer = { send: jest.fn().mockResolvedValue({ sent: true }) };
+    const service = new DashboardAuthApplicationService(
+      usersRepo as any,
+      jwt,
+      organizations as any,
+      mailer as any,
+    );
+    return { service, usersRepo, mailer };
+  }
+
+  function linkFrom(html: string): string {
+    const match = html.match(/#token=([^"]+)"/);
+    if (!match) throw new Error('no reset link in email');
+    return match[1];
+  }
+
+  it('emails a working reset link to an active account, matching the email case-insensitively', async () => {
+    const member = makeUser();
+    const { service, mailer } = makeService(makeUsersRepo([member]));
+
+    await service.requestPasswordReset('  Peter@Company.co.ke ');
+
+    expect(mailer.send).toHaveBeenCalledTimes(1);
+    const mail = mailer.send.mock.calls[0][0];
+    expect(mail.to).toBe(member.email);
+    const token = linkFrom(mail.html);
+    const result = await service.resetPassword(token, 'BrandNewPass123');
+    expect(result.user.email).toBe(member.email);
+  });
+
+  it('sends nothing and still resolves for an unknown email (no account discovery)', async () => {
+    const { service, mailer } = makeService();
+
+    await expect(
+      service.requestPasswordReset('nobody@nowhere.com'),
+    ).resolves.toBeUndefined();
+    expect(mailer.send).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing for a deactivated account', async () => {
+    const member = makeUser({ status: 'deactivated' });
+    const { service, mailer } = makeService(makeUsersRepo([member]));
+
+    await service.requestPasswordReset(member.email);
+
+    expect(mailer.send).not.toHaveBeenCalled();
+  });
+
+  it('sends at most one email per address per cooldown window', async () => {
+    const member = makeUser();
+    const { service, mailer } = makeService(makeUsersRepo([member]));
+
+    await service.requestPasswordReset(member.email);
+    await service.requestPasswordReset(member.email);
+
+    expect(mailer.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not throw when the mail transport fails', async () => {
+    const member = makeUser();
+    const { service, mailer } = makeService(makeUsersRepo([member]));
+    mailer.send.mockRejectedValueOnce(new Error('SMTP down'));
+
+    await expect(
+      service.requestPasswordReset(member.email),
+    ).resolves.toBeUndefined();
+  });
+
+  it('escapes the display name in the email body', async () => {
+    const member = makeUser({ displayName: '<script>alert(1)</script>' });
+    const { service, mailer } = makeService(makeUsersRepo([member]));
+
+    await service.requestPasswordReset(member.email);
+
+    expect(mailer.send.mock.calls[0][0].html).not.toContain('<script>');
+  });
 });
 
 describe('DashboardAuthApplicationService updateMember deactivation guards', () => {

@@ -35,6 +35,7 @@ import { CompleteOAuthSignUpDto } from './dto/complete-oauth-signup.dto';
 import { CreateMemberDto } from './dto/create-member.dto';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { AcceptPasswordResetDto } from './dto/accept-password-reset.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
 import { DashboardAuthResponseDto } from './dto/dashboard-auth-response.dto';
 
@@ -295,6 +296,21 @@ export class DashboardAuthController {
       success: true,
       message: 'Password reset link created',
       data: reset,
+    };
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Self-service password reset: emails a single-use reset link (1 hour) to the address if it belongs to an active account. Public. Always returns the same response whether or not the account exists, so it can't be used to discover accounts.",
+  })
+  async forgotPassword(@Body() body: ForgotPasswordDto) {
+    await this.auth.requestPasswordReset(body?.email ?? '');
+    return {
+      success: true,
+      message:
+        'If an account exists for that email, a password reset link has been sent.',
     };
   }
 
