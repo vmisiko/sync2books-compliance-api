@@ -1,6 +1,7 @@
 import {
   generateEtimsReceiptPdf,
   dashEvery4,
+  formatCuInvoiceNo,
   formatScuDateTime,
   totalsFromTaxBuckets,
   type EtimsReceiptData,
@@ -50,6 +51,13 @@ describe('totalsFromTaxBuckets', () => {
         taxRateE: 0,
       }),
     ).toEqual({ taxable: 35100, tax: 5536, total: 40636 });
+  });
+});
+
+describe('formatCuInvoiceNo', () => {
+  it('is {CU ID}/{receipt number} with no NS/NC label (TIS §6.23.4)', () => {
+    expect(formatCuInvoiceNo('KRACU0400001214', 10)).toBe('KRACU0400001214/10');
+    expect(formatCuInvoiceNo('KRACU0400001214', 15)).toBe('KRACU0400001214/15');
   });
 });
 
@@ -247,7 +255,7 @@ describe('generateEtimsReceiptPdf', () => {
       baseData({
         document: creditDoc,
         receiptLabel: 'NC',
-        originalCuInvoiceNo: 'KRACU0400001074/9 NS',
+        originalCuInvoiceNo: 'KRACU0400001074/9',
         taxBuckets: {
           ...zeroTaxBuckets(),
           taxableAmountB: 100,

@@ -47,7 +47,7 @@ import { InventoryService } from '../../inventory/api/inventory.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { MovementType } from '../../inventory/domain/enums/movement-type.enum';
 import { DocumentType } from '../../shared/domain/enums/document-type.enum';
-import { generateEtimsReceiptPdf, dashEvery4, formatScuDateTime } from './receipt/etims-receipt-pdf.generator';
+import { generateEtimsReceiptPdf, dashEvery4, formatCuInvoiceNo, formatScuDateTime } from './receipt/etims-receipt-pdf.generator';
 import { buildEtimsReceiptUrl } from './receipt/etims-receipt-url';
 import type {
   IComplianceConnectionRepository,
@@ -543,9 +543,7 @@ export class SalesService {
     );
     if (!originalDoc?.etimsReceiptNumber) return null;
     const originalScuId = connection?.sdcId ?? connection?.deviceId ?? '-';
-    return `${originalScuId}/${originalDoc.etimsReceiptNumber} ${
-      originalDoc.receiptLabel ?? 'NS'
-    }`;
+    return formatCuInvoiceNo(originalScuId, originalDoc.etimsReceiptNumber);
   }
 
   /**
@@ -718,12 +716,20 @@ export class SalesService {
         const kra = kraByDocId.get(d.id) ?? null;
         const conn = await getConn(d.merchantId, d.branchId);
         const supplierName = await getSupplierName(d.merchantId);
+        // Only credit notes carry an originalSaleId, so this is one lookup per
+        // credit-note row. Without it the dashboard's receipt dialog had no CU
+        // number for "ORIGINAL CU INVOICE NO.#".
+        const originalCuInvoiceNo = await this.resolveOriginalCuInvoiceNo(
+          d,
+          conn,
+        );
         return buildNormalizedSaleReport({
           document: d,
           kraRaw: kra,
           connection: conn,
           itemsById,
           supplierName,
+          originalCuInvoiceNo,
         });
       }),
     );
@@ -866,7 +872,9 @@ function buildScuFields(input: {
   const scuId = connection?.sdcId ?? connection?.deviceId ?? null;
   const receiptLabel = document.receiptLabel ?? (isCreditNote ? 'NC' : 'NS');
   const cuInvoiceNo =
-    input.receiptNumber != null ? `${scuId ?? '-'}/${input.receiptNumber} ${receiptLabel}` : null;
+    input.receiptNumber != null
+      ? formatCuInvoiceNo(scuId ?? '-', input.receiptNumber)
+      : null;
   const sdcDateTime =
     safeString(kraData?.sdcDateTime) || document.sdcDateTime || null;
   const { date: scuDate, time: scuTime } = formatScuDateTime(sdcDateTime);
@@ -1049,6 +1057,7 @@ function buildNormalizedSaleReport(input: {
   connection: ComplianceConnection | null;
   itemsById: Map<string, ComplianceItem>;
   supplierName: string | null;
+  originalCuInvoiceNo?: string | null;
 }): import('../controller/dto/sales-report.dto').SaleReportDto {
   const { document, kraRaw, connection, itemsById, supplierName } = input;
   const kraData = (kraRaw?.data as Record<string, unknown> | null) ?? null;
@@ -1071,9 +1080,7 @@ function buildNormalizedSaleReport(input: {
 
   const taxBuckets = computeTaxBuckets(document);
 
-  // Original CU invoice no. needs a document lookup -- not batched for the list
-  // view (same reasoning as syncErrorMessage below), so a credit note row here
-  // only gets it from the single-document detail fetch.
+  // Original CU invoice no. needs a document lookup, so the caller resolves it.
   const scu = buildScuFields({
     document,
     connection,
@@ -1082,7 +1089,7 @@ function buildNormalizedSaleReport(input: {
     rcptSign,
     intrlData,
     totRcptNo,
-    originalCuInvoiceNo: null,
+    originalCuInvoiceNo: input.originalCuInvoiceNo ?? null,
   });
   const sign = (n: number): number => (scu.isCreditNote ? -Math.abs(n) : n);
 

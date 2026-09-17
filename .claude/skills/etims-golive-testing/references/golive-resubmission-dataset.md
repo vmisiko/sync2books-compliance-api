@@ -183,14 +183,14 @@ the payment spread here is deliberate, because a synced QuickBooks `Invoice` can
 
 | Doc | Receipt | TOTAL | Notes |
 |---|---|---|---|
-| INV-260917-08 | `KRACU0400001214/8 NS` | 12,528.00 | = #1 |
-| INV-260917-09 | `/9 NS` | 10,560.00 | = #2 mixed B+A+C |
-| INV-260917-10 | `/10 NS` | 40,636.00 | = #3 → `invoice-copy.pdf`; KRA portal verified |
-| INV-260917-11 | `/11 NS` | 1,740.00 | = #4 M-Pesa, no PIN |
-| INV-260917-12 | `/12 NS` | 3,000.00 | = #5 cash, zero-rated |
-| INV-260917-13 | `/13 NS` | 3,600.00 | = #6 card, exempt |
-| INV-260917-14 | `/14 NS` | 29,580.00 | = #7 |
-| CN-260917-02 | `/15 NC` | −3,284.00 | = #8 against -10 → `credit-note-copy.pdf`; KRA portal verified |
+| INV-260917-08 | `KRACU0400001214/8` | 12,528.00 | = #1 |
+| INV-260917-09 | `/9` | 10,560.00 | = #2 mixed B+A+C |
+| INV-260917-10 | `/10` | 40,636.00 | = #3 → `invoice-copy.pdf`; KRA portal verified |
+| INV-260917-11 | `/11` | 1,740.00 | = #4 M-Pesa, no PIN |
+| INV-260917-12 | `/12` | 3,000.00 | = #5 cash, zero-rated |
+| INV-260917-13 | `/13` | 3,600.00 | = #6 card, exempt |
+| INV-260917-14 | `/14` | 29,580.00 | = #7 |
+| CN-260917-02 | `/15` | −3,284.00 | = #8 against -10 → `credit-note-copy.pdf`; KRA portal verified |
 
 Superseded, don't use: INV-260917-01..07 (receipts 1–7, KRA has no customer name) and CN-260917-01 (REJECTED,
 can't succeed — its original has a null custNm).
@@ -221,14 +221,14 @@ Status as verified 2026-09-17. Re-check; don't trust this list blindly.
 line total **with tax letter suffixed** (`12,528.00B`, `2,400.00A-EX`) · discount narration (when 2.3 lands) ·
 `TOTAL BEFORE DISCOUNT` / `TOTAL DISCOUNT AWARDED` (when 2.3 lands) · `SUB TOTAL` · `VAT` · `TOTAL` ·
 payment method **with amount** (`CASH 3,000.00`) · `ITEMS NUMBER n` · tax table rows EX / 16% / 0% / Non-VAT /
-8%, all present · `SCU INFORMATION`: Date, Time, `SCU ID: KRACU…`, `CU INVOICE NO.: KRACU…/n NS`, Internal
+8%, all present · `SCU INFORMATION`: Date, Time, `SCU ID: KRACU…`, `CU INVOICE NO.: KRACU…/n` (no NS/NC label — decided 2026-09-17, matches §6.23.4 and KRA's portal; the label stays only on the Receipt Counter line), Internal
 Data (dashed), Receipt Signature (dashed) · QR · `TIS INFORMATION`: receipt number, date, time · footer
 commercial message.
 
 **Credit note (page 10):** logo · trade name/address/PIN · `CREDIT NOTE` · `ORIGINAL CU INVOICE NO.#:` =
 the original sale's **CU** number (not our `INV-…`) · "CREDIT NOTE IS APPROVED ONLY FOR ORIGINAL SALES
 RECEIPT" · Buyer PIN · lines negative with tax letter · `TOTAL` negative · `TOTAL B-16.00%` · `TOTAL TAX B` ·
-`TOTAL TAX` · payment method negative · `ITEMS NUMBER` · SCU block with `…/n NC` · TIS block · message.
+`TOTAL TAX` · payment method negative · `ITEMS NUMBER` · SCU block with `…/n` (no label; page 10's sample shows `NC`, deliberately not followed) · TIS block · message.
 
 Where the spec text and a live KRA-certified receipt disagree, the certified receipt wins (that's how the
 all-five-rows tax table rule was settled).

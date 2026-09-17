@@ -80,6 +80,19 @@ const DEFAULT_HEADER_MESSAGE = 'Thank you for shopping with us';
 const DEFAULT_FOOTER_MESSAGE = 'THANK YOU\nWE LOOK FORWARD TO EARNING YOUR BUSINESS';
 
 /** TIS §6.23.6/§6.23.7: internal data and receipt signature print dashed after every 4th character. */
+/**
+ * TIS "CU Invoice No." -- `{CU ID}/{receipt number}`, never with a receipt label
+ * (NS/NC), for sales and credit notes alike. Matches §6.23.4's definition
+ * (`KRACU04XXXXXXXX/1`) and how KRA's own receipt portal prints it. The label
+ * still appears on the Receipt Counter line (§6.23.5).
+ */
+export function formatCuInvoiceNo(
+  cuId: string,
+  receiptNumber: number | string | null,
+): string {
+  return `${cuId}/${receiptNumber ?? '-'}`;
+}
+
 export function dashEvery4(s: string): string {
   if (!s) return s;
   return s.match(/.{1,4}/g)?.join('-') ?? s;
@@ -343,14 +356,14 @@ export async function generateEtimsReceiptPdf(
     // --- SCU INFORMATION block (TIS §6.23) ---
     const scuDateTime = formatScuDateTime(data.sdcDateTime);
     const cuId = connection?.sdcId ?? connection?.deviceId ?? '-';
-    const cuInvoiceNo = `${cuId}/${data.receiptNumber ?? '-'}`;
     const receiptLabel = data.receiptLabel ?? (isCreditNote ? 'NC' : 'NS');
+    const cuInvoiceNo = formatCuInvoiceNo(cuId, data.receiptNumber);
 
     doc.font('Helvetica-Bold').fontSize(10).text('SCU INFORMATION', leftX, doc.y);
     doc.font('Helvetica').fontSize(9);
     doc.text(`Date: ${scuDateTime.date}   Time: ${scuDateTime.time}`, leftX, doc.y);
     doc.text(`CU ID: ${cuId}`, leftX, doc.y);
-    doc.text(`CU Invoice No.: ${cuInvoiceNo} ${receiptLabel}`, leftX, doc.y);
+    doc.text(`CU Invoice No.: ${cuInvoiceNo}`, leftX, doc.y);
     doc.text(
       `Receipt Counter: ${data.receiptNumber ?? '-'}/${data.totRcptNo ?? '-'} ${receiptLabel}`,
       leftX,
