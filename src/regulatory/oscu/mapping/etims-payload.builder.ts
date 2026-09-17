@@ -48,6 +48,9 @@ export class EtimsPayloadBuilder {
     };
 
     if (document.customerPin) payload.customerPin = document.customerPin;
+    // OSCU custNm. Optional on a sale, but KRA NPEs on a null custNm for a credit
+    // note ("getCustNm() is null", live 2026-09-17).
+    if (document.customerName) payload.customerName = document.customerName;
 
     return payload;
   }

@@ -128,6 +128,12 @@ export class ApiSalesController {
           0,
         ),
         customerPin: body.customerTin ?? null,
+        // Same as the dashboard route: without these the receipt's Buyer Details is
+        // blank and a credit note is rejected by KRA (custNm null NPE, live 2026-09-17).
+        customerId: body.customerId ?? null,
+        customerName: body.customerName ?? null,
+        customerPhoneNumber: body.customerPhoneNumber ?? null,
+        customerEmail: body.customerEmail ?? null,
         lines: items.map((i) => ({
           itemId: i.id,
           description: i.itemDescription ?? '',
@@ -345,14 +351,19 @@ export class ApiSalesController {
 
   @Get(':id/receipt')
   @ApiOperation({
-    summary: 'Download the KRA eTIMS receipt PDF for an ACCEPTED sale',
+    summary:
+      'Download the KRA eTIMS receipt PDF for an ACCEPTED sale. Pass copy=true for a reprint: marked COPY (heading + watermark) per TIS §11.',
   })
   @ApiResponse({ status: 200, description: 'Receipt PDF' })
   async getReceipt(
     @Param('id') id: string,
     @Res({ passthrough: true }) res: Response,
+    @Query('copy') copy?: string,
   ): Promise<StreamableFile> {
-    const pdf = await this.salesService.getEtimsReceiptPdf(id);
+    const isCopy = copy === 'true';
+    const pdf = await this.salesService.getEtimsReceiptPdf(id, {
+      copy: isCopy,
+    });
     if (!pdf) {
       throw new NotFoundException(
         'Receipt not available -- sale has not been accepted by KRA yet',
@@ -360,7 +371,7 @@ export class ApiSalesController {
     }
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="etims-receipt-${id}.pdf"`,
+      'Content-Disposition': `attachment; filename="etims-receipt-${isCopy ? 'copy-' : ''}${id}.pdf"`,
     });
     return new StreamableFile(pdf);
   }

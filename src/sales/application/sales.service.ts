@@ -10,6 +10,7 @@ import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/per
 import {
   OSCU_TAX_RATE_BY_TAX_TY_CD,
   oscuTaxRateForCode,
+  splitTaxInclusiveAmount,
 } from '../../regulatory/oscu/mapping/oscu-tax-rates';
 import type {
   CreateDocumentInput,
@@ -46,7 +47,7 @@ import { InventoryService } from '../../inventory/api/inventory.service';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { MovementType } from '../../inventory/domain/enums/movement-type.enum';
 import { DocumentType } from '../../shared/domain/enums/document-type.enum';
-import { generateEtimsReceiptPdf, dashEvery4, formatScuDateTime } from './receipt/etims-receipt-pdf.generator';
+import { generateEtimsReceiptPdf, dashEvery4, formatCuInvoiceNo, formatScuDateTime } from './receipt/etims-receipt-pdf.generator';
 import { buildEtimsReceiptUrl } from './receipt/etims-receipt-url';
 import type {
   IComplianceConnectionRepository,
@@ -492,9 +493,13 @@ export class SalesService {
         serviceChargeAmount: 0,
       },
       itemList: document.lines.map((l) => {
-        const splyAmt = round2(l.quantity * l.unitPrice);
-        const taxAmt = round2(l.taxAmount);
-        const totAmt = round2(splyAmt + taxAmt);
+        // Same split as the OSCU request builder, so the receipt shows exactly
+        // what KRA recorded: qty x unitPrice is tax-inclusive, VAT comes out of it.
+        const totAmt = round2(l.quantity * l.unitPrice);
+        const { taxblAmt: splyAmt, taxAmt } = splitTaxInclusiveAmount(
+          totAmt,
+          resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory),
+        );
         const taxTyCd = resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory);
         const taxRate = taxRateByTaxTypeCode(taxTyCd);
         const item = itemsById.get(l.itemId);
@@ -538,9 +543,7 @@ export class SalesService {
     );
     if (!originalDoc?.etimsReceiptNumber) return null;
     const originalScuId = connection?.sdcId ?? connection?.deviceId ?? '-';
-    return `${originalScuId}/${originalDoc.etimsReceiptNumber} ${
-      originalDoc.receiptLabel ?? 'NS'
-    }`;
+    return formatCuInvoiceNo(originalScuId, originalDoc.etimsReceiptNumber);
   }
 
   /**
@@ -548,7 +551,10 @@ export class SalesService {
    * OSCU response. Returns null if the document hasn't reached ACCEPTED yet
    * (nothing to show — this is the source of truth for "has been synced").
    */
-  async getEtimsReceiptPdf(documentId: string): Promise<Buffer | null> {
+  async getEtimsReceiptPdf(
+    documentId: string,
+    options: { copy?: boolean } = {},
+  ): Promise<Buffer | null> {
     const { document } = await this.getDocument(documentId);
     if (document.complianceStatus !== ComplianceStatus.ACCEPTED) {
       return null;
@@ -607,6 +613,7 @@ export class SalesService {
       supplierName: tenant?.displayName ?? null,
       paymentTypeDescription: paymentTypeDescription(document.paymentTypeCode),
       taxBuckets,
+      copy: options.copy === true,
     });
   }
 
@@ -713,12 +720,20 @@ export class SalesService {
         const kra = kraByDocId.get(d.id) ?? null;
         const conn = await getConn(d.merchantId, d.branchId);
         const supplierName = await getSupplierName(d.merchantId);
+        // Only credit notes carry an originalSaleId, so this is one lookup per
+        // credit-note row. Without it the dashboard's receipt dialog had no CU
+        // number for "ORIGINAL CU INVOICE NO.#".
+        const originalCuInvoiceNo = await this.resolveOriginalCuInvoiceNo(
+          d,
+          conn,
+        );
         return buildNormalizedSaleReport({
           document: d,
           kraRaw: kra,
           connection: conn,
           itemsById,
           supplierName,
+          originalCuInvoiceNo,
         });
       }),
     );
@@ -861,7 +876,9 @@ function buildScuFields(input: {
   const scuId = connection?.sdcId ?? connection?.deviceId ?? null;
   const receiptLabel = document.receiptLabel ?? (isCreditNote ? 'NC' : 'NS');
   const cuInvoiceNo =
-    input.receiptNumber != null ? `${scuId ?? '-'}/${input.receiptNumber} ${receiptLabel}` : null;
+    input.receiptNumber != null
+      ? formatCuInvoiceNo(scuId ?? '-', input.receiptNumber)
+      : null;
   const sdcDateTime =
     safeString(kraData?.sdcDateTime) || document.sdcDateTime || null;
   const { date: scuDate, time: scuTime } = formatScuDateTime(sdcDateTime);
@@ -989,8 +1006,12 @@ function computeTaxBuckets(document: ComplianceDocument): {
 
   for (const l of document.lines) {
     const code = resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory);
-    const taxable = round2(l.quantity * l.unitPrice);
-    const taxAmt = round2(l.taxAmount);
+    // KRA treats qty x unitPrice as tax-inclusive (oscu-sales-request.builder.ts);
+    // the stored line taxAmount is on top of that and would overstate the receipt.
+    const { taxblAmt: taxable, taxAmt } = splitTaxInclusiveAmount(
+      round2(l.quantity * l.unitPrice),
+      code,
+    );
     switch (code) {
       case 'A':
         buckets.taxableAmountA += taxable;
@@ -1040,6 +1061,7 @@ function buildNormalizedSaleReport(input: {
   connection: ComplianceConnection | null;
   itemsById: Map<string, ComplianceItem>;
   supplierName: string | null;
+  originalCuInvoiceNo?: string | null;
 }): import('../controller/dto/sales-report.dto').SaleReportDto {
   const { document, kraRaw, connection, itemsById, supplierName } = input;
   const kraData = (kraRaw?.data as Record<string, unknown> | null) ?? null;
@@ -1062,9 +1084,7 @@ function buildNormalizedSaleReport(input: {
 
   const taxBuckets = computeTaxBuckets(document);
 
-  // Original CU invoice no. needs a document lookup -- not batched for the list
-  // view (same reasoning as syncErrorMessage below), so a credit note row here
-  // only gets it from the single-document detail fetch.
+  // Original CU invoice no. needs a document lookup, so the caller resolves it.
   const scu = buildScuFields({
     document,
     connection,
@@ -1073,7 +1093,7 @@ function buildNormalizedSaleReport(input: {
     rcptSign,
     intrlData,
     totRcptNo,
-    originalCuInvoiceNo: null,
+    originalCuInvoiceNo: input.originalCuInvoiceNo ?? null,
   });
   const sign = (n: number): number => (scu.isCreditNote ? -Math.abs(n) : n);
 
@@ -1147,9 +1167,12 @@ function buildNormalizedSaleReport(input: {
       serviceChargeAmount: 0,
     },
     itemList: document.lines.map((l) => {
-      const splyAmt = round2(l.quantity * l.unitPrice);
-      const taxAmt = round2(l.taxAmount);
-      const totAmt = round2(splyAmt + taxAmt);
+      // Same tax-inclusive split as the OSCU request builder -- see buildSaleReport.
+      const totAmt = round2(l.quantity * l.unitPrice);
+      const { taxblAmt: splyAmt, taxAmt } = splitTaxInclusiveAmount(
+        totAmt,
+        resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory),
+      );
       const taxTyCd = resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory);
       const taxRate = taxRateByTaxTypeCode(taxTyCd);
       const item = itemsById.get(l.itemId);

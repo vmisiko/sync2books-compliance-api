@@ -1,6 +1,6 @@
 ---
 name: etims-golive-testing
-description: Drives the KRA eTIMS OSCU Go-Live certification testing workflow for Sync2Books end-to-end — standing up compliance-api and nest-sync-2-books-api locally, provisioning new Go-Live credentials (Apigee App ID, Application Test Pin, device serial), and working through the 23-test-case checklist on developer.go.ke. Use this whenever the user wants to test the eTIMS/OSCU Go-Live checklist, drive the KRA sandbox tests, provision a new Application Test Pin for Sync2Books, or debug a failing OSCU endpoint (saveItem, insertStockIO, sendSalesTransaction, credit notes, etc.) — even if they just paste new credentials and say "try again" or share a screenshot of the developer.go.ke test dashboard. Encodes a full session's worth of hard-won debugging (payload shapes, sequencing bugs, environment gotchas) so it doesn't get rediscovered from scratch.
+description: Drives the KRA eTIMS OSCU Go-Live certification testing workflow for Sync2Books end-to-end — standing up compliance-api and nest-sync-2-books-api locally, provisioning new Go-Live credentials (Apigee App ID, Application Test Pin, device serial), and working through the 23-test-case checklist on developer.go.ke. Use this whenever the user wants to test the eTIMS/OSCU Go-Live checklist, drive the KRA sandbox tests, provision a new Application Test Pin for Sync2Books, or debug a failing OSCU endpoint (saveItem, insertStockIO, sendSalesTransaction, credit notes, etc.) — even if they just paste new credentials and say "try again" or share a screenshot of the developer.go.ke test dashboard. Also use it for the go-live RESUBMISSION after KRA's rejection on the TIS page 8/10 invoice and credit-note template — building the realistic item/customer/invoice/credit-note dataset (mirroring the QuickBooks catalogue), generating the receipt PDFs, and checking them against the template. Encodes a full session's worth of hard-won debugging (payload shapes, sequencing bugs, environment gotchas) so it doesn't get rediscovered from scratch.
 ---
 
 # eTIMS Go-Live Testing (Sync2Books)
@@ -14,6 +14,29 @@ previously-discovered ways — this skill exists so those aren't rediscovered by
 **Read `references/oscu-payload-gotchas.md` before making direct OSCU calls (saveItem, insertStockIO,
 saveStockMaster, sendSalesTransaction, credit notes)** — it has the exact request shapes that work and why
 the "obvious" version of each fails.
+
+## ⚠️ Current status: application REJECTED on the receipt template — read this first
+
+All 23 test cases passed on 2026-08-20, but KRA rejected the go-live application: *"Kindly refer to the TIS
+Documentation on page 8 and 10 on the invoice and credit note template"*. Page 8 is the Normal Invoice (`NS`)
+sample, page 10 the Normal Credit Note (`NC`). What failed was the **evidence PDFs and the data in them**
+(one item, one rate, `GOLIVE-INV-001`), not the OSCU API.
+
+So the job now is not "pass the checklist again" — it's **re-run the flow with a realistic, mixed dataset
+and produce receipts that match pages 8 and 10 field by field.** Before creating any item, customer, sale or
+credit note, read **`references/golive-resubmission-dataset.md`**. It has:
+
+- the naming rule (no `Test`/`Demo`/`Seed`/`GoLive` anywhere a reviewer can see — including company name and
+  invoice numbers);
+- the 13-item hospitality + fintech catalogue, 3 customers, 4 suppliers and 8 documents, mirroring what was
+  pushed to QuickBooks on 2026-09-09 (with tax-inclusive eTIMS prices worked out, since QuickBooks prices are
+  tax-exclusive);
+- pre-flight blockers still open (SCU ID `sdcId` null, trade address/messages empty, customer PINs empty, KRA
+  logo placeholder, no COPY watermark, discounts hardcoded to 0) — check them before generating PDFs;
+- the page 8 / page 10 acceptance checklist to tick against every PDF.
+
+Background and full gap analysis: `.docs/TIS_TEMPLATE_CONFORMANCE_PLAN.md`. Spec copy:
+`.docs/TIS-for-OSCU--VSCU-Technical-Specifications-v2.0.pdf`.
 
 ## The three repos
 
@@ -230,7 +253,9 @@ curl -s -X POST http://localhost:3000/organizations/$ORG_ID/applications/$APP_ID
 # -> take the "development" environment's apiKey
 
 # Per Go-Live session: create a company, provision eTIMS
-curl -s -X POST http://localhost:3000/companies -H "x-api-key: $API_KEY" -d '{"name":"Go-Live Test Company"}'
+# Company name is printed as the trade name on every receipt KRA reviews -- use the business's real
+# trading name, never "Go-Live Test Company" (see references/golive-resubmission-dataset.md §2)
+curl -s -X POST http://localhost:3000/companies -H "x-api-key: $API_KEY" -d '{"name":"<real trading name>"}'
 curl -s -X POST http://localhost:3000/companies/$COMPANY_ID/integrations/etims/provision \
   -H "x-api-key: $API_KEY" -H "Content-Type: application/json" \
   -d '{"kraPin":"<Application Test Pin>","environment":"SANDBOX","dvcSrlNo":"<device serial>","kraBhfId":"00"}'
@@ -252,7 +277,12 @@ WHERE kraPin='<pin>';"
 
 ## Step 4 — Register an item and stock, then run the flow
 
-Once provisioned, drive the full flow through nest-api's direct API:
+Once provisioned, drive the full flow through nest-api's direct API. The payloads below show the **shape**
+only — for anything that becomes go-live evidence, take every name, unit, price, customer and document from
+`references/golive-resubmission-dataset.md` §3 instead (13 items, opening stock for the 4 goods, 7 sales +
+1 partial credit note). Note `unitPrice` on a sale is **tax-inclusive** (`splyAmt = qty × unitPrice`, tax is
+split out of it), and a *partial* credit note goes through `POST .../sales` with `receiptTypeCode: "R"` +
+`originalTraderInvoiceNumber`, not the express endpoint (which credits the whole sale).
 
 ```bash
 # Item
@@ -344,6 +374,10 @@ correlate a domain-level failure with the adapter-level request/response log lin
 
 ## Step 5 — Work through the rest of the checklist
 
+**Use `references/golive-test-case-runbook.md`** — every one of the 23 dashboard rows mapped to the exact
+route, in dependency order, with the write payloads that passed live on 2026-09-17. The notes below are the
+background for it.
+
 Most of the remaining 23 test cases map onto `sync2books-compliance-api`'s existing OSCU pass-through
 routes (`GET/POST /oscu/*`, see `src/regulatory/oscu/presentation/oscu-operations.controller.ts`) — call
 these directly with `merchantId` (the sync2books company id) and `branchId` (the sync2books branch id, e.g.
@@ -380,7 +414,10 @@ authenticated session.
   pre-filled with existing values, submitted via a "START TEST" button.
 - The 4 required Go-Live evidence screenshots: **Item Creation, Invoice Generation, Invoice Copy, Credit
   Note**. Prioritize getting these 4 working before circling back to the rest of the 23-item checklist —
-  they're what actually gets submitted with the Go-Live application.
+  they're what actually gets submitted with the Go-Live application. **The first submission was rejected on
+  the Invoice Copy / Credit Note artifacts** — use the mixed goods+service invoice (document #3) and its
+  partial credit note (#8) from `references/golive-resubmission-dataset.md`, and tick the §5 page 8/10
+  checklist on both PDFs before uploading.
 
 ### The dashboard's pass/fail badges lag behind reality — don't trust them as ground truth
 

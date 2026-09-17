@@ -85,6 +85,7 @@ describe('SalesService.getNormalizedSaleReport tax type resolution', () => {
       findById: jest.fn().mockResolvedValue(document),
       findByIdempotencyKey: jest.fn(),
       findBySourceInvoiceId: jest.fn(),
+      findSaleByDocumentNumber: jest.fn().mockResolvedValue(null),
       findByMerchant: jest.fn(),
     };
     const eventRepo: IComplianceEventRepository = {
@@ -139,6 +140,29 @@ describe('SalesService.getNormalizedSaleReport tax type resolution', () => {
 
     expect(report.itemList[0].taxTypeCode).toBe('B');
   });
+
+  // Live INV-260917-01 (2026-09-17): 24 x 522.00 at B. KRA recorded totAmt 12528,
+  // taxblAmt 10800, taxAmt 1728 -- the receipt printed 14256 by adding the line's
+  // taxAmount on top of an already tax-inclusive qty x unitPrice.
+  it('splits VAT out of qty x unitPrice the same way the KRA request does', async () => {
+    const document = baseDocument(TaxCategory.VAT_STANDARD, 'B');
+    document.lines[0].quantity = 24;
+    document.lines[0].unitPrice = 522;
+    document.lines[0].taxAmount = 1728;
+    const service = buildService(document);
+
+    const report = await service.getNormalizedSaleReport('doc-1');
+
+    expect(report.itemList[0]).toMatchObject({
+      totalAmount: 12528,
+      taxableAmount: 10800,
+      taxAmount: 1728,
+    });
+    expect(report.salesTaxSummary).toMatchObject({
+      taxableAmountB: 10800,
+      taxAmountB: 1728,
+    });
+  });
 });
 
 /**
@@ -165,6 +189,7 @@ describe('SalesService.getNormalizedSaleReport etimsUrl branch segment', () => {
       findById: jest.fn().mockResolvedValue(document),
       findByIdempotencyKey: jest.fn(),
       findBySourceInvoiceId: jest.fn(),
+      findSaleByDocumentNumber: jest.fn().mockResolvedValue(null),
       findByMerchant: jest.fn(),
     };
     const eventRepo: IComplianceEventRepository = {

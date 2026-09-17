@@ -6,6 +6,7 @@ import type { ComplianceLine } from '../../domain/entities/compliance-line.entit
 import type { IComplianceDocumentRepository } from '../../../shared/ports/repository.port';
 import { ComplianceDocumentOrmEntity } from './compliance-document.orm-entity';
 import { ComplianceLineOrmEntity } from './compliance-line.orm-entity';
+import { DocumentType } from '../../../shared/domain/enums/document-type.enum';
 
 function lineOrmToDomain(row: ComplianceLineOrmEntity): ComplianceLine {
   return {
@@ -215,6 +216,30 @@ export class ComplianceDocumentTypeOrmRepository implements IComplianceDocumentR
   ): Promise<ComplianceDocument | null> {
     const row = await this.documentRepo.findOne({
       where: { merchantId, sourceInvoiceId },
+      order: { createdAt: 'DESC' },
+    });
+    if (!row) return null;
+    const lines = await this.lineRepo.find({
+      where: { documentId: row.id },
+      order: { createdAt: 'ASC' },
+    });
+    return docOrmToDomain(row, lines);
+  }
+
+  /**
+   * The SALE a credit note refers to by trader invoice number, scoped to the
+   * merchant -- trader numbers are only unique per tenant.
+   */
+  async findSaleByDocumentNumber(
+    merchantId: string,
+    documentNumber: string,
+  ): Promise<ComplianceDocument | null> {
+    const row = await this.documentRepo.findOne({
+      where: {
+        merchantId,
+        documentNumber,
+        documentType: In([DocumentType.SALE, DocumentType.SALE_INVOICE]),
+      },
       order: { createdAt: 'DESC' },
     });
     if (!row) return null;

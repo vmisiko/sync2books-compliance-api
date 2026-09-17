@@ -1,7 +1,10 @@
 import {
   generateEtimsReceiptPdf,
   dashEvery4,
+  copyReceiptLabel,
+  formatCuInvoiceNo,
   formatScuDateTime,
+  totalsFromTaxBuckets,
   type EtimsReceiptData,
   type TaxBuckets,
 } from './etims-receipt-pdf.generator';
@@ -24,6 +27,45 @@ describe('dashEvery4', () => {
 
   it('passes through empty input', () => {
     expect(dashEvery4('')).toBe('');
+  });
+});
+
+describe('totalsFromTaxBuckets', () => {
+  it('sums SUB TOTAL / VAT / TOTAL from the per-rate buckets, matching the tax table', () => {
+    // Live INV-260917-03 shape: B 29000 + 11136 incl., D 500.
+    expect(
+      totalsFromTaxBuckets({
+        taxableAmountA: 0,
+        taxableAmountB: 34600,
+        taxableAmountC: 0,
+        taxableAmountD: 500,
+        taxableAmountE: 0,
+        taxAmountA: 0,
+        taxAmountB: 5536,
+        taxAmountC: 0,
+        taxAmountD: 0,
+        taxAmountE: 0,
+        taxRateA: 0,
+        taxRateB: 16,
+        taxRateC: 0,
+        taxRateD: 0,
+        taxRateE: 0,
+      }),
+    ).toEqual({ taxable: 35100, tax: 5536, total: 40636 });
+  });
+});
+
+describe('formatCuInvoiceNo', () => {
+  it('is {CU ID}/{receipt number} with no NS/NC label (TIS §6.23.4)', () => {
+    expect(formatCuInvoiceNo('KRACU0400001214', 10)).toBe('KRACU0400001214/10');
+    expect(formatCuInvoiceNo('KRACU0400001214', 15)).toBe('KRACU0400001214/15');
+  });
+});
+
+describe('copyReceiptLabel', () => {
+  it('maps issued labels to their COPY labels (TIS §4.3)', () => {
+    expect(copyReceiptLabel('NS')).toBe('CS');
+    expect(copyReceiptLabel('NC')).toBe('CC');
   });
 });
 
@@ -221,7 +263,7 @@ describe('generateEtimsReceiptPdf', () => {
       baseData({
         document: creditDoc,
         receiptLabel: 'NC',
-        originalCuInvoiceNo: 'KRACU0400001074/9 NS',
+        originalCuInvoiceNo: 'KRACU0400001074/9',
         taxBuckets: {
           ...zeroTaxBuckets(),
           taxableAmountB: 100,
@@ -230,6 +272,25 @@ describe('generateEtimsReceiptPdf', () => {
       }),
     );
     await isValidPdf(buffer);
+  });
+
+  it('renders a COPY of a sale and of a credit note (TIS §11) with extra content over the original', async () => {
+    const original = await generateEtimsReceiptPdf(baseData());
+    const copy = await generateEtimsReceiptPdf(baseData({ copy: true }));
+    await isValidPdf(copy);
+    // Byte inequality alone proves nothing (CreationDate differs per render); the
+    // COPY heading + watermark add content.
+    expect(copy.length).toBeGreaterThan(original.length);
+
+    const creditCopy = await generateEtimsReceiptPdf(
+      baseData({
+        copy: true,
+        document: baseDocument({ documentType: DocumentType.CREDIT_NOTE, receiptLabel: 'NC' }),
+        receiptLabel: 'NC',
+        originalCuInvoiceNo: 'KRACU0400001074/9',
+      }),
+    );
+    await isValidPdf(creditCopy);
   });
 
   it('renders with a null connection (no eTIMS link yet) without throwing', async () => {

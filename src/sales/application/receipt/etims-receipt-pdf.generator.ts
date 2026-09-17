@@ -48,6 +48,21 @@ export interface EtimsReceiptData {
    * can't be resolved.
    */
   originalCuInvoiceNo?: string | null;
+  /**
+   * TIS §11 / §6.17: a reprint of an already-issued receipt. Adds the COPY
+   * designation and watermark, and uses the copy receipt label (CS/CC, §4.3) on
+   * the receipt counter. §11's "THIS IS NOT AN OFFICIAL RECEIPT" line is
+   * deliberately omitted (product decision, 2026-09-17).
+   */
+  copy?: boolean;
+}
+
+/** Receipt SUB TOTAL / VAT / TOTAL, summed from the per-rate buckets so they always agree with the tax table. */
+export function totalsFromTaxBuckets(b: TaxBuckets): { taxable: number; tax: number; total: number } {
+  const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
+  const taxable = round2(b.taxableAmountA + b.taxableAmountB + b.taxableAmountC + b.taxableAmountD + b.taxableAmountE);
+  const tax = round2(b.taxAmountA + b.taxAmountB + b.taxAmountC + b.taxAmountD + b.taxAmountE);
+  return { taxable, tax, total: round2(taxable + tax) };
 }
 
 const TAX_CATEGORY_LABELS: Record<'A' | 'B' | 'C' | 'D' | 'E', string> = {
@@ -59,7 +74,8 @@ const TAX_CATEGORY_LABELS: Record<'A' | 'B' | 'C' | 'D' | 'E', string> = {
 };
 
 const DOCUMENT_TITLE: Record<DocumentType, string> = {
-  [DocumentType.SALE]: 'TAX RECEIPT',
+  // TIS page 8: a Normal Sale (NS) is titled TAX INVOICE.
+  [DocumentType.SALE]: 'TAX INVOICE',
   [DocumentType.SALE_INVOICE]: 'TAX INVOICE',
   [DocumentType.CREDIT_NOTE]: 'CREDIT NOTE',
   [DocumentType.PURCHASE]: 'PURCHASE RECEIPT',
@@ -71,6 +87,24 @@ const DEFAULT_HEADER_MESSAGE = 'Thank you for shopping with us';
 const DEFAULT_FOOTER_MESSAGE = 'THANK YOU\nWE LOOK FORWARD TO EARNING YOUR BUSINESS';
 
 /** TIS §6.23.6/§6.23.7: internal data and receipt signature print dashed after every 4th character. */
+/**
+ * TIS "CU Invoice No." -- `{CU ID}/{receipt number}`, never with a receipt label
+ * (NS/NC), for sales and credit notes alike. Matches §6.23.4's definition
+ * (`KRACU04XXXXXXXX/1`) and how KRA's own receipt portal prints it. The label
+ * still appears on the Receipt Counter line (§6.23.5).
+ */
+export function formatCuInvoiceNo(
+  cuId: string,
+  receiptNumber: number | string | null,
+): string {
+  return `${cuId}/${receiptNumber ?? '-'}`;
+}
+
+/** §4.3 receipt label for a COPY of a receipt: NS -> CS, NC -> CC. */
+export function copyReceiptLabel(receiptLabel: string): string {
+  return receiptLabel.endsWith('C') ? 'CC' : 'CS';
+}
+
 export function dashEvery4(s: string): string {
   if (!s) return s;
   return s.match(/.{1,4}/g)?.join('-') ?? s;
@@ -138,6 +172,17 @@ export async function generateEtimsReceiptPdf(
     const midX = 230;
     const rightX = 400;
     const pageRight = 555;
+    const isCopy = data.copy === true;
+
+    // §11: COPY as a watermark. Drawn first so all receipt content prints over it.
+    if (isCopy) {
+      doc.save();
+      doc.rotate(-35, { origin: [297, 421] });
+      doc.font('Helvetica-Bold').fontSize(150).fillColor('#000').fillOpacity(0.07);
+      doc.text('COPY', 0, 350, { width: 595, align: 'center', lineBreak: false });
+      doc.restore();
+      doc.fillOpacity(1).fillColor('#000').font('Helvetica');
+    }
 
     // --- Header: KRA logo placeholder, trade name/address/PIN, title, QR top-right ---
     // No official KRA logo asset is bundled -- see TIS_TEMPLATE_CONFORMANCE_PLAN.md
@@ -157,7 +202,7 @@ export async function generateEtimsReceiptPdf(
     doc.text(`PIN: ${connection?.kraPin ?? '-'}`, nameX, doc.y, { width: 300 });
 
     doc.fontSize(16).font('Helvetica-Bold');
-    doc.text(DOCUMENT_TITLE[document.documentType] ?? 'TAX RECEIPT', nameX, doc.y + 4, { width: 300 });
+    doc.text(DOCUMENT_TITLE[document.documentType] ?? 'TAX INVOICE', nameX, doc.y + 4, { width: 300 });
     doc.font('Helvetica');
 
     if (qrPngBuffer) {
@@ -181,6 +226,17 @@ export async function generateEtimsReceiptPdf(
     doc.moveDown(0.5);
     doc.moveTo(leftX, doc.y).lineTo(pageRight, doc.y).strokeColor('#ccc').stroke();
     doc.moveDown(0.6);
+
+    // §11: COPY designation below the receipt header and above the item section,
+    // at least twice the amount text size (amounts print at 9pt).
+    if (isCopy) {
+      doc.font('Helvetica-Bold').fontSize(22).text('COPY', leftX, doc.y, {
+        width: pageRight - leftX,
+        align: 'center',
+      });
+      doc.font('Helvetica').fontSize(9);
+      doc.moveDown(0.4);
+    }
 
     // --- Credit note: original receipt reference + mandatory approval statement (page 10) ---
     if (isCreditNote) {
@@ -241,7 +297,8 @@ export async function generateEtimsReceiptPdf(
 
     for (const line of document.lines) {
       const item = itemsById.get(line.itemId);
-      const total = line.quantity * line.unitPrice + line.taxAmount;
+      // qty x unitPrice is the tax-inclusive line total KRA recorded (taxTyCd suffix per page 8).
+      const total = line.quantity * line.unitPrice;
       const y = doc.y;
       const name = item?.name || line.itemId;
       const isService = item?.productTypeCode === '3';
@@ -265,19 +322,26 @@ export async function generateEtimsReceiptPdf(
     // --- Totals block -- page 8 order: totals, then payment, then ITEMS NUMBER, THEN the
     // tax table (not the other way around -- an earlier version of this file put ITEMS
     // NUMBER and the tax table before the totals block). ---
+    // Derived from the tax buckets (the same tax-inclusive split sent to KRA), not the
+    // document's stored subtotal/tax/total, which add line tax on top and overstate it.
+    const receiptTotals = totalsFromTaxBuckets(taxBuckets);
     doc.font('Helvetica-Bold');
-    doc.text(`${isCreditNote ? 'TOTAL' : 'SUB TOTAL'}: ${money(document.subtotalAmount)}`, { align: 'right' });
-    doc.text(`${isCreditNote ? 'TOTAL TAX' : 'TAX'}: ${money(document.totalTax)}`, { align: 'right' });
-    if (!isCreditNote) {
-      doc.text(`TOTAL: ${money(document.totalAmount)} ${document.currency}`, { align: 'right' });
+    if (isCreditNote) {
+      doc.text(`TOTAL: ${money(receiptTotals.total)}`, { align: 'right' });
+      doc.text(`TOTAL TAX: ${money(receiptTotals.tax)}`, { align: 'right' });
+    } else {
+      doc.text(`SUB TOTAL: ${money(receiptTotals.taxable)}`, { align: 'right' });
+      doc.text(`VAT: ${money(receiptTotals.tax)}`, { align: 'right' });
+      doc.text(`TOTAL: ${money(receiptTotals.total)} ${document.currency}`, { align: 'right' });
     }
     doc.font('Helvetica');
     doc.moveDown(0.6);
 
+
     if (data.paymentTypeDescription) {
       doc.font('Helvetica-Bold').fontSize(9);
       doc.text(data.paymentTypeDescription, leftX, doc.y, { width: 200, continued: true });
-      doc.font('Helvetica').text(`  ${money(document.totalAmount)}`, { align: 'right' });
+      doc.font('Helvetica').text(`  ${money(receiptTotals.total)}`, { align: 'right' });
     }
 
     // Item counter (TIS §6.25) -- number of lines shown, excludes voids (voided lines never persist here).
@@ -327,14 +391,15 @@ export async function generateEtimsReceiptPdf(
     // --- SCU INFORMATION block (TIS §6.23) ---
     const scuDateTime = formatScuDateTime(data.sdcDateTime);
     const cuId = connection?.sdcId ?? connection?.deviceId ?? '-';
-    const cuInvoiceNo = `${cuId}/${data.receiptNumber ?? '-'}`;
-    const receiptLabel = data.receiptLabel ?? (isCreditNote ? 'NC' : 'NS');
+    const issuedLabel = data.receiptLabel ?? (isCreditNote ? 'NC' : 'NS');
+    const receiptLabel = isCopy ? copyReceiptLabel(issuedLabel) : issuedLabel;
+    const cuInvoiceNo = formatCuInvoiceNo(cuId, data.receiptNumber);
 
     doc.font('Helvetica-Bold').fontSize(10).text('SCU INFORMATION', leftX, doc.y);
     doc.font('Helvetica').fontSize(9);
     doc.text(`Date: ${scuDateTime.date}   Time: ${scuDateTime.time}`, leftX, doc.y);
     doc.text(`CU ID: ${cuId}`, leftX, doc.y);
-    doc.text(`CU Invoice No.: ${cuInvoiceNo} ${receiptLabel}`, leftX, doc.y);
+    doc.text(`CU Invoice No.: ${cuInvoiceNo}`, leftX, doc.y);
     doc.text(
       `Receipt Counter: ${data.receiptNumber ?? '-'}/${data.totRcptNo ?? '-'} ${receiptLabel}`,
       leftX,
