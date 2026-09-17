@@ -48,6 +48,12 @@ export interface EtimsReceiptData {
    * can't be resolved.
    */
   originalCuInvoiceNo?: string | null;
+  /**
+   * TIS §11 / §6.17: a reprint of an already-issued receipt. Adds the COPY
+   * designation and watermark and "THIS IS NOT AN OFFICIAL RECEIPT", and uses the
+   * copy receipt label (CS/CC, §4.3) on the receipt counter.
+   */
+  copy?: boolean;
 }
 
 /** Receipt SUB TOTAL / VAT / TOTAL, summed from the per-rate buckets so they always agree with the tax table. */
@@ -91,6 +97,11 @@ export function formatCuInvoiceNo(
   receiptNumber: number | string | null,
 ): string {
   return `${cuId}/${receiptNumber ?? '-'}`;
+}
+
+/** §4.3 receipt label for a COPY of a receipt: NS -> CS, NC -> CC. */
+export function copyReceiptLabel(receiptLabel: string): string {
+  return receiptLabel.endsWith('C') ? 'CC' : 'CS';
 }
 
 export function dashEvery4(s: string): string {
@@ -160,6 +171,17 @@ export async function generateEtimsReceiptPdf(
     const midX = 230;
     const rightX = 400;
     const pageRight = 555;
+    const isCopy = data.copy === true;
+
+    // §11: COPY as a watermark. Drawn first so all receipt content prints over it.
+    if (isCopy) {
+      doc.save();
+      doc.rotate(-35, { origin: [297, 421] });
+      doc.font('Helvetica-Bold').fontSize(150).fillColor('#000').fillOpacity(0.07);
+      doc.text('COPY', 0, 350, { width: 595, align: 'center', lineBreak: false });
+      doc.restore();
+      doc.fillOpacity(1).fillColor('#000').font('Helvetica');
+    }
 
     // --- Header: KRA logo placeholder, trade name/address/PIN, title, QR top-right ---
     // No official KRA logo asset is bundled -- see TIS_TEMPLATE_CONFORMANCE_PLAN.md
@@ -203,6 +225,17 @@ export async function generateEtimsReceiptPdf(
     doc.moveDown(0.5);
     doc.moveTo(leftX, doc.y).lineTo(pageRight, doc.y).strokeColor('#ccc').stroke();
     doc.moveDown(0.6);
+
+    // §11: COPY designation below the receipt header and above the item section,
+    // at least twice the amount text size (amounts print at 9pt).
+    if (isCopy) {
+      doc.font('Helvetica-Bold').fontSize(22).text('COPY', leftX, doc.y, {
+        width: pageRight - leftX,
+        align: 'center',
+      });
+      doc.font('Helvetica').fontSize(9);
+      doc.moveDown(0.4);
+    }
 
     // --- Credit note: original receipt reference + mandatory approval statement (page 10) ---
     if (isCreditNote) {
@@ -303,6 +336,18 @@ export async function generateEtimsReceiptPdf(
     doc.font('Helvetica');
     doc.moveDown(0.6);
 
+    // §11: below the totals, at least twice the amount text size.
+    if (isCopy) {
+      doc.font('Helvetica-Bold').fontSize(20).text(
+        'THIS IS NOT AN OFFICIAL RECEIPT',
+        leftX,
+        doc.y,
+        { width: pageRight - leftX, align: 'center' },
+      );
+      doc.font('Helvetica').fontSize(9);
+      doc.moveDown(0.6);
+    }
+
     if (data.paymentTypeDescription) {
       doc.font('Helvetica-Bold').fontSize(9);
       doc.text(data.paymentTypeDescription, leftX, doc.y, { width: 200, continued: true });
@@ -356,7 +401,8 @@ export async function generateEtimsReceiptPdf(
     // --- SCU INFORMATION block (TIS §6.23) ---
     const scuDateTime = formatScuDateTime(data.sdcDateTime);
     const cuId = connection?.sdcId ?? connection?.deviceId ?? '-';
-    const receiptLabel = data.receiptLabel ?? (isCreditNote ? 'NC' : 'NS');
+    const issuedLabel = data.receiptLabel ?? (isCreditNote ? 'NC' : 'NS');
+    const receiptLabel = isCopy ? copyReceiptLabel(issuedLabel) : issuedLabel;
     const cuInvoiceNo = formatCuInvoiceNo(cuId, data.receiptNumber);
 
     doc.font('Helvetica-Bold').fontSize(10).text('SCU INFORMATION', leftX, doc.y);

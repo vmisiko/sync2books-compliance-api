@@ -551,7 +551,10 @@ export class SalesService {
    * OSCU response. Returns null if the document hasn't reached ACCEPTED yet
    * (nothing to show — this is the source of truth for "has been synced").
    */
-  async getEtimsReceiptPdf(documentId: string): Promise<Buffer | null> {
+  async getEtimsReceiptPdf(
+    documentId: string,
+    options: { copy?: boolean } = {},
+  ): Promise<Buffer | null> {
     const { document } = await this.getDocument(documentId);
     if (document.complianceStatus !== ComplianceStatus.ACCEPTED) {
       return null;
@@ -610,6 +613,7 @@ export class SalesService {
       supplierName: tenant?.displayName ?? null,
       paymentTypeDescription: paymentTypeDescription(document.paymentTypeCode),
       taxBuckets,
+      copy: options.copy === true,
     });
   }
 
