@@ -16,7 +16,25 @@ export interface RegisterItemInput {
   externalId?: string | null;
   name: string;
   sku?: string | null;
-  taxCategory: TaxCategory;
+  /**
+   * Asserted internal tax category -- it overrides whatever the existing row
+   * has, so only pass it when the caller actually knows: a human's explicit
+   * taxTyCd pick in the dashboard, or an ERP tax code that name-matched a
+   * category confidently. A pull with no usable tax signal passes
+   * `defaultTaxCategory` below instead.
+   */
+  taxCategory?: TaxCategory;
+  /**
+   * Weak default for taxCategory, used ONLY when the item has no category
+   * from any stronger source -- not from `taxCategory` above, and not
+   * already on the existing row. A pull passes TaxCategory.OTHER here for an
+   * item whose ERP tax code matched nothing, so a brand-new item still lands
+   * with a resolvable category, while an existing item keeps the one it has
+   * instead of every routine re-pull resetting a human's tax pick back to
+   * OTHER (-> taxTyCd 'D'). Same asserted-vs-default split, and for the same
+   * reason, as productTypeCode/defaultProductTypeCode below.
+   */
+  defaultTaxCategory?: TaxCategory;
   classificationCode?: string;
   /** This item's own KRA quantity unit code — resolved per item, no category fallback. */
   unitCode?: string;
@@ -116,6 +134,14 @@ export async function registerItem(
     };
   }
 
+  // Same existing-preferring precedence as productTypeCode below -- see
+  // RegisterItemInput.defaultTaxCategory.
+  const taxCategory =
+    input.taxCategory ??
+    existing?.taxCategory ??
+    input.defaultTaxCategory ??
+    TaxCategory.OTHER;
+
   const resolution = await classificationResolver.resolveClassification({
     merchantId: input.merchantId,
     classificationCode: input.classificationCode,
@@ -123,7 +149,7 @@ export async function registerItem(
     packagingUnitCode: input.packagingUnitCode,
     taxTyCd: input.taxTyCd,
     productTypeCode: input.productTypeCode,
-    internalTaxCategory: input.taxCategory,
+    internalTaxCategory: taxCategory,
   });
 
   // Unlike taxTyCd below, these four are allowed to come back unresolved
@@ -184,7 +210,7 @@ export async function registerItem(
     const changed =
       input.name !== existing.name ||
       nextSku !== existing.sku ||
-      input.taxCategory !== existing.taxCategory ||
+      taxCategory !== existing.taxCategory ||
       classificationCode !== existing.classificationCode ||
       unitCode !== existing.unitCode ||
       packagingUnitCode !== existing.packagingUnitCode ||
@@ -235,7 +261,7 @@ export async function registerItem(
       ...existing,
       name: input.name,
       sku: nextSku,
-      taxCategory: input.taxCategory,
+      taxCategory,
       classificationCode,
       classificationMethod: resolution.method,
       needsClassificationReview: computeNeedsClassificationReview(resolution.method),
@@ -281,7 +307,7 @@ export async function registerItem(
     externalId: input.externalId ?? null,
     name: input.name,
     sku: input.sku ?? null,
-    taxCategory: input.taxCategory,
+    taxCategory,
     classificationCode,
     classificationMethod: resolution.method,
     needsClassificationReview: computeNeedsClassificationReview(resolution.method),

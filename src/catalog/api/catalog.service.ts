@@ -88,7 +88,10 @@ export class CatalogService {
     externalId?: string | null;
     name: string;
     sku?: string | null;
-    taxCategory: TaxCategory;
+    /** See RegisterItemInput.taxCategory -- asserted; overrides the existing row. */
+    taxCategory?: TaxCategory;
+    /** See RegisterItemInput.defaultTaxCategory -- only applied when nothing stronger set one. */
+    defaultTaxCategory?: TaxCategory;
     classificationCode?: string;
     unitCode?: string;
     internalUnit?: string;

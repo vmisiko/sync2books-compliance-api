@@ -128,8 +128,15 @@ function deriveStockTracked(
 export function mapMainApiItemToRegisterItemInput(params: {
   merchantId: string;
   item: MainApiPulledItem;
-  /** Resolved by the caller via MappingSuggestionService.suggestTaxCodeMapping — see DashboardItemsApplicationService.pullItems. */
-  taxCategory: TaxCategory;
+  /**
+   * Resolved by the caller via MappingSuggestionService.suggestTaxCodeMapping
+   * — see DashboardItemsApplicationService.pullItems. Undefined when the
+   * ERP's own tax code matched nothing (or the item carries none at all), in
+   * which case it's passed as a weak default instead of asserted, so the pull
+   * doesn't reset a tax a human set in Item Sync — see
+   * RegisterItemInput.defaultTaxCategory.
+   */
+  taxCategory?: TaxCategory;
 }): RegisterItemInput {
   const { merchantId, item } = params;
 
@@ -149,7 +156,11 @@ export function mapMainApiItemToRegisterItemInput(params: {
     // from any other source (no Service signal above, nothing a human already
     // set) -- see RegisterItemInput.defaultProductTypeCode.
     defaultProductTypeCode: '2',
+    // Asserted only when the ERP's tax code actually matched a category;
+    // otherwise OTHER goes in as a default, which a brand-new item takes and
+    // an existing one ignores in favour of the category it already has.
     taxCategory: params.taxCategory,
+    defaultTaxCategory: TaxCategory.OTHER,
     // classificationCode/unitCode/packagingUnitCode are deliberately omitted
     // here -- no ERP tells us these, and register-item.usecase.ts's
     // existing-preferring fallback means omitting them is safe for both a

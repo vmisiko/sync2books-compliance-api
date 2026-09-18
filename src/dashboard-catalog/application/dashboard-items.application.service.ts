@@ -23,8 +23,7 @@ import {
   normalizeRawItemType,
 } from '../../catalog/infrastructure/main-api/standardized-item.mapper';
 import { MappingSuggestionService } from '../../regulatory/oscu/application/mapping-suggestion.service';
-import { TAX_CATEGORY_BY_TAX_TY_CD } from '../../regulatory/oscu/mapping/oscu-tax-rates';
-import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
+import { taxCategoryForCode } from '../../regulatory/oscu/mapping/oscu-tax-rates';
 import type { CreateItemDto } from '../presentation/dto/create-item.dto';
 
 const SOURCE_DISPLAY_NAME: Record<SupportedIntegrationKey, string> = {
@@ -211,10 +210,16 @@ export class DashboardItemsApplicationService {
           // rather than erased. This replaces a removed
           // classification_mappings-backed lookup that used to run here --
           // see ClassificationMethod's doc comment for why it was removed.
-          const taxCategory =
-            this.suggestions.suggestTaxCodeMapping(
-              mainApiItem.defaultTaxCodeRef?.name ?? '',
-            )?.internalTaxCategory ?? TaxCategory.OTHER;
+          // Deliberately left undefined when the ERP's tax code matched
+          // nothing (or the item carries none): an unmatched name is the
+          // pull admitting it does not know this item's tax, and asserting
+          // OTHER on the strength of that used to reset the item to taxTyCd
+          // 'D' on every re-pull -- including one a human had just set to
+          // 'E' in Item Sync. The mapper passes OTHER as a default instead,
+          // so a brand-new item still lands with a resolvable category.
+          const taxCategory = this.suggestions.suggestTaxCodeMapping(
+            mainApiItem.defaultTaxCodeRef?.name ?? '',
+          )?.internalTaxCategory;
           const input = {
             ...mapMainApiItemToRegisterItemInput({
               merchantId,
@@ -332,8 +337,7 @@ export class DashboardItemsApplicationService {
       throw new BadRequestException('taxTyCd is required');
     }
 
-    const taxCategory =
-      TAX_CATEGORY_BY_TAX_TY_CD[dto.taxTyCd] ?? TaxCategory.OTHER;
+    const taxCategory = taxCategoryForCode(dto.taxTyCd);
 
     const result = await this.catalog.registerItem({
       merchantId,
@@ -441,16 +445,25 @@ export class DashboardItemsApplicationService {
    * was created manually:
    * - ERP-sourced: re-runs through `registerItem`'s upsert (same path a pull
    *   would take), so a future pull still finds and updates the same row.
-   *   name/tax stay fixed at the source (the next pull would just overwrite
-   *   anything else edited here) -- but productTypeCode IS editable here,
-   *   deliberately: an ERP pull can never tell KRA's Raw Material from
+   *   name/sku/price/country stay fixed at the source (the next pull would
+   *   just overwrite anything edited here) -- but productTypeCode and
+   *   taxTyCd ARE editable here, deliberately, because neither is an ERP
+   *   field at all: an ERP pull can never tell KRA's Raw Material from
    *   Finished Product, so every ERP-sourced good lands with productTypeCode
-   *   null (needsProductType true) until a human picks one, exactly like a
-   *   manual item with nothing selected -- this is that pick. Must pass
-   *   `sourceSystem` through -- `registerItem`'s existing-item lookup is
-   *   scoped by it (two ERPs can share the same externalId for this
-   *   merchant), so omitting it would silently create a duplicate row
-   *   instead of updating the intended one.
+   *   null (needsProductType true) until a human picks one; and no ERP
+   *   stores a KRA taxTyCd -- a pull only ever *guesses* a tax category by
+   *   name-matching the ERP's own tax code (MappingSuggestionService), so an
+   *   explicit pick here has to beat that guess. taxTyCd used to be dropped
+   *   silently on this branch: the PATCH returned 200 with the item
+   *   unchanged, and the dashboard's Tax Code field looked like it saved
+   *   when it had not. The matching internalTaxCategory is written alongside
+   *   it, since that -- not taxTyCd -- is what a later pull re-resolves the
+   *   code from (see registerItem/resolveTaxTyCd); writing only taxTyCd
+   *   would have it revert on the next pull. Must pass `sourceSystem`
+   *   through -- `registerItem`'s existing-item lookup is scoped by it (two
+   *   ERPs can share the same externalId for this merchant), so omitting it
+   *   would silently create a duplicate row instead of updating the
+   *   intended one.
    * - Manual entry (no externalId): the full field set is editable, but only
    *   before the item is REGISTERED -- see updateManualItem's doc comment.
    *   `registerItem`'s upsert has nothing to match a manual item against
@@ -499,12 +512,16 @@ export class DashboardItemsApplicationService {
       throw new NotFoundException(`Item ${itemId} not found`);
     }
 
-    if (!existing.externalId) {
-      const taxCategory =
-        overrides.taxTyCd !== undefined
-          ? (TAX_CATEGORY_BY_TAX_TY_CD[overrides.taxTyCd] ?? TaxCategory.OTHER)
-          : undefined;
+    // taxTyCd -> internalTaxCategory, for both branches below. The catalog
+    // stores both, and they must not disagree: taxTyCd is what reaches KRA,
+    // while internalTaxCategory is what a later pull re-resolves taxTyCd
+    // from.
+    const taxCategory =
+      overrides.taxTyCd !== undefined
+        ? taxCategoryForCode(overrides.taxTyCd)
+        : undefined;
 
+    if (!existing.externalId) {
       return this.catalog.updateManualItem({
         itemId,
         merchantId,
@@ -527,7 +544,14 @@ export class DashboardItemsApplicationService {
       sourceSystem: existing.sourceSystem,
       name: existing.name,
       sku: existing.sku,
-      taxCategory: existing.taxCategory,
+      taxCategory: taxCategory ?? existing.taxCategory,
+      // Explicit, so registerItem uses this code as-is instead of
+      // re-resolving one from the category against tax_mappings. Falling
+      // back to the item's own current code (rather than omitting it)
+      // keeps an unrelated edit -- a classification fix, a bulk packaging
+      // update -- from quietly re-deriving the tax code out from under an
+      // item that already has one.
+      taxTyCd: overrides.taxTyCd ?? existing.taxTyCd,
       classificationCode:
         overrides.classificationCode ?? existing.classificationCode,
       unitCode: overrides.unitCode ?? existing.unitCode,
