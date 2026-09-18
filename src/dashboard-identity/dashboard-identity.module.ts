@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { DASHBOARD_USER_REPO } from '../shared/tokens';
 import { ComplianceOrganizationModule } from '../compliance-organization/compliance-organization.module';
 import { DashboardOrganizationModule } from '../dashboard-organization/dashboard-organization.module';
+import { MailerModule } from '../mailer/mailer.module';
 import { DashboardAuthApplicationService } from './application/dashboard-auth.application.service';
 import { dashboardJwtSecret } from './infrastructure/dashboard-jwt.secret';
 import { DashboardJwtAuthGuard } from './infrastructure/guards/dashboard-jwt-auth.guard';
@@ -25,6 +26,7 @@ import { DashboardAuthController } from './presentation/dashboard-auth.controlle
   imports: [
     ComplianceOrganizationModule,
     DashboardOrganizationModule,
+    MailerModule,
     PassportModule,
     JwtModule.registerAsync({
       useFactory: () => ({

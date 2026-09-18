@@ -1,9 +1,11 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -19,6 +21,7 @@ import { DashboardOrganizationApplicationService } from '../../dashboard-organiz
 import type { DashboardOrganization } from '../../dashboard-organization/domain/entities/dashboard-organization.entity';
 import type { OAuthProfile } from '../infrastructure/oauth/oauth-profile.type';
 import { dashboardAppUrl } from '../infrastructure/oauth/dashboard-app-url';
+import { MailerService } from '../../mailer/mailer.service';
 
 const BCRYPT_ROUNDS = 10;
 const ACCESS_TOKEN_TTL_SECONDS = 3600;
@@ -39,6 +42,13 @@ const INVITE_TICKET_TYPE = 'member_invite';
  */
 const PASSWORD_RESET_TICKET_TTL = '24h';
 const PASSWORD_RESET_TICKET_TYPE = 'password_reset';
+/**
+ * Self-service ("Forgot password?") links travel by email to an address anyone
+ * can type in, so they live much shorter than the admin-relayed link above.
+ */
+const SELF_SERVICE_RESET_TICKET_TTL = '1h';
+/** One reset email per address per minute -- stops the endpoint being used to flood an inbox. */
+const SELF_SERVICE_RESET_COOLDOWN_MS = 60_000;
 
 export type DashboardAuthTokens = {
   accessToken: string;
@@ -137,15 +147,44 @@ type PasswordResetTicketPayload = {
   userId: string;
   email: string;
   organizationId: string;
+  /**
+   * Fingerprint of the password hash the link was issued against. Once the
+   * password changes (this link used, another link used, or any other reset)
+   * it no longer matches, so every earlier link stops working -- single use
+   * without storing tokens.
+   */
+  pwv: string;
 };
+
+/** Short, non-reversible fingerprint of the current password hash (see PasswordResetTicketPayload.pwv). */
+function passwordVersion(passwordHash: string | null): string {
+  return createHash('sha256')
+    .update(passwordHash ?? 'no-password')
+    .digest('hex')
+    .slice(0, 16);
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 @Injectable()
 export class DashboardAuthApplicationService {
+  private readonly logger = new Logger(DashboardAuthApplicationService.name);
+  /** email -> last self-service reset email time. In-memory: per-instance, resets on restart. */
+  private readonly lastResetRequestAt = new Map<string, number>();
+
   constructor(
     @Inject(DASHBOARD_USER_REPO)
     private readonly users: IDashboardUserRepository,
     private readonly jwt: JwtService,
     private readonly organizations: DashboardOrganizationApplicationService,
+    @Optional() private readonly mailer?: MailerService,
   ) {}
 
   async login(email: string, password: string): Promise<DashboardAuthResult> {
@@ -517,15 +556,74 @@ export class DashboardAuthApplicationService {
       );
     }
 
+    return this.issuePasswordReset(member, PASSWORD_RESET_TICKET_TTL);
+  }
+
+  /**
+   * Self-service "Forgot password?" -- emails a reset link to the address if it
+   * belongs to an active account. Always resolves the same way whether or not
+   * the account exists, so the endpoint can't be used to discover who has one.
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    const normalizedEmail = email?.trim().toLowerCase();
+    if (!normalizedEmail) return;
+
+    const now = Date.now();
+    const last = this.lastResetRequestAt.get(normalizedEmail);
+    if (last !== undefined && now - last < SELF_SERVICE_RESET_COOLDOWN_MS) {
+      return;
+    }
+    this.lastResetRequestAt.set(normalizedEmail, now);
+
+    const member = await this.users.findByEmail(normalizedEmail);
+    if (!member || member.status === 'deactivated') return;
+
+    const reset = this.issuePasswordReset(member, SELF_SERVICE_RESET_TICKET_TTL);
+    const name = escapeHtml(member.displayName || member.email);
+    const html = `
+      <p>Hi ${name},</p>
+      <p>We received a request to reset the password for your Sync2Books Compliance account (${escapeHtml(member.email)}).</p>
+      <p><a href="${reset.resetUrl}">Set a new password</a></p>
+      <p>This link expires in 1 hour and can only be used once. If you didn't ask for this, you can ignore this email -- your password won't change.</p>
+    `;
+
+    try {
+      const result = this.mailer
+        ? await this.mailer.send({
+            to: member.email,
+            subject: 'Reset your Sync2Books Compliance password',
+            html,
+          })
+        : ({ sent: false, reason: 'mailer not available' } as const);
+
+      if (!result.sent && process.env.NODE_ENV !== 'production') {
+        // Local dev without SMTP: surface the link so the flow is still testable.
+        // Never in production -- a reset link in logs is a credential.
+        this.logger.warn(
+          `Password reset email not sent (${result.reason}); dev-only link for ${member.email}: ${reset.resetUrl}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to send password reset email to ${member.email}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private issuePasswordReset(
+    member: DashboardUser,
+    expiresIn:
+      | typeof PASSWORD_RESET_TICKET_TTL
+      | typeof SELF_SERVICE_RESET_TICKET_TTL,
+  ): CreatePasswordResetResult {
     const payload: PasswordResetTicketPayload = {
       type: PASSWORD_RESET_TICKET_TYPE,
       userId: member.id,
       email: member.email,
       organizationId: member.organizationId,
+      pwv: passwordVersion(member.passwordHash),
     };
-    const resetToken = this.jwt.sign(payload, {
-      expiresIn: PASSWORD_RESET_TICKET_TTL,
-    });
+    const resetToken = this.jwt.sign(payload, { expiresIn });
 
     return {
       resetToken,
@@ -582,7 +680,11 @@ export class DashboardAuthApplicationService {
     payload: PasswordResetTicketPayload,
   ): Promise<DashboardUser> {
     const member = await this.users.findById(payload.userId);
-    if (!member || member.email !== payload.email) {
+    if (
+      !member ||
+      member.email !== payload.email ||
+      payload.pwv !== passwordVersion(member.passwordHash)
+    ) {
       throw new NotFoundException(
         'This reset link is no longer valid -- ask for a new one',
       );
