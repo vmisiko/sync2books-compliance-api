@@ -14,10 +14,11 @@ import { TransferStockDto } from './dto/transfer-stock.dto';
 import { ReconcileStockDto } from './dto/reconcile-stock.dto';
 import { RepairKraLedgerDto } from './dto/repair-kra-ledger.dto';
 import { ComplianceServiceAuthGuard } from '../../integration/compliance-service-auth.guard';
+import { AssertedMerchantGuard } from '../../integration/asserted-merchant.guard';
 
 @Controller('api/stock')
 @ApiTags('Stock')
-@UseGuards(ComplianceServiceAuthGuard)
+@UseGuards(ComplianceServiceAuthGuard, AssertedMerchantGuard)
 export class StockController {
   constructor(private readonly inventoryService: InventoryService) {}
 

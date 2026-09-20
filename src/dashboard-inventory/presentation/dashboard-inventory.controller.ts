@@ -18,6 +18,7 @@ import {
 } from '@nestjs/swagger';
 import { DashboardInventoryApplicationService } from '../application/dashboard-inventory.application.service';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
+import { MerchantOwnershipGuard } from '../../dashboard-identity/infrastructure/guards/merchant-ownership.guard';
 import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guards/active-tenant.guard';
 import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { DashboardAdjustStockDto } from './dto/dashboard-adjust-stock.dto';
@@ -26,7 +27,7 @@ import { DashboardRepairKraLedgerDto } from './dto/dashboard-repair-kra-ledger.d
 
 @Controller('dashboard-api/inventory')
 @ApiTags('Dashboard inventory (Mode B)')
-@UseGuards(DashboardJwtAuthGuard, ActiveTenantGuard)
+@UseGuards(DashboardJwtAuthGuard, ActiveTenantGuard, MerchantOwnershipGuard)
 @ApiBearerAuth()
 export class DashboardInventoryController {
   constructor(

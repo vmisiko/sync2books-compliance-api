@@ -50,8 +50,10 @@ won't get it. But:
 ## 2. `COMPLIANCE_SERVICE_TOKEN` must be a real generated secret
 
 `ComplianceServiceAuthGuard` (guards `CatalogController` and other
-service-to-service routes) **fails open** — if `COMPLIANCE_SERVICE_TOKEN` is
-unset, every request is allowed through with no auth check at all. If it's
+service-to-service routes) **refuses the request when `COMPLIANCE_SERVICE_TOKEN`
+is unset and `NODE_ENV=production`** (2026-09-20). Outside production an unset
+token still allows the call, with a startup warning — so a non-production shared
+environment is still open unless you set it. If it's
 set to something guessable (a literal string like `caprover-service-token`
 rather than a generated random value), it's barely better than unset. Set it
 to a real random secret in whatever secret store backs this deploy (CapRover

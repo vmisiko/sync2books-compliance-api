@@ -10,6 +10,8 @@ import type { Request } from 'express';
 import { PlatformOscuCallbackService } from '../integration/platform-outbound/platform-oscu-callback.service';
 import { Sync2BooksCorrelationPersistenceService } from '../integration/platform-outbound/sync2books-correlation-persistence.service';
 import { InvoiceReceiptPushbackService } from '../integration/platform-outbound/invoice-receipt-pushback.service';
+import { MerchantOwnershipGuard } from '../dashboard-identity/infrastructure/guards/merchant-ownership.guard';
+import { AssertedMerchantGuard } from '../integration/asserted-merchant.guard';
 import { MailerService } from '../mailer/mailer.service';
 
 describe('Express credit note controllers', () => {
@@ -117,7 +119,14 @@ describe('Express credit note controllers', () => {
           },
         },
       ],
-    }).compile();
+    })
+      // These specs exercise controller behaviour, not authorization; the
+      // guards' own specs cover the tenant checks.
+      .overrideGuard(MerchantOwnershipGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(AssertedMerchantGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     apiController = module.get(ApiSalesController);
     dashboardController = module.get(DashboardSalesController);

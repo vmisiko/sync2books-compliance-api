@@ -26,13 +26,14 @@ import { SyncCodeListDto } from './dto/sync-code-list.dto';
 import { SyncReferenceDataNowDto } from './dto/sync-reference-data-now.dto';
 import { ResyncOscuSequenceDto } from './dto/resync-oscu-sequence.dto';
 import { ComplianceServiceAuthGuard } from '../../integration/compliance-service-auth.guard';
+import { AssertedMerchantGuard } from '../../integration/asserted-merchant.guard';
 import { PlatformOscuCallbackService } from '../../integration/platform-outbound/platform-oscu-callback.service';
 import { Sync2BooksCorrelationPersistenceService } from '../../integration/platform-outbound/sync2books-correlation-persistence.service';
 import { parseSync2BooksCorrelation } from '../../integration/platform-outbound/sync2books-request-headers.util';
 
 @Controller('catalog')
 @ApiTags('Catalog')
-@UseGuards(ComplianceServiceAuthGuard)
+@UseGuards(ComplianceServiceAuthGuard, AssertedMerchantGuard)
 export class CatalogController {
   constructor(
     private readonly catalogService: CatalogService,

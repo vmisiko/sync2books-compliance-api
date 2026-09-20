@@ -7,6 +7,7 @@ import {
   OscuWriteBodyDto,
 } from './dto/oscu-lookup-query.dto';
 import { ComplianceServiceAuthGuard } from '../../../integration/compliance-service-auth.guard';
+import { AssertedMerchantGuard } from '../../../integration/asserted-merchant.guard';
 
 /**
  * Thin pass-through routes over `IEtimsAdapter` for the raw OSCU/eTIMS operations that have
@@ -15,7 +16,7 @@ import { ComplianceServiceAuthGuard } from '../../../integration/compliance-serv
  */
 @Controller('oscu')
 @ApiTags('OSCU Operations')
-@UseGuards(ComplianceServiceAuthGuard)
+@UseGuards(ComplianceServiceAuthGuard, AssertedMerchantGuard)
 export class OscuOperationsController {
   constructor(private readonly oscu: OscuOperationsService) {}
 

@@ -1,4 +1,10 @@
-import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
 import { recordMovement } from '../application/use-cases/record-movement.usecase';
@@ -186,6 +192,29 @@ export class InventoryService {
    * (unknown item, unprovisioned tenant, no matching branch) passes through
    * untouched rather than failing the write.
    */
+  /**
+   * A transfer names two items and two branches and carries no merchant, so
+   * without this check one call could move stock out of one taxpayer's item and
+   * into another's -- and each side then reports to a different KRA device.
+   * Unresolvable ids pass through (same tolerance as toCanonicalBranchId): the
+   * check exists to catch crossing tenants, not to gate unknown items.
+   */
+  private async assertSameMerchant(
+    itemId: string,
+    receivingItemId: string,
+  ): Promise<void> {
+    if (!this.itemRepo || itemId === receivingItemId) return;
+    const items = await this.itemRepo.findByIds([itemId, receivingItemId]);
+    const from = items.find((i) => i.id === itemId);
+    const into = items.find((i) => i.id === receivingItemId);
+    if (!from || !into) return;
+    if (from.merchantId !== into.merchantId) {
+      throw new BadRequestException(
+        'Stock transfer must stay within one business: the two items belong to different merchants',
+      );
+    }
+  }
+
   private async toCanonicalBranchId(
     itemId: string,
     branchId: string,
@@ -1322,6 +1351,8 @@ export class InventoryService {
     referenceId?: string;
     unitPrice?: number;
   }) {
+    await this.assertSameMerchant(params.itemId, params.receivingItemId);
+
     const refId = params.referenceId ?? `xfer-${Date.now()}`;
     const out = await this.recordMovement({
       itemId: params.itemId,

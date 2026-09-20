@@ -32,6 +32,7 @@ import { CreateExpressCreditNoteDto } from './dto/create-express-credit-note.dto
 import { ResyncOscuSequenceDto } from './dto/resync-oscu-sequence.dto';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import { ComplianceServiceAuthGuard } from '../../integration/compliance-service-auth.guard';
+import { AssertedMerchantGuard } from '../../integration/asserted-merchant.guard';
 import { PlatformOscuCallbackService } from '../../integration/platform-outbound/platform-oscu-callback.service';
 import { Sync2BooksCorrelationPersistenceService } from '../../integration/platform-outbound/sync2books-correlation-persistence.service';
 import { parseSync2BooksCorrelation } from '../../integration/platform-outbound/sync2books-request-headers.util';
@@ -39,7 +40,7 @@ import { ItemNotReadyForEtimsError } from '../domain/errors/item-not-ready-for-e
 
 @Controller('api/sales')
 @ApiTags('API Sales')
-@UseGuards(ComplianceServiceAuthGuard)
+@UseGuards(ComplianceServiceAuthGuard, AssertedMerchantGuard)
 export class ApiSalesController {
   constructor(
     private readonly salesService: SalesService,

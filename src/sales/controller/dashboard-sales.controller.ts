@@ -33,6 +33,7 @@ import { CreateExpressCreditNoteDto } from './dto/create-express-credit-note.dto
 import { RetrySalesDto } from './dto/retry-sales.dto';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
+import { MerchantOwnershipGuard } from '../../dashboard-identity/infrastructure/guards/merchant-ownership.guard';
 import { MailerService } from '../../mailer/mailer.service';
 import { EmailReceiptDto } from './dto/email-receipt.dto';
 import { renderReceiptEmailHtml } from '../application/receipt/receipt-email.renderer';
@@ -47,7 +48,7 @@ import { InvoiceReceiptPushbackService } from '../../integration/platform-outbou
  */
 @Controller('dashboard-api/sales')
 @ApiTags('Dashboard Sales')
-@UseGuards(DashboardJwtAuthGuard)
+@UseGuards(DashboardJwtAuthGuard, MerchantOwnershipGuard)
 @ApiBearerAuth()
 export class DashboardSalesController {
   constructor(

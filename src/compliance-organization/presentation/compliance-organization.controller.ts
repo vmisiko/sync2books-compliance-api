@@ -14,6 +14,7 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 import { ComplianceOrganizationApplicationService } from '../application/compliance-organization.application.service';
 import { ComplianceServiceAuthGuard } from '../../integration/compliance-service-auth.guard';
+import { AssertedMerchantGuard } from '../../integration/asserted-merchant.guard';
 import { UpsertBranchDto } from './dto/upsert-branch.dto';
 import { UpsertEtimsConnectionDto } from './dto/upsert-etims-connection.dto';
 import { TenantUpsertResponseDto } from './dto/tenant-upsert-response.dto';
@@ -21,7 +22,7 @@ import { UpsertTenantDto } from './dto/upsert-tenant.dto';
 
 @Controller('compliance-organization')
 @ApiTags('Compliance organization')
-@UseGuards(ComplianceServiceAuthGuard)
+@UseGuards(ComplianceServiceAuthGuard, AssertedMerchantGuard)
 export class ComplianceOrganizationController {
   constructor(
     private readonly organization: ComplianceOrganizationApplicationService,

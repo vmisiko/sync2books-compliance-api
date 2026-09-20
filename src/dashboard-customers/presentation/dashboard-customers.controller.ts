@@ -19,6 +19,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
+import { MerchantOwnershipGuard } from '../../dashboard-identity/infrastructure/guards/merchant-ownership.guard';
 import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guards/active-tenant.guard';
 import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { DashboardCustomersApplicationService } from '../application/dashboard-customers.application.service';
@@ -36,7 +37,7 @@ import {
  */
 @Controller('dashboard-api/customers')
 @ApiTags('Dashboard Customers')
-@UseGuards(DashboardJwtAuthGuard)
+@UseGuards(DashboardJwtAuthGuard, MerchantOwnershipGuard)
 @ApiBearerAuth()
 export class DashboardCustomersController {
   constructor(private readonly customers: DashboardCustomersApplicationService) {}
