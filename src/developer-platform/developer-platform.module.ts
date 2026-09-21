@@ -18,7 +18,15 @@ import { ComplianceApplicationTypeOrmRepository } from './infrastructure/persist
 import { createRateLimitStore } from './infrastructure/rate-limit/rate-limit-store.factory';
 import { DeveloperPlatformController } from './presentation/developer-platform.controller';
 import { V1BusinessesController } from './presentation/v1/v1-businesses.controller';
+import { V1ItemsController } from './presentation/v1/v1-items.controller';
+import { V1LookupsController } from './presentation/v1/v1-lookups.controller';
 import { V1MeController } from './presentation/v1/v1-me.controller';
+import { V1SalesController } from './presentation/v1/v1-sales.controller';
+import { V1StockController } from './presentation/v1/v1-stock.controller';
+import { V1ScopeService } from './application/v1-scope.service';
+import { CatalogModule } from '../catalog/catalog.module';
+import { InventoryModule } from '../inventory/inventory.module';
+import { SalesModule } from '../sales/sales.module';
 
 /**
  * The self-serve API platform: a merchant organisation's own integration
@@ -37,11 +45,18 @@ import { V1MeController } from './presentation/v1/v1-me.controller';
     ]),
     ComplianceOrganizationModule,
     DashboardIdentityModule,
+    CatalogModule,
+    InventoryModule,
+    SalesModule,
   ],
   controllers: [
     DeveloperPlatformController,
     V1MeController,
     V1BusinessesController,
+    V1ItemsController,
+    V1StockController,
+    V1SalesController,
+    V1LookupsController,
   ],
   providers: [
     ComplianceApplicationTypeOrmRepository,
@@ -56,6 +71,7 @@ import { V1MeController } from './presentation/v1/v1-me.controller';
     },
     { provide: RATE_LIMIT_STORE, useFactory: createRateLimitStore },
     DeveloperPlatformApplicationService,
+    V1ScopeService,
     ComplianceApiKeyGuard,
     TenantScopeGuard,
     ApiRateLimitGuard,

@@ -121,6 +121,22 @@ export class SalesService {
   }
 
   /**
+   * The sale a merchant already issued under a trader invoice number, if any.
+   * Backs the public API's duplicate check: a second document under the same
+   * number but a different idempotency key is a caller mistake worth a 409,
+   * not a second invoice filed with KRA.
+   */
+  async findSaleByTraderNumber(
+    merchantId: string,
+    documentNumber: string,
+  ): Promise<ComplianceDocument | null> {
+    return this.documentRepo.findSaleByDocumentNumber(
+      merchantId,
+      documentNumber,
+    );
+  }
+
+  /**
    * Looks up the document created from a given Main-API `Invoice` id, scoped
    * to a merchant. Backs the dashboard's receipt-attachment-status/
    * retry-receipt-attachment proxy routes (see `DashboardInvoicesApplicationService`).

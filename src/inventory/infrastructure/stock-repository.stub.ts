@@ -59,6 +59,13 @@ export class StockRepositoryStub implements IStockRepository {
       Array.from(stockByKey.values()).filter((s) => s.itemId === itemId),
     );
   }
+
+  listByItems(itemIds: string[]): Promise<InventoryStock[]> {
+    const wanted = new Set(itemIds);
+    return Promise.resolve(
+      Array.from(stockByKey.values()).filter((s) => wanted.has(s.itemId)),
+    );
+  }
 }
 
 export class StockMovementRepositoryStub implements IStockMovementRepository {
@@ -81,10 +88,15 @@ export class StockMovementRepositoryStub implements IStockMovementRepository {
 
   list(params: {
     itemId?: string;
+    itemIds?: string[];
     branchId?: string;
     limit?: number;
   }): Promise<StockMovement[]> {
     let result = movements.slice().reverse();
+    if (params.itemIds) {
+      const scope = new Set(params.itemIds);
+      result = result.filter((m) => scope.has(m.itemId));
+    }
     if (params.itemId)
       result = result.filter((m) => m.itemId === params.itemId);
     if (params.branchId)

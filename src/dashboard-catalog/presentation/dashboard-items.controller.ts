@@ -64,7 +64,8 @@ export class DashboardItemsController {
   })
   @ApiResponse({ status: 201, description: 'Created item' })
   async create(@ActiveTenant() tenantId: string, @Body() body: CreateItemDto) {
-    const item = await this.items.createItem(tenantId, body);
+    const created = await this.items.createItem(tenantId, body);
+    const [item] = await this.items.withStock(tenantId, [created]);
     return { success: true, message: 'Item created', data: { item } };
   }
 
@@ -94,7 +95,7 @@ export class DashboardItemsController {
     @Param('id') id: string,
     @Body() body: UpdateItemDto,
   ) {
-    const item = await this.items.updateItem(tenantId, id, {
+    const updated = await this.items.updateItem(tenantId, id, {
       name: body.name,
       sku: body.sku,
       classificationCode: body.classificationCode,
@@ -105,6 +106,7 @@ export class DashboardItemsController {
       taxTyCd: body.taxTyCd,
       productTypeCode: body.productTypeCode,
     });
+    const [item] = await this.items.withStock(tenantId, [updated]);
     return { success: true, message: 'Item updated', data: { item } };
   }
 
@@ -139,6 +141,13 @@ export class DashboardItemsController {
       packagingUnitCode: body.packagingUnitCode,
       productTypeCode: body.productTypeCode,
     });
-    return { success: true, message: 'Items updated', data: result };
+    return {
+      success: true,
+      message: 'Items updated',
+      data: {
+        ...result,
+        updated: await this.items.withStock(tenantId, result.updated),
+      },
+    };
   }
 }

@@ -192,3 +192,160 @@ describe('InventoryService branch-id canonicalization', () => {
     expect(result.stock.branchId).toBe('branch-y');
   });
 });
+
+/**
+ * Regression coverage for InventoryService.requireBranchInItemTenant. A
+ * dashboard whose cached branch list still belonged to another business sent
+ * that business's branch id with an item from this one: the write landed a
+ * stock row (and movements) on a branch of the wrong tenant, and the item's own
+ * tenant found no eTIMS connection for it, so nothing ever reached KRA.
+ */
+describe('InventoryService strict branch check (adjust / transfer / repair)', () => {
+  const MERCHANT = 'merchant-1';
+  const OWN_BRANCH = 'branch-own';
+  const FOREIGN_BRANCH = 'branch-of-another-business';
+
+  function makeItem(id: string): ComplianceItem {
+    return {
+      id,
+      merchantId: MERCHANT,
+      name: 'Widget',
+      sku: 'SKU-1',
+      taxCategory: TaxCategory.VAT_STANDARD,
+      classificationCode: '14111400',
+      unitCode: 'U',
+      packagingUnitCode: 'NT',
+      taxTyCd: 'B',
+      productTypeCode: '2',
+      etimsItemCode: null,
+      version: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as ComplianceItem;
+  }
+
+  // The stock repository stub keeps module-level state across tests, so each
+  // test needs an item id of its own.
+  let itemSeq = 0;
+
+  function buildService(opts: { tenantProvisioned?: boolean } = {}) {
+    const { tenantProvisioned = true } = opts;
+    const item = makeItem(`item-strict-${++itemSeq}`);
+    const itemRepo: IComplianceItemRepository = {
+      findByIds: () => Promise.resolve<ComplianceItem[]>([item]),
+    };
+    const organization = {
+      getTenantByMerchantId: async (merchantId: string) =>
+        tenantProvisioned && merchantId === MERCHANT
+          ? { id: 'tenant-1' }
+          : null,
+      // Only OWN_BRANCH (or its '00' alias) exists under tenant-1.
+      resolveCanonicalBranchId: async (tenantId: string, branchId: string) =>
+        tenantId === 'tenant-1' &&
+        (branchId === OWN_BRANCH || branchId === '00')
+          ? OWN_BRANCH
+          : null,
+      resolveCanonicalBranchIdForMerchant: async (
+        merchantId: string,
+        branchId: string,
+      ) =>
+        merchantId === MERCHANT &&
+        (branchId === OWN_BRANCH || branchId === '00')
+          ? OWN_BRANCH
+          : null,
+    };
+    const service = new (InventoryService as any)(
+      new StockRepositoryStub(),
+      new StockMovementRepositoryStub(),
+      itemRepo,
+      undefined,
+      undefined,
+      undefined,
+      organization,
+    ) as InventoryService;
+    return { service, item };
+  }
+
+  it('adjustStock refuses a branch that belongs to another business, and writes nothing', async () => {
+    const { service, item } = buildService();
+
+    await expect(
+      service.adjustStock({
+        itemId: item.id,
+        branchId: FOREIGN_BRANCH,
+        quantity: 70,
+        action: 'ADD',
+      }),
+    ).rejects.toThrow(/does not belong to the business/);
+
+    expect(
+      (await service.listStock(FOREIGN_BRANCH)).filter(
+        (s) => s.itemId === item.id,
+      ),
+    ).toHaveLength(0);
+    expect(await service.listMovements({ itemId: item.id })).toHaveLength(0);
+  });
+
+  it('adjustStock accepts the alias and writes to the canonical branch', async () => {
+    const { service, item } = buildService();
+
+    const result = await service.adjustStock({
+      itemId: item.id,
+      branchId: '00',
+      quantity: 5,
+      action: 'ADD',
+    });
+
+    expect(result.stock.branchId).toBe(OWN_BRANCH);
+    expect(result.stock.quantityOnHand).toBe(5);
+  });
+
+  it('transferStock refuses a foreign destination before debiting the source', async () => {
+    const { service, item } = buildService();
+    await service.adjustStock({
+      itemId: item.id,
+      branchId: OWN_BRANCH,
+      quantity: 10,
+      action: 'ADD',
+    });
+
+    await expect(
+      service.transferStock({
+        itemId: item.id,
+        fromBranchId: OWN_BRANCH,
+        receivingItemId: item.id,
+        toBranchId: FOREIGN_BRANCH,
+        quantity: 4,
+      }),
+    ).rejects.toThrow(/does not belong to the business/);
+
+    // Source untouched: a half-applied transfer would have left 6 here.
+    expect(
+      (await service.getStockLevel(item.id, OWN_BRANCH)).quantityOnHand,
+    ).toBe(10);
+  });
+
+  it('repairKraStockLedger refuses a foreign branch', async () => {
+    const { service, item } = buildService();
+
+    await expect(
+      service.repairKraStockLedger({
+        itemId: item.id,
+        branchId: FOREIGN_BRANCH,
+      }),
+    ).rejects.toThrow(/does not belong to the business/);
+  });
+
+  it("stays tolerant when the item's tenant is not provisioned in compliance-api", async () => {
+    const { service, item } = buildService({ tenantProvisioned: false });
+
+    const result = await service.adjustStock({
+      itemId: item.id,
+      branchId: 'whatever-branch',
+      quantity: 3,
+      action: 'ADD',
+    });
+
+    expect(result.stock.branchId).toBe('whatever-branch');
+  });
+});

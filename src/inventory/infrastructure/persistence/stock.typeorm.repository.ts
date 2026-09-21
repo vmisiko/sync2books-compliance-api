@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, FindOptionsWhere, In, Repository } from 'typeorm';
 import type { InventoryStock } from '../../domain/entities/inventory-stock.entity';
 import type { StockMovement } from '../../domain/entities/stock-movement.entity';
 import type { MovementType } from '../../domain/enums/movement-type.enum';
@@ -11,6 +11,8 @@ import type {
 import { InsufficientStockError } from '../../domain/errors/insufficient-stock.error';
 import { InventoryStockOrmEntity } from './inventory-stock.orm-entity';
 import { StockMovementOrmEntity } from './stock-movement.orm-entity';
+
+const ITEM_ID_CHUNK = 500;
 
 function stockId(itemId: string, branchId: string): string {
   return `${itemId}:${branchId}`;
@@ -158,6 +160,17 @@ export class StockTypeOrmRepository
     return rows.map(toDomainStock);
   }
 
+  async listByItems(itemIds: string[]): Promise<InventoryStock[]> {
+    // Chunked so a large catalogue stays under the driver's bound-parameter
+    // limit (sqlite in dev, mysql in prod).
+    const rows: InventoryStockOrmEntity[] = [];
+    for (let i = 0; i < itemIds.length; i += ITEM_ID_CHUNK) {
+      const chunk = itemIds.slice(i, i + ITEM_ID_CHUNK);
+      rows.push(...(await this.stockRepo.find({ where: { itemId: In(chunk) } })));
+    }
+    return rows.map(toDomainStock);
+  }
+
   async append(movement: StockMovement): Promise<StockMovement> {
     const row = this.movementRepo.create({
       id: movement.id,
@@ -188,16 +201,42 @@ export class StockTypeOrmRepository
 
   async list(params: {
     itemId?: string;
+    itemIds?: string[];
     branchId?: string;
     limit?: number;
   }): Promise<StockMovement[]> {
+    const take = params.limit ?? 100;
+    if (params.itemIds) {
+      // A single itemId narrows the scope; it never widens it.
+      const scoped = params.itemId
+        ? params.itemIds.filter((id) => id === params.itemId)
+        : params.itemIds;
+      // Chunked like listByItems. Each chunk keeps its own newest `take`, so
+      // the newest `take` of the union is always among the merged rows.
+      const rows: StockMovementOrmEntity[] = [];
+      for (let i = 0; i < scoped.length; i += ITEM_ID_CHUNK) {
+        const where: FindOptionsWhere<StockMovementOrmEntity> = {
+          itemId: In(scoped.slice(i, i + ITEM_ID_CHUNK)),
+        };
+        if (params.branchId) where.branchId = params.branchId;
+        rows.push(
+          ...(await this.movementRepo.find({
+            where,
+            order: { createdAt: 'DESC' },
+            take,
+          })),
+        );
+      }
+      rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      return rows.slice(0, take).map(toDomainMovement);
+    }
     const where: { itemId?: string; branchId?: string } = {};
     if (params.itemId) where.itemId = params.itemId;
     if (params.branchId) where.branchId = params.branchId;
     const rows = await this.movementRepo.find({
       where,
       order: { createdAt: 'DESC' },
-      take: params.limit ?? 100,
+      take,
     });
     return rows.map(toDomainMovement);
   }

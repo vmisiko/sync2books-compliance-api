@@ -1,32 +1,22 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
-import { ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { Controller, Get, Param } from '@nestjs/common';
+import { ApiOperation } from '@nestjs/swagger';
 import { ComplianceOrganizationApplicationService } from '../../../compliance-organization/application/compliance-organization.application.service';
 import type { ConnectionEnvironment } from '../../../shared/domain/enums/connection-environment.enum';
-import { API_KEY_HEADER } from '../../domain/api-key';
 import { ApiKeyScope } from '../../domain/api-key-scope.enum';
 import {
   ApiTenantId,
   AuthenticatedApiCaller,
 } from '../../infrastructure/decorators/api-caller.decorator';
 import { RequireScopes } from '../../infrastructure/decorators/require-scopes.decorator';
-import { ApiRateLimitGuard } from '../../infrastructure/guards/api-rate-limit.guard';
 import type { ApiCaller } from '../../infrastructure/guards/api-caller';
-import { ComplianceApiKeyGuard } from '../../infrastructure/guards/compliance-api-key.guard';
-import { TenantScopeGuard } from '../../infrastructure/guards/tenant-scope.guard';
+import { V1Api } from './v1-api.decorator';
 
 /**
- * The entry point of the public API: who a key is, and which businesses it can
- * reach. Everything else on `/v1` lands in the next phase, but these two are
- * what a developer calls first to confirm their key works and to discover the
- * business ids the rest of the API takes.
- *
- * Guard order matters and is the same on every `/v1` controller:
- * authenticate → count against the limit → bind to a business.
+ * The businesses a key can reach. A developer calls this first, after
+ * `/v1/me`, to discover the business ids every other route takes.
  */
 @Controller('v1/businesses')
-@ApiTags('Compliance API v1')
-@ApiSecurity(API_KEY_HEADER)
-@UseGuards(ComplianceApiKeyGuard, ApiRateLimitGuard, TenantScopeGuard)
+@V1Api()
 export class V1BusinessesController {
   constructor(
     private readonly organizations: ComplianceOrganizationApplicationService,
@@ -61,7 +51,7 @@ export class V1BusinessesController {
       });
     }
 
-    return { success: true, message: 'OK', data: { businesses } };
+    return { data: { businesses } };
   }
 
   @Get(':businessId')
@@ -79,8 +69,6 @@ export class V1BusinessesController {
     const environment = await this.organizations.getTenantEnvironment(tenantId);
 
     return {
-      success: true,
-      message: 'OK',
       data: {
         business: {
           id: tenantId,
@@ -94,6 +82,27 @@ export class V1BusinessesController {
             tradeCity: b.tradeCity ?? null,
           })),
         },
+      },
+    };
+  }
+
+  @Get(':businessId/branches')
+  @RequireScopes(ApiKeyScope.LOOKUPS_READ)
+  @ApiOperation({ summary: "A business's branches" })
+  async branches(
+    @Param('businessId') _businessId: string,
+    @ApiTenantId() tenantId: string,
+  ) {
+    const branches = await this.organizations.listBranches(tenantId);
+    return {
+      data: {
+        branches: branches.map((b) => ({
+          id: b.id,
+          kraBhfId: b.kraBhfId,
+          displayName: b.displayName,
+          tradeAddressLine1: b.tradeAddressLine1 ?? null,
+          tradeCity: b.tradeCity ?? null,
+        })),
       },
     };
   }

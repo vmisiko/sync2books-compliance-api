@@ -178,6 +178,19 @@ export class CatalogService {
     return this.itemRepo.findById(itemId);
   }
 
+  /**
+   * Every item id a merchant owns, soft-deleted ones included -- the tenant
+   * boundary for `inventory_stock` / `stock_movements`, which carry no
+   * merchantId of their own. Deleted items stay in: their movement history
+   * is still the merchant's.
+   */
+  async listItemIdsForMerchant(merchantId: string): Promise<string[]> {
+    const items = await this.itemRepo.findByMerchant(merchantId, {
+      includeDeleted: true,
+    });
+    return items.map((item) => item.id);
+  }
+
   /** See update-manual-item.usecase.ts -- only for items with no externalId. */
   async updateManualItem(input: UpdateManualItemInput) {
     return updateManualItem(input, this.itemRepo, this.classificationResolver);
