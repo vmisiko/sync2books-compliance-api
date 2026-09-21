@@ -276,6 +276,21 @@ export class ComplianceOrganizationApplicationService {
     return this.tenantRepo.findBySync2booksCompanyId(sync2booksCompanyId);
   }
 
+  /**
+   * Resolves the tenant a `merchantId` (as stamped on compliance-owned rows)
+   * belongs to. `merchantId` is `sync2booksCompanyId` for tenants linked to the
+   * main API and the tenant's own id for compliance-only businesses (see
+   * `toDomain` in the connection repository), so both have to be tried.
+   */
+  async getTenantByMerchantId(
+    merchantId: string,
+  ): Promise<ComplianceTenant | null> {
+    return (
+      (await this.getTenantBySync2booksCompanyId(merchantId)) ??
+      (await this.getTenantById(merchantId))
+    );
+  }
+
   /** Businesses owned by a DashboardOrganization, for the dashboard's business list. */
   async listTenantsByOrganizationId(
     organizationId: string,
@@ -324,6 +339,28 @@ export class ComplianceOrganizationApplicationService {
 
   async getTenantById(tenantId: string): Promise<ComplianceTenant | null> {
     return this.tenantRepo.findById(tenantId);
+  }
+
+  /**
+   * The eTIMS environment a business operates in, read from its default
+   * branch's connection. Null when the business has no branch or no eTIMS
+   * connection yet -- a caller that must not guess (TenantScopeGuard) treats
+   * that as "not addressable", never as "probably sandbox".
+   *
+   * Lighter than {@link getTenantSummary} on purpose: this runs on the
+   * authenticated request path, and getTenantSummary creates a default branch
+   * as a side effect, which a read has no business doing.
+   */
+  async getTenantEnvironment(
+    tenantId: string,
+  ): Promise<ConnectionEnvironment | null> {
+    const branchId = await this.resolveDefaultBranchId(tenantId);
+    if (!branchId) return null;
+    const etims = await this.getEtimsConnectionForBranch(branchId);
+    if (!etims) return null;
+    return etims.environment === ConnectionEnvironment.PRODUCTION
+      ? ConnectionEnvironment.PRODUCTION
+      : ConnectionEnvironment.SANDBOX;
   }
 
   async upsertBranch(input: UpsertBranchInput): Promise<ComplianceBranch> {

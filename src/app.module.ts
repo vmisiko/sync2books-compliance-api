@@ -16,6 +16,7 @@ import { DashboardMappingModule } from './dashboard-mapping/dashboard-mapping.mo
 import { DashboardOrganizationModule } from './dashboard-organization/dashboard-organization.module';
 import { DashboardPurchasesModule } from './dashboard-purchases/dashboard-purchases.module';
 import { DashboardSuppliersModule } from './dashboard-suppliers/dashboard-suppliers.module';
+import { DeveloperPlatformModule } from './developer-platform/developer-platform.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { OscuMappingModule } from './regulatory/oscu/oscu-mapping.module';
 import { OscuOperationsModule } from './regulatory/oscu/presentation/oscu-operations.module';
@@ -37,6 +38,8 @@ import { ComplianceDocumentOrmEntity } from './sales/infrastructure/persistence/
 import { ComplianceEventOrmEntity } from './sales/infrastructure/persistence/compliance-event.orm-entity';
 import { ComplianceLineOrmEntity } from './sales/infrastructure/persistence/compliance-line.orm-entity';
 import { CustomerOrmEntity } from './dashboard-customers/infrastructure/persistence/customer.orm-entity';
+import { ComplianceApiKeyOrmEntity } from './developer-platform/infrastructure/persistence/compliance-api-key.orm-entity';
+import { ComplianceApplicationOrmEntity } from './developer-platform/infrastructure/persistence/compliance-application.orm-entity';
 import { DashboardUserOrmEntity } from './dashboard-identity/infrastructure/persistence/dashboard-user.orm-entity';
 import { DashboardOrganizationOrmEntity } from './dashboard-organization/infrastructure/persistence/dashboard-organization.orm-entity';
 import { InventoryStockOrmEntity } from './inventory/infrastructure/persistence/inventory-stock.orm-entity';
@@ -65,6 +68,8 @@ import { SupplierOrmEntity } from './dashboard-suppliers/infrastructure/persiste
       database: process.env.DB_DATABASE || 'compliance',
       entities: [
         CatalogItemOrmEntity,
+        ComplianceApiKeyOrmEntity,
+        ComplianceApplicationOrmEntity,
         ComplianceBranchOrmEntity,
         ComplianceDocumentOrmEntity,
         ComplianceEtimsConnectionOrmEntity,
@@ -107,6 +112,7 @@ import { SupplierOrmEntity } from './dashboard-suppliers/infrastructure/persiste
     DashboardOrganizationModule,
     DashboardPurchasesModule,
     DashboardSuppliersModule,
+    DeveloperPlatformModule,
     InventoryModule,
     MainApiPullModule,
     SalesModule,

@@ -153,7 +153,9 @@ architecture document that claims tenant isolation.
 6. Tests: for each surface, a spec proving org A cannot read or write org B (the repo's `tenant-scope-audit`
    skill covers exactly this).
 
-### P1 — Compliance applications and API keys *(~1 week)*
+### P1 — Compliance applications and API keys ✅ *done 2026-09-21*
+
+*Delivered in `src/developer-platform/`. Deviations from the plan below: rate limiting is per-application (not per-key) so rotating a key can't buy a second allowance; `Idempotency-Key` parsing is built and tested but not yet attached to a route (it lands with `POST /v1/sales` in P2); the `/v1` surface so far is only `GET /v1/me` and `GET /v1/businesses[/:id]`, enough to prove the guard chain live.*
 
 1. Entities above + `ComplianceApiKeyGuard`: `x-api-key` → hash lookup → active key → application →
    organisation; attach `req.apiCaller = {applicationId, organizationId, environment, scopes}`.
