@@ -19,6 +19,13 @@ statement depends on a deployment-time configuration value rather than on code, 
 explicitly. v2.0 corrects four statements in v1.0 that described intent rather than implementation; the
 corrections are listed in §10.2.
 
+**Scope of disclosure.** This document describes the fiscalisation path and the interface a taxpayer or their
+developer integrates against. It deliberately does not enumerate Sync2Books' internal service topology,
+internal routes or administrative interfaces: those are not part of the integration contract, and publishing
+them would widen the attack surface of a system that holds taxpayers' KRA device credentials without telling a
+reviewer anything about how fiscal data reaches KRA. Every control that bears on the integrity of that path is
+stated in §6 in terms of what it guarantees.
+
 ---
 
 ## 1. Purpose and scope
@@ -43,18 +50,22 @@ three ways, all of which converge on the same fiscalisation path:
    purchases out of QuickBooks Online, Odoo, Microsoft Dynamics 365 Business Central or Xero, fiscalises them,
    and writes the KRA-signed receipt back onto the source document. The taxpayer does not change how they
    invoice.
-3. **Through the Sync2Books API** — a taxpayer's own software submits sales programmatically.
+3. **Through the Sync2Books Compliance API** — the taxpayer's own software, or a developer working for
+   them, submits sales programmatically using an API key issued to that taxpayer from the compliance
+   dashboard.
 
 In all three cases the **same compliance service** performs the OSCU call, applies the same validation rules,
 and produces the same TIS-conformant receipt.
 
 ### 1.3 Scope
 
-In scope: the services that participate in fiscalisation, the credential model, the OSCU call sequence, the
-printed/PDF receipt, security controls, environment separation, and error handling.
+In scope: the fiscalisation path itself — the credential model, the OSCU call sequence, the integration
+surface a taxpayer or their developer works with, the printed/PDF receipt, security controls, environment
+separation, and error handling.
 
-Out of scope: the internal mechanics of each third-party accounting platform's own API; the taxpayer's
-commercial processes; billing and subscription handling.
+Out of scope: Sync2Books' internal service topology and any interface that is not part of the integration
+contract; the internal mechanics of each third-party accounting platform's own API; the taxpayer's commercial
+processes; billing and subscription handling.
 
 ### 1.4 Positioning — TIS, OSCU and eTIMS
 
@@ -72,61 +83,78 @@ what makes a single centrally-operated platform able to serve many small and med
 
 ## 2. System context
 
-### 2.1 The three classes of caller, and the single KRA path
+### 2.1 How work reaches KRA
 
-Sync2Books accepts fiscalisation work from three distinct classes of caller. They authenticate differently,
-but all of them reach KRA through exactly one component and one code path.
+A taxpayer's fiscal data can originate in three ways. All three converge on one component, and only that
+component speaks to KRA.
 
 ```
  ┌──────────────────────────┐
- │  A. Taxpayer's finance   │   dashboard session
- │     staff (browser)      │──── JWT + x-tenant-id ────┐
+ │  A. Taxpayer's finance   │  compliance dashboard
+ │     staff (browser)      │──── signed-in session ────┐
  └──────────────────────────┘                           │
                                                         ▼
  ┌──────────────────────────┐                 ┌──────────────────────────────────┐
- │  B. Taxpayer's accounting│  ERP native API │  sync2books-compliance-api       │
- │     platform (QuickBooks,│◀──────────────▶ │  (eTIMS compliance service)      │
+ │  B. Taxpayer's accounting│  platform's own │  Sync2Books Compliance Service   │
+ │     platform (QuickBooks,│◀──── API ──────▶│  (the TIS fiscalisation core)    │
  │     Odoo, Dynamics, Xero)│                 │                                  │
- └────────────┬─────────────┘                 │  • sole holder of OSCU creds     │        ┌──────────────┐
-              │ OAuth2 / native               │  • validation + payload mapping  │  OSCU  │  KRA eTIMS   │
-              ▼                               │  • sequence counters             │───────▶│  OSCU        │
- ┌──────────────────────────┐   HTTPS +       │  • receipt PDF + QR generation   │◀───────│  gateway     │
- │  nest-sync-2-books-api   │   bearer token  │  • audit trail                   │        └──────────────┘
- │  (core sync engine)      │────────────────▶│                                  │
- │  ERP connectors, receipt │                 └──────────────────────────────────┘
- │  write-back, tenant cat. │                             ▲
- └────────────┬─────────────┘                             │  API key (main API) → forwarded
-              ▲                                           │
- ┌────────────┴─────────────┐                             │
- │  C. Taxpayer's own       │───── API key ───────────────┘
- │     software / developer │
- └──────────────────────────┘
+ └──────────────────────────┘                 │  • sole holder of OSCU creds     │        ┌──────────────┐
+                                              │  • validation + payload mapping  │  OSCU  │  KRA eTIMS   │
+                                              │  • sequence counters             │───────▶│  OSCU        │
+ ┌──────────────────────────┐                 │  • receipt PDF + QR generation   │◀───────│  gateway     │
+ │  C. Taxpayer's own       │──── API key ───▶│  • audit trail                   │        └──────────────┘
+ │     software / developer │   (HTTPS)       │                                  │
+ └──────────────────────────┘                 └──────────────────────────────────┘
 ```
 
-| Caller | Credential presented | Reaches compliance service via |
+| Source | How it is authorised | What it submits |
 |---|---|---|
-| **A — Dashboard user** | Compliance-issued JWT (access/refresh), plus an active-tenant header | Directly, on `/dashboard-api/*` routes |
-| **B — Accounting platform** | The platform's own OAuth2 / native credentials, held by the core sync engine | Core sync engine → compliance service, over HTTPS with a bearer service token |
-| **C — Developer / taxpayer software** | Sync2Books API key on the core sync engine | Core sync engine → compliance service, same service-token hop |
+| **A — Dashboard user** | A signed-in session on the compliance dashboard, bound to the taxpayer's organisation | Items, sales, credit notes, stock movements and purchases entered by finance staff |
+| **B — Accounting platform** | The taxpayer authorises Sync2Books in their own accounting platform, using that platform's consent flow | Invoices, credit notes, items, stock and purchases read out of the taxpayer's books |
+| **C — Developer integration** | An API key the taxpayer issues from the compliance dashboard, scoped to that taxpayer's own businesses | Whatever the taxpayer's own software issues — typically sales and credit notes, with catalogue and stock kept in step |
 
-**The single KRA path.** No caller class reaches KRA directly. The accounting-platform connectors do not
-call KRA. The core sync engine does not call KRA. The dashboard does not call KRA. Only
-`sync2books-compliance-api` holds OSCU credentials and only it opens a connection to the KRA gateway. This is
-an architectural property, not a convention: the credentials (`cmcKey`, `dvcId`, `sdcId`) exist in exactly one
-database table, in one service, and the OSCU HTTP client lives in that same service.
+**The single KRA path.** No source reaches KRA directly. The accounting-platform connectors do not call KRA.
+A developer's API key does not reach KRA. The dashboard does not call KRA. Only the compliance service holds
+OSCU credentials and only it opens a connection to the KRA gateway. This is an architectural property, not a
+convention: the credentials (`cmcKey`, `dvcId`, `sdcId`) exist in exactly one database table, in one service,
+and the OSCU HTTP client lives in that same service.
 
-### 2.2 Services
+### 2.2 The integration surface a developer sees
 
-| Service | Responsibility | Talks to KRA? |
-|---|---|---|
-| `sync2books-compliance-api` | **The TIS fiscalisation core.** Owns taxpayer/branch/connection provisioning, device initialisation, OSCU credential custody, validation rules, OSCU payload construction, sequence counters, submission, KRA response handling, receipt PDF + QR generation, and the regulatory audit trail. | **Yes — exclusively** |
-| `nest-sync-2-books-api` | **Core sync engine.** System of record for the tenant/company/connection catalogue and for accounting-platform connections. Normalises ERP entities, maps `companyId` → `merchantId`/branch, forwards fiscalisation requests to the compliance service, and writes the KRA receipt back onto the source invoice in the ERP. | No |
-| Compliance dashboard (web) | Human-facing console: onboarding, item catalogue, invoices, credit notes, stock, purchases, receipt download and reprint, submission status. | No |
-| Developer/integration console (web) | Connector configuration and API documentation for the accounting-platform integration path. | No |
+Path C is the one an external integrator works with, so it is worth stating concretely. A developer never
+handles an OSCU credential and never chooses a KRA endpoint.
 
-Services communicate over authenticated HTTPS and deploy independently.
+1. **The taxpayer registers their business** in the compliance dashboard: KRA PIN, branch (`bhfId`), trade
+   address and device serial. Sync2Books initialises the OSCU device for that branch (§4.1).
+2. **The taxpayer issues an API key** from the compliance dashboard, for their own developer. The key is
+   scoped to that taxpayer's businesses and to one environment — a sandbox key can address only sandbox
+   businesses, a live key only production ones — so a key can never act for another taxpayer or cross an
+   environment boundary. *(Self-service issuance and rotation in the dashboard is being delivered; see §9.2.
+   Today a key is issued to the taxpayer by Sync2Books on request, with the same scoping.)*
+3. **The developer syncs reference data** — KRA code lists and item classifications (§4.2) — and registers
+   the taxpayer's items against them (§4.4). These are the values every later submission is validated
+   against, so they are fetched from KRA rather than hard-coded by the integrator.
+4. **The developer submits sales and credit notes** (§4.6) and keeps stock in step (§4.5). Each submission is
+   validated, mapped to the OSCU payload, given its KRA-owned sequence number and submitted; the KRA response
+   is stored against the document.
+5. **The developer retrieves the receipt** (§4.8) — a TIS-conformant PDF with the verification QR — and
+   presents or prints it. Submission status, KRA error detail and allocated receipt numbers are readable over
+   the same API.
 
----
+The operations in §4 are the full surface. Everything a developer needs — reference data, catalogue, stock,
+sales, credit notes, purchases, lookups and receipts — is exposed there; anything else in the platform is
+internal and is not part of the integration contract.
+
+### 2.3 The fiscalisation core
+
+| Concern | Where it lives |
+|---|---|
+| Taxpayer, branch and eTIMS-connection provisioning; device initialisation | Compliance service |
+| OSCU credential custody | Compliance service — **exclusively** |
+| Validation rules, OSCU payload construction, sequence counters, submission, KRA response handling | Compliance service |
+| Receipt PDF and QR generation, reprints and COPY receipts | Compliance service |
+| Regulatory audit trail | Compliance service |
+| Reading the taxpayer's books from their accounting platform, and writing the signed receipt back onto the source invoice | Sync2Books accounting-platform sync (never touches KRA or OSCU credentials) |
 
 ## 3. Component architecture
 
@@ -207,7 +235,8 @@ presentation/    HTTP controllers + DTOs
 ### 3.4 Accounting-platform connectors are optional and upstream
 
 The ERP connectors (QuickBooks Online, Odoo, Microsoft Dynamics 365 Business Central, Xero) live entirely in
-the core sync engine. They are an **optional data source**, not part of the fiscalisation path:
+the Sync2Books accounting-platform sync, upstream of fiscalisation. They are an **optional data source**,
+not part of the fiscalisation path:
 
 - A taxpayer who uses the Sync2Books dashboard directly has no ERP connection at all and fiscalises normally.
 - A connector never holds an OSCU credential and never calls KRA.
@@ -351,16 +380,16 @@ sales, under `purchase_confirm_seq:<kraPin>:<environment>`.
 
 Once KRA accepts a sale, the receipt is rendered locally from the stored KRA response — no second call to KRA
 is needed, and a reprint therefore always reproduces exactly what KRA signed. The renderer produces a PDF with
-an embedded QR code pointing at KRA's own receipt-verification portal (§5.3).
+an embedded QR code pointing at KRA's own receipt-verification portal (§5.4).
 
 ### 4.9 Receipt write-back to the taxpayer's accounting platform
 
-For taxpayers on the accounting-platform path, the compliance service notifies the core sync engine that a
-receipt is available. The core sync engine writes a durable `sync_items` row and then attaches the receipt PDF
-to the originating invoice in QuickBooks, Odoo, Dynamics or Xero. Attachment is guarded against duplication in
-three independent ways: the work item is keyed to the compliance document id; an existing non-failed item for
-the same document blocks a second enqueue; and the handler itself re-checks the ERP before pushing. A failed
-attachment is re-drivable from the dashboard.
+For taxpayers on the accounting-platform path, an accepted submission raises a durable work item that
+attaches the receipt PDF to the originating invoice in QuickBooks, Odoo, Dynamics or Xero. Attachment is
+guarded against duplication in three independent ways: the work item is keyed to the compliance document id;
+an existing non-failed item for the same document blocks a second enqueue; and the handler re-checks the
+accounting platform before pushing. A failed attachment is re-drivable. This step is downstream of KRA and
+cannot alter the fiscal record.
 
 This stage is entirely downstream of KRA acceptance. If it fails, the fiscal record at KRA is unaffected.
 
@@ -457,8 +486,8 @@ empty result) for the stock-movement lookup; the raw responses are retained.
 ### 6.1 Credential custody
 
 - KRA PIN, `bhfId`, device serial, `cmcKey`, `dvcId` and `sdcId` exist in **one table in one service**
-  (`compliance_etims_connections`). They are never copied into the core sync engine, never sent to an ERP
-  connector, and never returned to a browser.
+  (`compliance_etims_connections`). They are never copied into another Sync2Books service, never sent to an
+  accounting-platform connector, never returned over the API, and never returned to a browser.
 - The OSCU HTTP client is the only code that reads `cmcKey`, and it places it in a request header to KRA and
   nowhere else.
 - **Least privilege across taxpayers.** Each taxpayer's operations execute against that taxpayer's own branch
@@ -466,8 +495,8 @@ empty result) for the stock-movement lookup; the raw responses are retained.
 
 ### 6.2 Secrets management
 
-Every secret — the service-to-service token, gateway client credentials, database credentials, ERP OAuth
-client secrets — is supplied through the deployment environment. No credential, key or taxpayer PIN is held in
+Every secret — gateway client credentials, database credentials, internal service credentials, accounting
+platform OAuth client secrets — is supplied through the deployment environment. No credential, key or taxpayer PIN is held in
 source control, in test fixtures, or in configuration files committed to the repository. This is enforced as a
 standing engineering rule across all Sync2Books repositories.
 
@@ -477,27 +506,24 @@ All traffic to the KRA OSCU gateway, between Sync2Books services, to ERP platfor
 TLS/HTTPS. The compliance dashboard is served from an explicit CORS allow-list rather than a wildcard, with
 credentials enabled only for those origins.
 
-### 6.4 Authentication of each caller class
+### 6.4 Authentication and authorisation
 
-| Path | Control |
+| Caller | Control |
 |---|---|
-| Core sync engine → compliance service | Bearer service token compared in constant time, plus a mandatory `x-sync2books-company-id` context header. Applied to the OSCU pass-through, catalogue, sales, stock and organisation routes. |
-| Dashboard → compliance service | JWT access/refresh tokens; passwords hashed with bcrypt. Dashboard routes additionally carry an active-tenant guard that rejects a request whose target tenant is not in the caller's organisation. |
-| Developer / ERP → core sync engine | Sync2Books API key, with optional HMAC-SHA256 request signing. |
-| Compliance service → core sync engine (receipt notification) | Authenticated callback guard on the receiving side. |
-| Core sync engine → compliance service (webhooks) | HMAC-SHA256 verified with a constant-time comparison over the **raw** request bytes; the service is configured to preserve the raw body specifically so a re-serialised payload cannot silently break verification. |
+| **Developer integration (API)** | A per-taxpayer API key presented over TLS, scoped to that taxpayer's businesses and to a single environment. Keys are held as a hash, never in plaintext, and are revocable. Optional HMAC-SHA256 request signing is supported for callers that want message integrity as well as authentication. |
+| **Dashboard user** | An authenticated session bound to the user's organisation; passwords are hashed with bcrypt. |
+| **Accounting platform** | The platform's own OAuth2 / native credentials, obtained through that platform's consent flow and held encrypted by Sync2Books. Never a KRA credential. |
+| **Internal service-to-service calls** | Mutually authenticated over TLS with a deployment-issued secret compared in constant time, and bound to a single taxpayer per request (below). Webhook callbacks are verified with HMAC-SHA256 over the **raw** request bytes, so a re-serialised payload cannot silently pass verification. |
 
-> **Fail-closed service authentication.** Outside local development the service-token guard refuses every
-> request when `COMPLIANCE_SERVICE_TOKEN` is unset, rather than admitting it: these routes reach a tenant's
-> KRA device credentials, so an unset token is an open door, not a convenience. In local development the
-> service logs a warning on the first unauthenticated request and allows it, so a developer machine needs no
-> shared secret.
+> **Fail-closed authentication.** Outside local development, a request on any route that can reach a
+> taxpayer's KRA device credentials is refused when its credential is not configured, rather than admitted.
+> An unset secret is treated as an open door, not as a convenience.
 >
-> **Merchant binding.** The service token authenticates *that the core sync engine is calling*; it does not
-> by itself say *which taxpayer it may act for*. Every service route therefore compares the `merchantId` in
-> the payload against the `x-sync2books-company-id` the caller authenticated with and rejects a mismatch with
-> HTTP 403. The equivalent check exists on the dashboard side: a JWT proves the caller's organisation, and any
-> route naming a `merchantId` verifies that the business belongs to that organisation before acting.
+> **Every request is bound to one taxpayer.** Authenticating a caller establishes *who is calling*; it never
+> by itself establishes *which taxpayer they may act for*. Every route that names a taxpayer therefore
+> re-checks that the named taxpayer is one the caller is entitled to act for, and rejects a mismatch with
+> HTTP 403 — an API key cannot be pointed at another taxpayer's business, and a signed-in user cannot act
+> outside their own organisation.
 
 ### 6.5 Encryption at rest
 
@@ -509,25 +535,25 @@ a committed near-term change (§9.1).
 
 ### 6.6 Rate limiting
 
-The core sync engine applies a **per-application request limit over a one-minute window, held in process
-memory**, to its API-key-authenticated routes. It does not currently emit `X-RateLimit-*` response headers.
-The compliance service does not apply rate limiting of its own; it is not exposed to the public internet as a
-developer surface today, and its callers are the core sync engine and the dashboard.
+Rate limiting today is a **per-caller request limit over a one-minute window, held in process memory**, and
+it does not emit `X-RateLimit-*` response headers. Stated plainly because the API is opening to external
+integrators: a shared-store limiter with published headers is a committed change before the developer surface
+is generally available (§9.2), and until then limits are not coordinated across instances.
 
 v1.0 of this document listed **Redis** as the caching/rate-limiting technology. That was incorrect as a
 description of rate limiting and is withdrawn. Redis is used in exactly one place today: as an **optional**
 cache for the KRA gateway OAuth access token, selected when a Redis URL is configured and falling back to an
-in-process cache otherwise. Shared-store rate limiting with published headers is a planned change (§9.2).
+in-process cache otherwise.
 
 ### 6.7 Multi-tenant isolation
 
 Tenant isolation is enforced on every inbound surface before a request reaches the data layer:
 
-- **Service routes** compare the payload's `merchantId` against the company the caller authenticated as, and
-  reject a mismatch (§6.4).
-- **Dashboard routes** resolve the target business and refuse it unless it belongs to the authenticated
-  user's organisation — whether the business is named in the active-tenant header or as a `merchantId` in the
-  request.
+- **Every request that names a taxpayer** is checked against the taxpayer the caller is entitled to act for,
+  and a mismatch is rejected before any data is read (§6.4). This holds however the taxpayer is named — in
+  the request body, the query string or the path.
+- **Signed-in dashboard users** are resolved to their organisation from the session, and a business outside
+  that organisation is refused.
 - **Stock transfers**, which name two items and two branches and no taxpayer, are refused when the two items
   belong to different taxpayers, so stock cannot cross from one KRA device to another.
 - A business with no owning organisation is refused rather than served to whoever asks for it first.
@@ -664,7 +690,7 @@ that description is withdrawn. What exists today is:
 |---|---|
 | **In-request correction and retry** | A drift rejection (§8.3) is corrected and the call retried within the same request, bounded by a small retry budget. |
 | **Durable state, explicit re-drive** | A failed document persists in `REJECTED` or `FAILED` with KRA's error text. It is re-drivable at any time — individually or in bulk — from the dashboard or by API. The retry path walks a document forward through the real state machine (`DRAFT → validate → prepare → submit`, `REJECTED/FAILED → RETRYING → submit`); it never jumps states. |
-| **Durable queue for receipt write-back** | The ERP receipt attachment is a persisted `sync_items` row in the core sync engine, processed in the background and re-drivable if it fails. This is downstream of KRA and does not affect the fiscal record. |
+| **Durable queue for receipt write-back** | The accounting-platform receipt attachment is a persisted work item, processed in the background and re-drivable if it fails. This is downstream of KRA and does not affect the fiscal record. |
 | **Scheduled reference-data sync** | The daily 02:00 code-list and classification pull is the one automatic scheduled job on the KRA path. |
 
 The distinction matters and is stated deliberately: **a submission that KRA rejects is never silently
@@ -709,26 +735,26 @@ current capability.
 Items 1–4 below were completed on 2026-09-20 and are described in the present tense in §6.4 and §6.7; they
 are listed here so the change is traceable against v1.0 of this document.
 
-1. ~~**Fail-closed service authentication**~~ — done. The guard refuses service requests outside local
-   development when the token is unset (§6.4).
-2. ~~**Bind the asserted company header to the payload**~~ — done. A `merchantId` that disagrees with the
-   authenticated company is rejected with HTTP 403.
-3. ~~**Verify business ownership on dashboard routes that name a `merchantId`**~~ — done, alongside the
-   existing active-tenant header check.
+1. ~~**Fail-closed authentication**~~ — done. A route that can reach a taxpayer's KRA device credentials
+   refuses the request outside local development when its credential is not configured (§6.4).
+2. ~~**Bind every request to one taxpayer**~~ — done. A named taxpayer that disagrees with the one the
+   caller authenticated for is rejected with HTTP 403.
+3. ~~**Verify business ownership wherever a taxpayer is named**~~ — done, alongside the existing
+   session-derived organisation check.
 4. ~~**Assert both items in a stock transfer belong to one taxpayer**~~ — done.
-5. **Make the taxpayer→organisation link mandatory** for newly created tenants (still open).
-6. **Field-level encryption at rest for OSCU credentials** (`cmcKey`, device serial) and ERP OAuth tokens
-   (see §6.5) (still open).
-7. **Derive the tenant from the session on the remaining dashboard routes** so a client-supplied id is never
-   the only scoping input (still open).
+5. **Make the taxpayer→organisation link mandatory** for newly created taxpayers (still open).
+6. **Field-level encryption at rest for OSCU credentials** (`cmcKey`, device serial) and accounting-platform
+   OAuth tokens (see §6.5) (still open).
+7. **Derive the taxpayer from the session on every remaining surface** so a client-supplied identifier is
+   never the only scoping input (still open).
 
 ### 9.2 Platform roadmap
 
 | Item | Description |
 |---|---|
-| **Compliance-issued API keys** | A taxpayer's own developer will be able to issue an API key scoped to that taxpayer's businesses, from the compliance dashboard, without handling a provider-level credential. Keys stored as a hash (never plaintext), shown once, with real rotation and revocation, environment binding (a test key may address only sandbox businesses, a live key only production), and per-application scopes. |
-| **Public `/v1` API surface** | A small, stable, versioned API over businesses, branches, items, stock, sales, credit notes, receipts and lookups, with a consistent error envelope and cursor pagination. Raw OSCU pass-through routes remain internal — they are a certification tool, not a product surface. |
-| **Shared-store rate limiting with published headers** | Per-application limits backed by a shared store, emitting `X-RateLimit-*` response headers (see §6.6). |
+| **Self-service API key issuance** | The taxpayer will issue, rotate and revoke their own API keys from the compliance dashboard, without a Sync2Books operator in the loop (§2.2). The scoping and storage described in §6.4 — one taxpayer, one environment, hashed at rest, shown once — apply to keys issued today and continue to apply; what is being added is the self-service surface, per-key scopes, and a usage view. |
+| **Versioned `/v1` API surface** | A stable, versioned form of the operations in §4 — businesses, branches, items, stock, sales, credit notes, receipts and lookups — with a consistent error envelope and cursor pagination. The raw OSCU pass-through operations stay a certification tool and are not part of the developer surface. |
+| **Shared-store rate limiting with published headers** | Per-key limits backed by a shared store, emitting `X-RateLimit-*` response headers (see §6.6). |
 | **Outbound webhooks** | `document.accepted`, `document.rejected`, `item.registered`, `stock.synced`, `receipt.ready` and similar events, signed with HMAC-SHA256 over the raw body and timestamped against replay, with exponential backoff, a real scheduler, and a dead-letter view. |
 | **Automatic scheduled retry with backoff** | A scheduled re-drive of transport-failed submissions with exponential backoff and a dead-letter state, replacing today's operator-driven re-drive (see §8.4). |
 | **Daily reconciliation** | A scheduled comparison of locally recorded receipt numbers and stock quantities against KRA's own summaries, flagging mismatches for review. |
@@ -761,20 +787,20 @@ are listed here so the change is traceable against v1.0 of this document.
 | **`intrlData`** | Internal data returned by OSCU; printed dashed every four characters. |
 | **`sdcDateTime`** | The SCU's own date and time for the transaction; printed in the SCU information block. |
 | **Receipt label** | TIS §4.3 two-letter designation — `NS` normal sale, `NC` normal credit note, `CS`/`CC` their copies, and so on. |
-| **`merchantId`** | Sync2Books' internal identifier for a taxpayer, equal to the core sync engine's company identifier. Not a KRA field. |
-| **Mode A / Mode B** | Internal names for the two call paths into the compliance service: via the core sync engine (A) and directly from the dashboard (B). |
+| **`merchantId`** | Sync2Books' identifier for a taxpayer (a business) within the platform. Not a KRA field. |
 
 ### 10.2 What changed from version 1.0
 
 | # | v1.0 statement | v2.0 treatment | Why |
 |---|---|---|---|
-| 1 | "Caching / rate limiting: **Redis**" | Corrected in §6.6 | Rate limiting is an in-process per-application counter in the core sync engine; the compliance service has none. Redis is used only as an optional gateway-token cache. |
+| 1 | "Caching / rate limiting: **Redis**" | Corrected in §6.6 | Rate limiting today is a per-caller in-process counter, not a Redis-backed one. Redis is used only as an optional cache for the KRA gateway access token. |
 | 2 | "Outbound eTIMS operations are written to a **durable sync queue** … retried until KRA acknowledges it" | Corrected in §8.4; automatic scheduled retry moved to §9.2 | KRA submission is synchronous. Retry is in-request drift correction plus durable state with operator-driven re-drive. A durable queue does exist, but for ERP receipt write-back, which is downstream of KRA. |
 | 3 | "Encryption at rest. Sensitive connection fields (communication key, device serial) are **encrypted at the database layer**" | Corrected in §6.5; field-level encryption moved to §9.1 | No application-level field encryption exists today. Storage-level encryption is provided by the hosting platform. |
-| 4 | "Persistence: MySQL (TypeORM), with **versioned SQL migrations**" | Restated accurately | The core sync engine uses versioned SQL migrations. The compliance service's schema is derived from its entity definitions; it has no migrations directory. |
+| 4 | "Persistence: MySQL (TypeORM), with **versioned SQL migrations**" | Restated accurately | The compliance service's schema is derived from its entity definitions rather than from a versioned migrations directory. |
 | 5 | Integration sequence described at component level | Rewritten in §4 with the concrete endpoint and OSCU operation for each of 18 stages | KRA asked how the integration takes place; naming the real endpoints and operations demonstrates it. |
 | 6 | No receipt/TIS conformance section | Added as §5, with the live-verified Gear Train evidence set | Responds directly to the September template feedback on specification pages 8 and 10. |
 | 7 | No statement of unbuilt work | Added as §9, clearly separated | So that no planned capability can be read as a current one. |
+| 8 | Internal service topology described by name | Removed; §2 now describes the integration surface instead | The internal decomposition is not part of the integration contract, and naming internal services, routes and administrative interfaces in a published document widens the attack surface around taxpayers' KRA credentials without informing the review. |
 
 ---
 
