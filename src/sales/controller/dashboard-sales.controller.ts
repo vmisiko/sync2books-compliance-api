@@ -39,6 +39,7 @@ import { EmailReceiptDto } from './dto/email-receipt.dto';
 import { renderReceiptEmailHtml } from '../application/receipt/receipt-email.renderer';
 import { ItemNotReadyForEtimsError } from '../domain/errors/item-not-ready-for-etims.error';
 import { InvoiceReceiptPushbackService } from '../../integration/platform-outbound/invoice-receipt-pushback.service';
+import { OwnedSaleRoute } from './sale-ownership.guard';
 
 /**
  * Guarded (previously open to any caller). Still trusts merchantId/branchId
@@ -187,12 +188,15 @@ export class DashboardSalesController {
   ): Promise<SalesReportDetailResponseDto> {
     const shouldSubmit = submit === undefined ? true : submit !== 'false';
 
-    const original = (await this.salesService.getDocument(body.saleId))
-      .document;
-    if (original.merchantId !== body.merchantId) {
-      throw new BadRequestException({
-        message: 'saleId does not belong to merchantId',
-      });
+    // body.merchantId was verified as the caller's own by MerchantOwnershipGuard;
+    // a saleId that belongs to any other merchant is answered exactly like one
+    // that doesn't exist, so this can't be used to probe for someone's documents.
+    const original = await this.salesService.findDocumentForMerchant(
+      body.saleId,
+      body.merchantId,
+    );
+    if (!original) {
+      throw new NotFoundException('Sale not found');
     }
     if (original.branchId !== body.branchId) {
       throw new BadRequestException({
@@ -336,6 +340,7 @@ export class DashboardSalesController {
   // }
 
   @Get(':id/')
+  @OwnedSaleRoute()
   @ApiOperation({ summary: 'Get sale  by sale id' })
   @ApiResponse({
     status: 200,
@@ -350,6 +355,7 @@ export class DashboardSalesController {
   }
 
   @Get(':id/receipt')
+  @OwnedSaleRoute()
   @ApiOperation({
     summary:
       'Download the KRA eTIMS receipt PDF for an ACCEPTED sale. Pass copy=true for a reprint: marked COPY (heading + watermark) per TIS §11.',
@@ -377,6 +383,7 @@ export class DashboardSalesController {
   }
 
   @Post(':id/email')
+  @OwnedSaleRoute()
   @ApiOperation({
     summary:
       "Email the sale invoice receipt to the customer (attaches the KRA receipt PDF when the sale has been ACCEPTED, otherwise sends the summary only)",
