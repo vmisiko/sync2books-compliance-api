@@ -26,7 +26,7 @@ import { DocumentType } from '../../shared/domain/enums/document-type.enum';
 import { InvoiceType } from '../../shared/domain/enums/invoice-type.enum';
 import {
   applyInvoiceTypeOverride,
-  findItemsNotRegisteredExempt,
+  findItemsIneligibleForExempt,
 } from '../domain/utils/invoice-type.util';
 import { CatalogService } from '../../catalog/api/catalog.service';
 import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
@@ -100,7 +100,7 @@ export class ApiSalesController {
         : DocumentType.SALE;
     const invoiceType = body.invoiceType ?? InvoiceType.NORMAL;
     if (invoiceType === InvoiceType.EXEMPT) {
-      await this.assertItemsAreExemptRegistered(body.items.map((i) => i.id));
+      await this.assertItemsAreExemptEligible(body.items.map((i) => i.id));
     }
 
     const normalizeForCreditNote = docType === DocumentType.CREDIT_NOTE;
@@ -198,31 +198,44 @@ export class ApiSalesController {
   }
 
   /**
-   * KRA ties tax treatment to the item as registered with `saveItem`, not to
-   * the transaction -- confirmed live 2026-09-28, KRA rejects
-   * `sendSalesTransaction` with "You created this item with TaxTyCd: B but
-   * selling it with: A" when a line disagrees with its item's own registered
-   * code. So an EXEMPT sale is refused up front here, before a document is
-   * even created, rather than being submitted and left to KRA to bounce --
-   * which would also burn a reserved `invcNo` for nothing. Only used for a
-   * fresh sale: an express credit note reuses its original's already-ACCEPTED
-   * lines, which passed this same check when the sale itself was created.
+   * KRA validates an EXEMPT line against the item's *classification's* own
+   * KRA-defined tax type, not the item's locally-stored default -- see
+   * `findItemsIneligibleForExempt`'s doc comment for the live evidence this
+   * is corrected from. Refused up front, before a document is even created,
+   * rather than submitted and left to KRA to bounce (which would also burn a
+   * reserved `invcNo` for nothing). Only used for a fresh sale: an express
+   * credit note reuses its original's already-ACCEPTED lines, which passed
+   * this same check when the sale itself was created.
    */
-  private async assertItemsAreExemptRegistered(itemIds: string[]): Promise<void> {
+  private async assertItemsAreExemptEligible(itemIds: string[]): Promise<void> {
     const items = await Promise.all(
       itemIds.map((id) => this.catalog.getItemById(id)),
     );
     const resolved = items
       .filter((item): item is NonNullable<typeof item> => item !== null)
-      .map((item) => ({ id: item.id, name: item.name, taxTyCd: item.taxTyCd }));
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        classificationCode: item.classificationCode,
+      }));
 
-    const notExempt = findItemsNotRegisteredExempt(resolved);
-    if (notExempt.length > 0) {
+    const codes = [...new Set(resolved.map((i) => i.classificationCode).filter(Boolean))];
+    const classifications = await Promise.all(
+      codes.map((code) => this.catalog.getItemClassification(code)),
+    );
+    const classificationsByCode = new Map(
+      classifications
+        .filter((c): c is NonNullable<typeof c> => c !== null)
+        .map((c) => [c.itemClsCd, { itemClsCd: c.itemClsCd, taxTyCd: c.taxTyCd }]),
+    );
+
+    const ineligible = findItemsIneligibleForExempt(resolved, classificationsByCode);
+    if (ineligible.length > 0) {
       throw new BadRequestException({
-        message: `Cannot file this sale as tax-exempt: KRA requires an item's tax type to match how it was registered. ${notExempt
+        message: `Cannot file this sale as tax-exempt: KRA's own classification for ${ineligible
           .map((i) => i.name)
-          .join(', ')} ${notExempt.length === 1 ? 'is' : 'are'} not registered as Exempt with KRA.`,
-        items: notExempt.map((i) => i.id),
+          .join(', ')} ${ineligible.length === 1 ? 'is' : 'are'} taxed, not Exempt.`,
+        items: ineligible.map((i) => i.id),
       });
     }
   }

@@ -29,7 +29,7 @@ describe('Express credit note controllers', () => {
     submitDocument: jest.Mock;
     getNormalizedSaleReport: jest.Mock;
   };
-  let catalogService: { getItemById: jest.Mock };
+  let catalogService: { getItemById: jest.Mock; getItemClassification: jest.Mock };
 
   const acceptedSale = {
     id: 'sale-1',
@@ -110,6 +110,14 @@ describe('Express credit note controllers', () => {
       getItemById: jest.fn().mockImplementation(async (id: string) => ({
         id,
         name: `Item ${id}`,
+        classificationCode: 'CLS-EXEMPT',
+      })),
+      // Defaults every classification to Exempt-taxed, matching the default
+      // item above, so the invoiceType tests below exercise
+      // applyInvoiceTypeOverride itself, not this eligibility gate -- the
+      // gate has its own dedicated describe block further down.
+      getItemClassification: jest.fn().mockImplementation(async (itemClsCd: string) => ({
+        itemClsCd,
         taxTyCd: 'A',
       })),
     };
@@ -437,7 +445,7 @@ describe('Express credit note controllers', () => {
     });
   });
 
-  describe('EXEMPT sales must only include KRA-Exempt-registered items', () => {
+  describe('EXEMPT sales must only include items whose KRA classification is Exempt', () => {
     const body = {
       merchantId: 'merchant-1',
       branchId: 'branch-1',
@@ -450,26 +458,66 @@ describe('Express credit note controllers', () => {
       items: [{ id: 'item-1', quantity: 1, unitPrice: 100, taxCategory: 'VAT_STANDARD', taxAmount: 16 }],
     };
 
-    // The KRA-confirmed rule: tax treatment is tied to the item as
-    // registered, not the transaction, so a normally-taxable item cannot be
-    // sold Exempt no matter what the sale claims.
-    it('refuses the sale before creating anything when an item is registered under a real VAT rate', async () => {
-      catalogService.getItemById.mockResolvedValueOnce({ id: 'item-1', name: 'Grilled Goat Ribs', taxTyCd: 'B' });
+    // Live-corrected 2026-09-28: KRA validates against the item's
+    // *classification's* own KRA-defined tax type, not the item's own
+    // locally-stored default -- see findItemsIneligibleForExempt's doc
+    // comment for the counter-example this replaced a stricter, wrong check
+    // with.
+    it('refuses the sale before creating anything when the item’s classification is taxed, not Exempt', async () => {
+      catalogService.getItemById.mockResolvedValueOnce({
+        id: 'item-1',
+        name: 'Grilled Goat Ribs',
+        classificationCode: '1010150800',
+      });
+      catalogService.getItemClassification.mockResolvedValueOnce({
+        itemClsCd: '1010150800',
+        taxTyCd: 'B',
+      });
 
       await expect(dashboardController.createSale(body, 'false')).rejects.toThrow(BadRequestException);
       expect(salesService.createDocument).not.toHaveBeenCalled();
     });
 
     it('names the offending item in the error', async () => {
-      catalogService.getItemById.mockResolvedValueOnce({ id: 'item-1', name: 'Grilled Goat Ribs', taxTyCd: 'B' });
+      catalogService.getItemById.mockResolvedValueOnce({
+        id: 'item-1',
+        name: 'Grilled Goat Ribs',
+        classificationCode: '1010150800',
+      });
+      catalogService.getItemClassification.mockResolvedValueOnce({
+        itemClsCd: '1010150800',
+        taxTyCd: 'B',
+      });
 
       const error = await dashboardController.createSale(body, 'false').catch((e) => e);
       expect(error.getResponse().message).toContain('Grilled Goat Ribs');
       expect(error.getResponse().items).toEqual(['item-1']);
     });
 
-    it('proceeds when every item is already Exempt-registered', async () => {
-      catalogService.getItemById.mockResolvedValueOnce({ id: 'item-1', name: 'Kenya Red Cross Grant', taxTyCd: 'A' });
+    it('proceeds when the item’s classification is itself Exempt', async () => {
+      catalogService.getItemById.mockResolvedValueOnce({
+        id: 'item-1',
+        name: 'Facility Interest Charge',
+        classificationCode: '1000000000',
+      });
+      catalogService.getItemClassification.mockResolvedValueOnce({
+        itemClsCd: '1000000000',
+        taxTyCd: 'A',
+      });
+
+      await expect(apiController.createSale(body, emptyReq, 'false')).resolves.toBeDefined();
+      expect(salesService.createDocument).toHaveBeenCalled();
+    });
+
+    // No positive KRA evidence either way -- refusing would block a possibly
+    // legitimate sale for nothing.
+    it('proceeds when the classification never synced locally', async () => {
+      catalogService.getItemById.mockResolvedValueOnce({
+        id: 'item-1',
+        name: 'New Item',
+        classificationCode: '9999999999',
+      });
+      catalogService.getItemClassification.mockResolvedValueOnce(null);
 
       await expect(apiController.createSale(body, emptyReq, 'false')).resolves.toBeDefined();
       expect(salesService.createDocument).toHaveBeenCalled();

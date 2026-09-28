@@ -2,7 +2,7 @@ import { InvoiceType } from '../../../shared/domain/enums/invoice-type.enum';
 import { TaxCategory } from '../../../shared/domain/enums/tax-category.enum';
 import {
   applyInvoiceTypeOverride,
-  findItemsNotRegisteredExempt,
+  findItemsIneligibleForExempt,
 } from './invoice-type.util';
 
 describe('applyInvoiceTypeOverride', () => {
@@ -53,29 +53,48 @@ describe('applyInvoiceTypeOverride', () => {
   });
 });
 
-describe('findItemsNotRegisteredExempt', () => {
-  const exemptItem = { id: 'item-1', name: 'Kenyan Red Cross Grant Supplies', taxTyCd: 'A' };
-  const vatItem = { id: 'item-2', name: 'Grilled Goat Ribs', taxTyCd: 'B' };
+describe('findItemsIneligibleForExempt', () => {
+  const exemptItem = { id: 'item-1', name: 'Facility Interest Charge', classificationCode: '1000000000' };
+  const vatItem = { id: 'item-2', name: 'Grilled Goat Ribs', classificationCode: '1010150800' };
+  const unsyncedItem = { id: 'item-3', name: 'New Item', classificationCode: '9999999999' };
+  const unregisteredItem = { id: 'item-4', name: 'Draft Item', classificationCode: '' };
 
-  it('is empty when every item is already registered Exempt', () => {
-    expect(findItemsNotRegisteredExempt([exemptItem])).toEqual([]);
+  const classifications = new Map([
+    ['1000000000', { itemClsCd: '1000000000', taxTyCd: 'A' }],
+    ['1010150800', { itemClsCd: '1010150800', taxTyCd: 'B' }],
+  ]);
+
+  it('is empty when the item’s classification is itself Exempt', () => {
+    expect(findItemsIneligibleForExempt([exemptItem], classifications)).toEqual([]);
   });
 
-  // The KRA-confirmed case: an item registered under a real VAT rate cannot
-  // be sold as EXEMPT no matter what the sale claims.
-  it('names an item registered under a real VAT rate', () => {
-    expect(findItemsNotRegisteredExempt([exemptItem, vatItem])).toEqual([vatItem]);
+  // Live-corrected 2026-09-28: KRA validates against the classification's own
+  // tax type, not the item's locally-stored default -- an item classified
+  // "Goats" (KRA taxTyCd B) is rejected regardless of what a merchant set
+  // locally.
+  it('names an item whose classification is taxed, not Exempt', () => {
+    expect(findItemsIneligibleForExempt([exemptItem, vatItem], classifications)).toEqual([vatItem]);
   });
 
   it('names every offending item, not just the first', () => {
-    const anotherVatItem = { id: 'item-3', name: 'Dawa Cocktail', taxTyCd: 'B' };
-    expect(findItemsNotRegisteredExempt([vatItem, anotherVatItem])).toEqual([
+    const anotherVatItem = { id: 'item-5', name: 'Dawa Cocktail', classificationCode: '1010150800' };
+    expect(findItemsIneligibleForExempt([vatItem, anotherVatItem], classifications)).toEqual([
       vatItem,
       anotherVatItem,
     ]);
   });
 
+  // No positive KRA evidence either way -- refusing would block a possibly
+  // legitimate sale for nothing; KRA's own response is still authoritative.
+  it('lets through an item whose classification never synced locally', () => {
+    expect(findItemsIneligibleForExempt([unsyncedItem], classifications)).toEqual([]);
+  });
+
+  it('lets through an item with no classification code at all', () => {
+    expect(findItemsIneligibleForExempt([unregisteredItem], classifications)).toEqual([]);
+  });
+
   it('is empty for an empty line set', () => {
-    expect(findItemsNotRegisteredExempt([])).toEqual([]);
+    expect(findItemsIneligibleForExempt([], classifications)).toEqual([]);
   });
 });

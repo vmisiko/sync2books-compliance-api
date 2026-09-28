@@ -49,31 +49,6 @@ export interface TaxableLine {
  * `taxTyCdSnapshot: l.taxTyCdSnapshot ?? item.taxTyCd` fell through to the
  * item every time this override left `taxTyCdSnapshot` unset.
  */
-/** The part of a catalog item this module needs to check its own registered tax type. */
-export interface RegisteredItemTaxType {
-  id: string;
-  name: string;
-  taxTyCd: string;
-}
-
-/**
- * Items on an EXEMPT sale that are NOT themselves registered with KRA under
- * the Exempt tax type -- confirmed live 2026-09-28: KRA's OSCU rejects
- * `sendSalesTransaction` outright when a line's tax type disagrees with the
- * `taxTyCd` the item was registered under via `saveItem` ("You created this
- * item with TaxTyCd: B but selling it with: A"). KRA ties tax treatment to
- * the *item as registered*, not to the transaction -- a customer's
- * exemption cannot force a normally-taxable item to file at 0%. The caller
- * (`DashboardSalesController`/`ApiSalesController`) is expected to refuse
- * the whole sale with this list rather than submit it and let KRA bounce it,
- * which would also burn a reserved `invcNo`.
- */
-export function findItemsNotRegisteredExempt(
-  items: RegisteredItemTaxType[],
-): RegisteredItemTaxType[] {
-  return items.filter((i) => i.taxTyCd !== OSCU_EXEMPT_TAX_TYPE_CODE);
-}
-
 export function applyInvoiceTypeOverride<T extends TaxableLine>(
   lines: T[],
   invoiceType: InvoiceType,
@@ -90,4 +65,64 @@ export function applyInvoiceTypeOverride<T extends TaxableLine>(
     taxAmount: 0,
     taxTyCdSnapshot: OSCU_EXEMPT_TAX_TYPE_CODE,
   }));
+}
+
+/** The part of a catalog item this module needs to resolve its classification's own KRA tax type. */
+export interface ItemPendingExemptCheck {
+  id: string;
+  name: string;
+  /** `CatalogItem.classificationCode` -- KRA's `itemClsCd`. Empty string means unresolved (never registered). */
+  classificationCode: string;
+}
+
+/**
+ * Which of KRA's own tax types a classification code carries, as returned in
+ * `selectItemClsList` and mirrored verbatim onto `oscu_item_classifications`
+ * (see `sync-item-classifications.usecase.ts`) -- never computed locally.
+ */
+export interface ClassificationTaxType {
+  itemClsCd: string;
+  taxTyCd: string | null;
+}
+
+/**
+ * Items on an EXEMPT sale whose KRA item classification is known to carry a
+ * tax type other than Exempt.
+ *
+ * Corrected 2026-09-28 after a real counter-example (a competing eTIMS
+ * integrator successfully selling the same item both at its normal rate and,
+ * shortly after, as Exempt): the first version of this check compared the
+ * *item's own locally-stored* `taxTyCd` (a merchant-chosen default) against
+ * Exempt, which is the wrong field. Live evidence instead correlates with the
+ * item's **classification's own KRA-defined tax type**
+ * (`oscu_item_classifications.taxTyCd`, KRA's own reference data, not ours):
+ * an item classified "Goats" (KRA taxTyCd `B`) was rejected when sold as
+ * Exempt ("You created this item with TaxTyCd: B but selling it with: A");
+ * an item classified "Live Plant and Animal Material..." (KRA taxTyCd `A`)
+ * was accepted -- regardless of what either item's own local `taxTyCd`
+ * column said. KRA evidently validates against the classification, which can
+ * legitimately allow Exempt for one item and not another sharing the same
+ * merchant-assigned local tax category, matching what the counter-example
+ * showed.
+ *
+ * This is still not a fully proven rule -- two live data points plus one
+ * outside example -- so it only refuses when we hold positive KRA evidence
+ * (a synced classification whose `taxTyCd` names something other than
+ * Exempt). An item whose classification never synced, or whose classification
+ * itself carries no tax type, is let through rather than guessed at: KRA's
+ * own `sendSalesTransaction` response is authoritative either way, and a
+ * false refusal blocks a legitimate sale for no benefit, whereas a rare false
+ * accept costs one submission KRA can still reject on its own.
+ */
+export function findItemsIneligibleForExempt(
+  items: ItemPendingExemptCheck[],
+  classificationsByCode: Map<string, ClassificationTaxType>,
+): ItemPendingExemptCheck[] {
+  return items.filter((item) => {
+    const classification = item.classificationCode
+      ? classificationsByCode.get(item.classificationCode)
+      : undefined;
+    if (!classification?.taxTyCd) return false; // no positive evidence -- let KRA decide
+    return classification.taxTyCd !== OSCU_EXEMPT_TAX_TYPE_CODE;
+  });
 }
