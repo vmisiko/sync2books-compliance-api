@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { InvoiceType } from '../../../shared/domain/enums/invoice-type.enum';
 import { SourceSystem } from '../../../shared/domain/enums/source-system.enum';
 
 export class CursorPaginationDto {
@@ -118,6 +119,12 @@ export class SaleReportDto {
 
   @ApiProperty({ nullable: true })
   receiptTypeCode!: string | null;
+
+  @ApiProperty({
+    enum: InvoiceType,
+    description: 'EXEMPT means every line was filed at 0% VAT for a tax-exempt customer.',
+  })
+  invoiceType!: InvoiceType;
 
   @ApiProperty({ nullable: true })
   saleDetailUrl!: string | null;

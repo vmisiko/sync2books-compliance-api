@@ -4,6 +4,7 @@ import { generateIdempotencyKey } from '../../domain/utils/idempotency.util';
 import { deriveLineSnapshot } from '../../domain/utils/line-snapshot.util';
 import { ComplianceStatus } from '../../../shared/domain/enums/compliance-status.enum';
 import { DocumentType } from '../../../shared/domain/enums/document-type.enum';
+import { InvoiceType } from '../../../shared/domain/enums/invoice-type.enum';
 import { SourceSystem } from '../../../shared/domain/enums/source-system.enum';
 import type {
   IComplianceDocumentRepository,
@@ -32,6 +33,8 @@ export interface CreateDocumentInput {
   receiptTypeCode?: string | null;
   paymentTypeCode?: string | null;
   invoiceStatusCode?: string | null;
+  /** Defaults to NORMAL -- see ComplianceDocument.invoiceType's doc comment. */
+  invoiceType?: InvoiceType;
   currency: string;
   exchangeRate: number;
   subtotalAmount: number;
@@ -163,6 +166,7 @@ export async function createDocument(
     receiptTypeCode: input.receiptTypeCode ?? null,
     paymentTypeCode: input.paymentTypeCode ?? null,
     invoiceStatusCode: input.invoiceStatusCode ?? null,
+    invoiceType: input.invoiceType ?? InvoiceType.NORMAL,
     currency: input.currency,
     exchangeRate: input.exchangeRate,
     subtotalAmount: input.subtotalAmount,

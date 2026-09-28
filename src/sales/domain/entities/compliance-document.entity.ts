@@ -1,5 +1,6 @@
 import { ComplianceStatus } from '../../../shared/domain/enums/compliance-status.enum';
 import { DocumentType } from '../../../shared/domain/enums/document-type.enum';
+import { InvoiceType } from '../../../shared/domain/enums/invoice-type.enum';
 import { SourceSystem } from '../../../shared/domain/enums/source-system.enum';
 import { ComplianceLine } from './compliance-line.entity';
 
@@ -73,6 +74,14 @@ export interface ComplianceDocument {
   receiptTypeCode: string | null;
   paymentTypeCode: string | null;
   invoiceStatusCode: string | null;
+  /**
+   * Sale-level tax treatment: NORMAL (the item's own catalog tax category
+   * applies) or EXEMPT (every line was forced to 0% VAT because the customer
+   * holds a KRA tax exemption -- see `applyInvoiceTypeOverride`). Set once at
+   * creation and never changed afterwards; an express credit note copies its
+   * original sale's value rather than choosing its own.
+   */
+  invoiceType: InvoiceType;
   currency: string;
   exchangeRate: number;
   subtotalAmount: number;

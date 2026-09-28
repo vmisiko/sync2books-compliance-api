@@ -23,6 +23,12 @@ import {
 import { SalesService } from '../application/sales.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { DocumentType } from '../../shared/domain/enums/document-type.enum';
+import { InvoiceType } from '../../shared/domain/enums/invoice-type.enum';
+import {
+  applyInvoiceTypeOverride,
+  findItemsNotRegisteredExempt,
+} from '../domain/utils/invoice-type.util';
+import { CatalogService } from '../../catalog/api/catalog.service';
 import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
 import {
   SalesReportDetailResponseDto,
@@ -46,6 +52,7 @@ export class ApiSalesController {
     private readonly salesService: SalesService,
     private readonly oscuCallback: PlatformOscuCallbackService,
     private readonly correlationPersistence: Sync2BooksCorrelationPersistenceService,
+    private readonly catalog: CatalogService,
   ) {}
 
   @Get()
@@ -91,15 +98,23 @@ export class ApiSalesController {
       body.receiptTypeCode === 'R'
         ? DocumentType.CREDIT_NOTE
         : DocumentType.SALE;
+    const invoiceType = body.invoiceType ?? InvoiceType.NORMAL;
+    if (invoiceType === InvoiceType.EXEMPT) {
+      await this.assertItemsAreExemptRegistered(body.items.map((i) => i.id));
+    }
 
     const normalizeForCreditNote = docType === DocumentType.CREDIT_NOTE;
-    const items = normalizeForCreditNote
+    const normalizedItems = normalizeForCreditNote
       ? body.items.map((i) => ({
           ...i,
           quantity: Math.abs(i.quantity),
           taxAmount: Math.abs(i.taxAmount),
         }))
       : body.items;
+    // Runs last, after every other normalization, so a tax-exempt sale can
+    // never carry a line the client computed at a real VAT rate -- see
+    // applyInvoiceTypeOverride's doc comment.
+    const items = applyInvoiceTypeOverride(normalizedItems, invoiceType);
 
     const createResult = await this.salesService.createDocument(
       {
@@ -117,6 +132,7 @@ export class ApiSalesController {
         receiptTypeCode: body.receiptTypeCode,
         paymentTypeCode: body.paymentTypeCode,
         invoiceStatusCode: body.invoiceStatusCode,
+        invoiceType,
         currency: 'KES',
         exchangeRate: 1,
         subtotalAmount: items.reduce(
@@ -142,6 +158,10 @@ export class ApiSalesController {
           unitPrice: i.unitPrice,
           taxCategory: i.taxCategory,
           taxAmount: i.taxAmount,
+          // Set only when applyInvoiceTypeOverride forced EXEMPT above;
+          // undefined otherwise, so a normal sale still falls back to the
+          // item's own catalog taxTyCd exactly as before this field existed.
+          taxTyCdSnapshot: i.taxTyCdSnapshot,
         })),
       },
       { enqueueProcessing: false },
@@ -175,6 +195,36 @@ export class ApiSalesController {
 
     const data = await this.salesService.getNormalizedSaleReport(documentId);
     return { data };
+  }
+
+  /**
+   * KRA ties tax treatment to the item as registered with `saveItem`, not to
+   * the transaction -- confirmed live 2026-09-28, KRA rejects
+   * `sendSalesTransaction` with "You created this item with TaxTyCd: B but
+   * selling it with: A" when a line disagrees with its item's own registered
+   * code. So an EXEMPT sale is refused up front here, before a document is
+   * even created, rather than being submitted and left to KRA to bounce --
+   * which would also burn a reserved `invcNo` for nothing. Only used for a
+   * fresh sale: an express credit note reuses its original's already-ACCEPTED
+   * lines, which passed this same check when the sale itself was created.
+   */
+  private async assertItemsAreExemptRegistered(itemIds: string[]): Promise<void> {
+    const items = await Promise.all(
+      itemIds.map((id) => this.catalog.getItemById(id)),
+    );
+    const resolved = items
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .map((item) => ({ id: item.id, name: item.name, taxTyCd: item.taxTyCd }));
+
+    const notExempt = findItemsNotRegisteredExempt(resolved);
+    if (notExempt.length > 0) {
+      throw new BadRequestException({
+        message: `Cannot file this sale as tax-exempt: KRA requires an item's tax type to match how it was registered. ${notExempt
+          .map((i) => i.name)
+          .join(', ')} ${notExempt.length === 1 ? 'is' : 'are'} not registered as Exempt with KRA.`,
+        items: notExempt.map((i) => i.id),
+      });
+    }
   }
 
   @Post('resync-invoice-sequence')
@@ -230,6 +280,13 @@ export class ApiSalesController {
       unitPrice: l.unitPrice,
       taxCategory: l.taxCategory,
       taxAmount: Math.abs(l.taxAmount),
+      // Carries the original's actual submitted tax code forward (e.g. 'A'
+      // on a line from an EXEMPT sale) -- without it, this would silently
+      // re-derive from the catalog item's current taxTyCd, which can differ
+      // from what the original sale actually charged (see
+      // applyInvoiceTypeOverride's doc comment for why taxCategory alone is
+      // not what reaches KRA).
+      taxTyCdSnapshot: l.taxTyCdSnapshot ?? undefined,
     }));
 
     const createResult = await this.salesService.createDocument(
@@ -255,6 +312,12 @@ export class ApiSalesController {
           body.paymentTypeCode ?? original.paymentTypeCode ?? '01',
         invoiceStatusCode:
           body.invoiceStatusCode ?? original.invoiceStatusCode ?? '02',
+        // Not read from the request -- a credit note reverses the sale it
+        // references, so it carries that sale's own tax treatment rather than
+        // letting a caller choose independently. `items` above already copied
+        // the original's per-line taxCategory/taxAmount, so this is just the
+        // matching document-level record for reporting.
+        invoiceType: original.invoiceType,
         currency: original.currency,
         exchangeRate: original.exchangeRate,
         subtotalAmount: items.reduce(

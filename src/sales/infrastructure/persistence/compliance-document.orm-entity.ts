@@ -73,6 +73,10 @@ export class ComplianceDocumentOrmEntity {
   @Column('varchar', { nullable: true })
   invoiceStatusCode!: string | null;
 
+  /** NORMAL | EXEMPT -- see ComplianceDocument.invoiceType's doc comment. */
+  @Column('varchar', { default: 'NORMAL' })
+  invoiceType!: string;
+
   @Column('varchar')
   currency!: string;
 

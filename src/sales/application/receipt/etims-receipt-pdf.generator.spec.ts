@@ -10,6 +10,7 @@ import {
 } from './etims-receipt-pdf.generator';
 import { ComplianceStatus } from '../../../shared/domain/enums/compliance-status.enum';
 import { DocumentType } from '../../../shared/domain/enums/document-type.enum';
+import { InvoiceType } from '../../../shared/domain/enums/invoice-type.enum';
 import { SourceSystem } from '../../../shared/domain/enums/source-system.enum';
 import { TaxCategory } from '../../../shared/domain/enums/tax-category.enum';
 import { ConnectionEnvironment } from '../../../shared/domain/enums/connection-environment.enum';
@@ -125,6 +126,7 @@ function baseDocument(overrides: Partial<ComplianceDocument> = {}): ComplianceDo
     receiptTypeCode: 'S',
     paymentTypeCode: '01',
     invoiceStatusCode: '02',
+    invoiceType: InvoiceType.NORMAL,
     currency: 'KES',
     exchangeRate: 1,
     subtotalAmount: 100,

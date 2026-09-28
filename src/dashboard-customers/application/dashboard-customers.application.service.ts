@@ -137,6 +137,7 @@ export class DashboardCustomersApplicationService {
       tin: input.tin ?? null,
       phoneNumber: input.phoneNumber ?? null,
       email: input.email ?? null,
+      taxExempt: input.taxExempt ?? false,
     });
     return this.customerRepo.save(entity);
   }
@@ -156,6 +157,7 @@ export class DashboardCustomersApplicationService {
       tin: input.tin ?? existing.tin,
       phoneNumber: input.phoneNumber ?? existing.phoneNumber,
       email: input.email ?? existing.email,
+      taxExempt: input.taxExempt ?? existing.taxExempt,
     });
     return this.customerRepo.save(existing);
   }

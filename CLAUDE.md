@@ -60,6 +60,13 @@ Idempotency key across submissions: `merchantId:sourceDocumentId:documentType`.
 - Apigee sometimes wraps a real rejection in an outer HTTP 200 — check `responseHeader.responseCode`, not HTTP status.
 - Some lookups (`selectStockMoveList`, `getPurchaseTransactionInfo`) need `tin`/`bhfId` duplicated in the JSON body even though already in headers.
 - `resultCd: "001"` ("no result") is a valid pass for lookups, not a failure.
+- **Tax treatment is tied to the item as registered, not to the transaction** -- confirmed live 2026-09-28: KRA
+  rejects `sendSalesTransaction` outright ("You created this item with TaxTyCd: B but selling it with: A") when
+  a line's tax type disagrees with the `taxTyCd` the item was registered under via `saveItem`. A tax-exempt
+  customer cannot force a normally-taxable item to file at 0% -- the item itself must already be registered
+  Exempt. See `invoiceType`/`findItemsNotRegisteredExempt` (`src/sales/domain/utils/invoice-type.util.ts`),
+  which `DashboardSalesController`/`ApiSalesController.createSale` run before creating a document, so this is
+  refused up front rather than burning a reserved `invcNo` on a submission KRA will bounce.
 
 **DB**: TypeORM, `synchronize: true` in `app.module.ts` and every spec's test module — there is no migrations directory; schema is fully auto-synced from entities. Supports MySQL (`mysql2`) for real use; `better-sqlite3`/`sql.js` are also deps, likely for lightweight/test scenarios. `StockRepositoryStub` inventory is in-memory only and resets on restart.
 

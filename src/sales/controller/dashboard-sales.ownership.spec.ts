@@ -9,6 +9,7 @@ import { MailerService } from '../../mailer/mailer.service';
 import { DOCUMENT_REPO } from '../../shared/tokens';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import { SalesService } from '../application/sales.service';
+import { CatalogService } from '../../catalog/api/catalog.service';
 import { DashboardSalesController } from './dashboard-sales.controller';
 
 /**
@@ -73,6 +74,12 @@ describe('DashboardSalesController -- cross-organization access', () => {
         {
           provide: InvoiceReceiptPushbackService,
           useValue: { notifyForRetriedDocuments: jest.fn() },
+        },
+        {
+          // Not exercised by this spec's scenarios (none create an EXEMPT
+          // sale) -- present only so DashboardSalesController resolves.
+          provide: CatalogService,
+          useValue: { getItemById: jest.fn() },
         },
         {
           provide: DOCUMENT_REPO,

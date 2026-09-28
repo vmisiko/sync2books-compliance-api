@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { InvoiceType } from '../../../shared/domain/enums/invoice-type.enum';
 
 export class CreateSaleItemDto {
   @ApiProperty({ description: 'Catalog item id (stable)' })
@@ -89,6 +90,15 @@ export class CreateSaleDto {
 
   @ApiProperty({ description: 'Invoice status code (OSCU salesSttsCd)' })
   invoiceStatusCode!: string;
+
+  @ApiProperty({
+    enum: InvoiceType,
+    required: false,
+    default: InvoiceType.NORMAL,
+    description:
+      'EXEMPT forces every line to 0% VAT, for a customer holding a KRA tax exemption -- overrides each item\'s own catalog tax category on this sale only. Enforced server-side regardless of the taxCategory/taxAmount sent on items.',
+  })
+  invoiceType?: InvoiceType;
 
   @ApiProperty({ type: [CreateSaleItemDto] })
   items!: CreateSaleItemDto[];

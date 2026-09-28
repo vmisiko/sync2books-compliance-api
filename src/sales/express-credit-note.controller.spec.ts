@@ -5,6 +5,7 @@ import { DashboardSalesController } from './controller/dashboard-sales.controlle
 import { SalesService } from './application/sales.service';
 import { ComplianceStatus } from '../shared/domain/enums/compliance-status.enum';
 import { DocumentType } from '../shared/domain/enums/document-type.enum';
+import { InvoiceType } from '../shared/domain/enums/invoice-type.enum';
 import { SourceSystem } from '../shared/domain/enums/source-system.enum';
 import type { Request } from 'express';
 import { PlatformOscuCallbackService } from '../integration/platform-outbound/platform-oscu-callback.service';
@@ -14,6 +15,7 @@ import { MerchantOwnershipGuard } from '../dashboard-identity/infrastructure/gua
 import { SaleOwnershipGuard } from './controller/sale-ownership.guard';
 import { AssertedMerchantGuard } from '../integration/asserted-merchant.guard';
 import { MailerService } from '../mailer/mailer.service';
+import { CatalogService } from '../catalog/api/catalog.service';
 
 describe('Express credit note controllers', () => {
   let apiController: ApiSalesController;
@@ -27,6 +29,7 @@ describe('Express credit note controllers', () => {
     submitDocument: jest.Mock;
     getNormalizedSaleReport: jest.Mock;
   };
+  let catalogService: { getItemById: jest.Mock };
 
   const acceptedSale = {
     id: 'sale-1',
@@ -42,6 +45,7 @@ describe('Express credit note controllers', () => {
     receiptTypeCode: 'S',
     paymentTypeCode: '01',
     invoiceStatusCode: '02',
+    invoiceType: InvoiceType.NORMAL,
     currency: 'KES',
     exchangeRate: 1,
     subtotalAmount: 100,
@@ -99,11 +103,22 @@ describe('Express credit note controllers', () => {
       submitDocument: jest.fn().mockResolvedValue({}),
       getNormalizedSaleReport: jest.fn().mockResolvedValue({ id: 'cn-1' }),
     };
+    // Defaults every item to Exempt-registered, so the invoiceType tests below
+    // exercise applyInvoiceTypeOverride itself, not this registration gate --
+    // the gate has its own dedicated describe block further down.
+    catalogService = {
+      getItemById: jest.fn().mockImplementation(async (id: string) => ({
+        id,
+        name: `Item ${id}`,
+        taxTyCd: 'A',
+      })),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ApiSalesController, DashboardSalesController],
       providers: [
         { provide: SalesService, useValue: salesService },
+        { provide: CatalogService, useValue: catalogService },
         {
           provide: PlatformOscuCallbackService,
           useValue: {
@@ -263,4 +278,210 @@ describe('Express credit note controllers', () => {
       { enqueueProcessing: false },
     )
   })
+
+  describe('invoiceType (tax-exempt sales)', () => {
+    const exemptBody = {
+      merchantId: 'merchant-1',
+      branchId: 'branch-1',
+      saleDate: '2026-02-20',
+      traderInvoiceNumber: 'INV-EXEMPT-1',
+      receiptTypeCode: 'S',
+      paymentTypeCode: '01',
+      invoiceStatusCode: '02',
+      invoiceType: InvoiceType.EXEMPT,
+      items: [
+        {
+          id: 'item-1',
+          quantity: 2,
+          unitPrice: 500,
+          // A caller sending real VAT alongside EXEMPT is exactly the case
+          // this override exists for -- it must never reach KRA.
+          taxCategory: 'VAT_STANDARD',
+          taxAmount: 160,
+        },
+      ],
+    };
+
+    it('defaults to NORMAL and leaves lines untouched when invoiceType is omitted', async () => {
+      await dashboardController.createSale(
+        {
+          merchantId: 'merchant-1',
+          branchId: 'branch-1',
+          saleDate: '2026-02-20',
+          traderInvoiceNumber: 'INV-NORMAL-1',
+          receiptTypeCode: 'S',
+          paymentTypeCode: '01',
+          invoiceStatusCode: '02',
+          items: [
+            { id: 'item-1', quantity: 1, unitPrice: 100, taxCategory: 'VAT_STANDARD', taxAmount: 16 },
+          ],
+        },
+        'false',
+      );
+
+      expect(salesService.createDocument).toHaveBeenCalledWith(
+        expect.objectContaining({
+          invoiceType: InvoiceType.NORMAL,
+          totalTax: 16,
+          lines: [expect.objectContaining({ taxCategory: 'VAT_STANDARD', taxAmount: 16 })],
+        }),
+        { enqueueProcessing: false },
+      );
+    });
+
+    // The security-relevant case: even though the client sent VAT_STANDARD /
+    // taxAmount 160, EXEMPT on the sale must force every line to 0% before
+    // totals are computed and before createDocument is called at all.
+    it('dashboard: forces every line to EXEMPT/0 tax and zeroes the totals', async () => {
+      await dashboardController.createSale(exemptBody, 'false');
+
+      expect(salesService.createDocument).toHaveBeenCalledWith(
+        expect.objectContaining({
+          invoiceType: InvoiceType.EXEMPT,
+          totalTax: 0,
+          subtotalAmount: 1000,
+          totalAmount: 1000,
+          lines: [
+            expect.objectContaining({
+              itemId: 'item-1',
+              taxCategory: 'EXEMPT',
+              taxAmount: 0,
+              // Without this, the item's own catalog taxTyCd would win
+              // downstream and KRA would still be charged real VAT -- see
+              // applyInvoiceTypeOverride's doc comment.
+              taxTyCdSnapshot: 'A',
+            }),
+          ],
+        }),
+        { enqueueProcessing: false },
+      );
+    });
+
+    it('api: forces every line to EXEMPT/0 tax the same way', async () => {
+      await apiController.createSale(exemptBody, emptyReq, 'false');
+
+      expect(salesService.createDocument).toHaveBeenCalledWith(
+        expect.objectContaining({
+          invoiceType: InvoiceType.EXEMPT,
+          totalTax: 0,
+          lines: [expect.objectContaining({ taxCategory: 'EXEMPT', taxAmount: 0, taxTyCdSnapshot: 'A' })],
+        }),
+        { enqueueProcessing: false },
+      );
+    });
+
+    it('an express credit note inherits its original sale’s invoiceType, not the request’s', async () => {
+      salesService.getDocument.mockResolvedValueOnce({
+        document: { ...acceptedSale, invoiceType: InvoiceType.EXEMPT },
+      });
+
+      await apiController.createExpressCreditNote(
+        {
+          merchantId: 'merchant-1',
+          branchId: 'branch-1',
+          saleId: 'sale-1',
+          traderInvoiceNumber: 'CN-EXEMPT-1',
+          returnDate: '2026-02-21',
+        },
+        emptyReq,
+        'false',
+      );
+
+      expect(salesService.createDocument).toHaveBeenCalledWith(
+        expect.objectContaining({ invoiceType: InvoiceType.EXEMPT }),
+        { enqueueProcessing: false },
+      );
+    });
+
+    // Independent of invoiceType: even a NORMAL sale's own real tax code
+    // (VAT_STANDARD/B here) must carry over so a credit note reverses the
+    // sale as it was actually charged, not as the catalog item is today.
+    it("copies the original sale's own taxTyCdSnapshot onto the credit note's lines", async () => {
+      await apiController.createExpressCreditNote(
+        {
+          merchantId: 'merchant-1',
+          branchId: 'branch-1',
+          saleId: 'sale-1',
+          traderInvoiceNumber: 'CN-SNAPSHOT-1',
+          returnDate: '2026-02-21',
+        },
+        emptyReq,
+        'false',
+      );
+
+      expect(salesService.createDocument).toHaveBeenCalledWith(
+        expect.objectContaining({
+          lines: [expect.objectContaining({ taxTyCdSnapshot: 'B' })],
+        }),
+        { enqueueProcessing: false },
+      );
+    });
+
+    it('an express credit note off a NORMAL sale stays NORMAL', async () => {
+      await apiController.createExpressCreditNote(
+        {
+          merchantId: 'merchant-1',
+          branchId: 'branch-1',
+          saleId: 'sale-1',
+          traderInvoiceNumber: 'CN-NORMAL-1',
+          returnDate: '2026-02-21',
+        },
+        emptyReq,
+        'false',
+      );
+
+      expect(salesService.createDocument).toHaveBeenCalledWith(
+        expect.objectContaining({ invoiceType: InvoiceType.NORMAL }),
+        { enqueueProcessing: false },
+      );
+    });
+  });
+
+  describe('EXEMPT sales must only include KRA-Exempt-registered items', () => {
+    const body = {
+      merchantId: 'merchant-1',
+      branchId: 'branch-1',
+      saleDate: '2026-02-20',
+      traderInvoiceNumber: 'INV-EXEMPT-GATE-1',
+      receiptTypeCode: 'S',
+      paymentTypeCode: '01',
+      invoiceStatusCode: '02',
+      invoiceType: InvoiceType.EXEMPT,
+      items: [{ id: 'item-1', quantity: 1, unitPrice: 100, taxCategory: 'VAT_STANDARD', taxAmount: 16 }],
+    };
+
+    // The KRA-confirmed rule: tax treatment is tied to the item as
+    // registered, not the transaction, so a normally-taxable item cannot be
+    // sold Exempt no matter what the sale claims.
+    it('refuses the sale before creating anything when an item is registered under a real VAT rate', async () => {
+      catalogService.getItemById.mockResolvedValueOnce({ id: 'item-1', name: 'Grilled Goat Ribs', taxTyCd: 'B' });
+
+      await expect(dashboardController.createSale(body, 'false')).rejects.toThrow(BadRequestException);
+      expect(salesService.createDocument).not.toHaveBeenCalled();
+    });
+
+    it('names the offending item in the error', async () => {
+      catalogService.getItemById.mockResolvedValueOnce({ id: 'item-1', name: 'Grilled Goat Ribs', taxTyCd: 'B' });
+
+      const error = await dashboardController.createSale(body, 'false').catch((e) => e);
+      expect(error.getResponse().message).toContain('Grilled Goat Ribs');
+      expect(error.getResponse().items).toEqual(['item-1']);
+    });
+
+    it('proceeds when every item is already Exempt-registered', async () => {
+      catalogService.getItemById.mockResolvedValueOnce({ id: 'item-1', name: 'Kenya Red Cross Grant', taxTyCd: 'A' });
+
+      await expect(apiController.createSale(body, emptyReq, 'false')).resolves.toBeDefined();
+      expect(salesService.createDocument).toHaveBeenCalled();
+    });
+
+    it('never runs the check for a NORMAL sale', async () => {
+      await apiController.createSale(
+        { ...body, invoiceType: InvoiceType.NORMAL },
+        emptyReq,
+        'false',
+      );
+      expect(catalogService.getItemById).not.toHaveBeenCalled();
+    });
+  });
 });

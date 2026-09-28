@@ -37,6 +37,16 @@ export class CustomerOrmEntity {
   @Column('varchar', { nullable: true })
   sourceSystem!: string | null;
 
+  /**
+   * True when this customer holds a KRA tax exemption -- drives the default
+   * for "Invoice Type" on Add Sale (see `InvoiceType.EXEMPT`). A default
+   * only: the person creating the sale can still override it per sale. Never
+   * set by an ERP pull, since no source system this repo pulls from carries
+   * exemption status -- manual/edit only.
+   */
+  @Column('boolean', { default: false })
+  taxExempt!: boolean;
+
   @CreateDateColumn()
   createdAt!: Date;
 

@@ -106,3 +106,96 @@ describe('DashboardCustomersApplicationService.pullCustomers', () => {
     expect(customerRepo._store.size).toBe(1);
   });
 });
+
+/**
+ * `taxExempt` drives the default "Invoice Type" on Add Sale (see
+ * `InvoiceType.EXEMPT` / `applyInvoiceTypeOverride`) -- a manual/edit-only
+ * flag, never set by an ERP pull, so this is covered separately from the
+ * pull fixtures above.
+ */
+describe('DashboardCustomersApplicationService taxExempt', () => {
+  function makeByIdRepo() {
+    const store = new Map<string, Record<string, unknown>>();
+    return {
+      findOne: jest.fn().mockImplementation(({ where: { id, merchantId } }) =>
+        Promise.resolve(
+          [...store.values()].find(
+            (c) => c.id === id && c.merchantId === merchantId,
+          ) ?? null,
+        ),
+      ),
+      create: jest
+        .fn()
+        .mockImplementation((entity: Record<string, unknown>) => entity),
+      save: jest.fn().mockImplementation((entity: Record<string, unknown>) => {
+        store.set(entity.id as string, entity);
+        return Promise.resolve(entity);
+      }),
+      _store: store,
+    };
+  }
+
+  function makeCreateUpdateService(customerRepo: ReturnType<typeof makeByIdRepo>) {
+    return new DashboardCustomersApplicationService(
+      customerRepo as unknown as never,
+      {} as OscuOperationsService,
+      { resolveMerchantId: jest.fn() } as unknown as ComplianceOrganizationApplicationService,
+      {} as unknown as MainApiConnectionApplicationService,
+      {} as unknown as MainApiPullClient,
+    );
+  }
+
+  it('defaults a new customer to not tax-exempt', async () => {
+    const repo = makeByIdRepo();
+    const service = makeCreateUpdateService(repo);
+
+    const created = await service.create({ merchantId: 'merchant-1', name: 'Karibu Wholesalers' });
+
+    expect(created.taxExempt).toBe(false);
+  });
+
+  it('creates a customer flagged tax-exempt', async () => {
+    const repo = makeByIdRepo();
+    const service = makeCreateUpdateService(repo);
+
+    const created = await service.create({
+      merchantId: 'merchant-1',
+      name: 'Kenya Red Cross',
+      taxExempt: true,
+    });
+
+    expect(created.taxExempt).toBe(true);
+  });
+
+  it('updates the flag on an existing customer', async () => {
+    const repo = makeByIdRepo();
+    const service = makeCreateUpdateService(repo);
+    const created = await service.create({ merchantId: 'merchant-1', name: 'Kenya Red Cross' });
+
+    const updated = await service.update('merchant-1', created.id, { taxExempt: true });
+
+    expect(updated.taxExempt).toBe(true);
+  });
+
+  // `??` (not `||`), so an explicit `false` overrides an existing `true`
+  // rather than being read as "not supplied".
+  it('can turn the flag back off', async () => {
+    const repo = makeByIdRepo();
+    const service = makeCreateUpdateService(repo);
+    const created = await service.create({ merchantId: 'merchant-1', name: 'Kenya Red Cross', taxExempt: true });
+
+    const updated = await service.update('merchant-1', created.id, { taxExempt: false });
+
+    expect(updated.taxExempt).toBe(false);
+  });
+
+  it('leaves the flag alone when not mentioned in the update', async () => {
+    const repo = makeByIdRepo();
+    const service = makeCreateUpdateService(repo);
+    const created = await service.create({ merchantId: 'merchant-1', name: 'Kenya Red Cross', taxExempt: true });
+
+    const updated = await service.update('merchant-1', created.id, { name: 'Kenya Red Cross Society' });
+
+    expect(updated.taxExempt).toBe(true);
+  });
+});

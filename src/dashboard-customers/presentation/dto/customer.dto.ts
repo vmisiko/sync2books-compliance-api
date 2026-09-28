@@ -15,6 +15,14 @@ export class CreateCustomerDto {
 
   @ApiProperty({ required: false })
   email?: string;
+
+  @ApiProperty({
+    required: false,
+    default: false,
+    description:
+      'Whether this customer holds a KRA tax exemption -- defaults the "Invoice Type" on Add Sale to EXEMPT for them.',
+  })
+  taxExempt?: boolean;
 }
 
 export class UpdateCustomerDto {
@@ -29,6 +37,9 @@ export class UpdateCustomerDto {
 
   @ApiProperty({ required: false })
   email?: string;
+
+  @ApiProperty({ required: false })
+  taxExempt?: boolean;
 }
 
 export class CustomerResponseDto {
@@ -52,6 +63,9 @@ export class CustomerResponseDto {
 
   @ApiProperty({ nullable: true, description: 'ERP provenance (SourceSystem enum value), when pulled from an ERP' })
   sourceSystem!: string | null;
+
+  @ApiProperty({ description: 'Whether this customer holds a KRA tax exemption' })
+  taxExempt!: boolean;
 
   @ApiProperty()
   createdAt!: Date;

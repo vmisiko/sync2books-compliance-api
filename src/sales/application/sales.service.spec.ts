@@ -1,6 +1,7 @@
 import { SalesService } from './sales.service';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import { DocumentType } from '../../shared/domain/enums/document-type.enum';
+import { InvoiceType } from '../../shared/domain/enums/invoice-type.enum';
 import { SourceSystem } from '../../shared/domain/enums/source-system.enum';
 import { TaxCategory } from '../../shared/domain/enums/tax-category.enum';
 import type { ComplianceDocument } from '../domain/entities/compliance-document.entity';
@@ -36,6 +37,7 @@ function baseDocument(
     receiptTypeCode: 'S',
     paymentTypeCode: '01',
     invoiceStatusCode: '02',
+    invoiceType: InvoiceType.NORMAL,
     currency: 'KES',
     exchangeRate: 1,
     subtotalAmount: 100,

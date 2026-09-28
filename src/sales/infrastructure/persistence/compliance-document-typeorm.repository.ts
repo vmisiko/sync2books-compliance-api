@@ -55,6 +55,9 @@ function docOrmToDomain(
     receiptTypeCode: row.receiptTypeCode,
     paymentTypeCode: row.paymentTypeCode,
     invoiceStatusCode: row.invoiceStatusCode,
+    // Rows written before this column existed have TypeORM's column default
+    // ('NORMAL'), never null, so no fallback is needed here.
+    invoiceType: row.invoiceType as ComplianceDocument['invoiceType'],
     currency: row.currency,
     exchangeRate: row.exchangeRate,
     subtotalAmount: row.subtotalAmount,
@@ -104,6 +107,7 @@ function docDomainToOrm(
   e.receiptTypeCode = document.receiptTypeCode;
   e.paymentTypeCode = document.paymentTypeCode;
   e.invoiceStatusCode = document.invoiceStatusCode;
+  e.invoiceType = document.invoiceType;
   e.currency = document.currency;
   e.exchangeRate = document.exchangeRate;
   e.subtotalAmount = document.subtotalAmount;
