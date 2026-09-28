@@ -79,7 +79,7 @@ describe('DashboardSalesController -- cross-organization access', () => {
           // Not exercised by this spec's scenarios (none create an EXEMPT
           // sale) -- present only so DashboardSalesController resolves.
           provide: CatalogService,
-          useValue: { getItemById: jest.fn(), getItemClassification: jest.fn() },
+          useValue: { getItemById: jest.fn() },
         },
         {
           provide: DOCUMENT_REPO,
