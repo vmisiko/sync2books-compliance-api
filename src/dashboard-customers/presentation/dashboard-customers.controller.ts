@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -70,6 +71,20 @@ export class DashboardCustomersController {
     @Body() body: UpdateCustomerDto,
   ) {
     return this.customers.update(merchantId, id, body);
+  }
+
+  @Delete(':id')
+  @ApiOperation({
+    summary:
+      'Delete a customer. Soft delete: it drops out of lists and invoice matching, and a later ERP pull leaves it deleted. Never touches the ERP or KRA.',
+  })
+  @ApiResponse({ status: 200, description: 'Customer deleted' })
+  @ApiResponse({ status: 404, description: 'No such customer for this merchant' })
+  async remove(
+    @Query('merchantId') merchantId: string,
+    @Param('id') id: string,
+  ) {
+    return this.customers.delete(merchantId, id);
   }
 
   @Post('pull')

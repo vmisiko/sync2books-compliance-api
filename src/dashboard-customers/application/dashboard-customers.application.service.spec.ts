@@ -1,3 +1,5 @@
+import { NotFoundException } from '@nestjs/common';
+import { FindOperator } from 'typeorm';
 import { DashboardCustomersApplicationService } from './dashboard-customers.application.service';
 import type { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import type { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
@@ -197,5 +199,151 @@ describe('DashboardCustomersApplicationService taxExempt', () => {
     const updated = await service.update('merchant-1', created.id, { name: 'Kenya Red Cross Society' });
 
     expect(updated.taxExempt).toBe(true);
+  });
+});
+
+describe('DashboardCustomersApplicationService.delete', () => {
+  /**
+   * In-memory repo that honours the `deletedAt: IsNull()` filter and the
+   * list() query builder's `deletedAt IS NULL` clause -- the parts under test.
+   */
+  function makeSoftDeleteRepo() {
+    const store = new Map<string, Record<string, unknown>>();
+    const matches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
+      Object.entries(where).every(([key, value]) =>
+        value instanceof FindOperator
+          ? value.type === 'isNull' && row[key] == null
+          : row[key] === value,
+      );
+    return {
+      findOne: jest.fn().mockImplementation(({ where }) =>
+        Promise.resolve([...store.values()].find((row) => matches(row, where)) ?? null),
+      ),
+      create: jest.fn().mockImplementation((entity: Record<string, unknown>) => entity),
+      save: jest.fn().mockImplementation((entity: Record<string, unknown>) => {
+        store.set(entity.id as string, entity);
+        return Promise.resolve(entity);
+      }),
+      createQueryBuilder: jest.fn().mockImplementation(() => {
+        const clauses: string[] = [];
+        let merchantId: string | undefined;
+        const qb = {
+          where: (_sql: string, params: { merchantId: string }) => {
+            merchantId = params.merchantId;
+            return qb;
+          },
+          andWhere: (sql: string) => {
+            clauses.push(sql);
+            return qb;
+          },
+          orderBy: () => qb,
+          getMany: () =>
+            Promise.resolve(
+              [...store.values()].filter(
+                (row) =>
+                  row.merchantId === merchantId &&
+                  (!clauses.includes('c.deletedAt IS NULL') || row.deletedAt == null),
+              ),
+            ),
+        };
+        return qb;
+      }),
+      _store: store,
+    };
+  }
+
+  function makeDeleteService(customerRepo: ReturnType<typeof makeSoftDeleteRepo>) {
+    const mainApiConnections = {
+      getForTenant: jest.fn().mockResolvedValue({
+        mainApiApiKey: 'key-1',
+        integrations: { quickbooks: { connectionId: 'conn-1' } },
+      }),
+      resolveMerchantId: jest.fn().mockResolvedValue('merchant-1'),
+    };
+    const mainApiPull = {
+      syncCustomersFromBookkeeping: jest.fn().mockResolvedValue(undefined),
+      getCustomers: jest.fn().mockResolvedValue({
+        customers: [
+          {
+            id: 'QB_14',
+            bookId: '14',
+            name: 'Amani Business Park Ltd',
+            companyName: 'Amani Business Park Ltd',
+            standardized: { sourceSystem: 'QUICKBOOKS' },
+          },
+        ],
+        total: 1,
+        page: 1,
+        limit: 100,
+        totalPages: 1,
+      }),
+    };
+    return new DashboardCustomersApplicationService(
+      customerRepo as unknown as never,
+      {} as OscuOperationsService,
+      { resolveMerchantId: jest.fn() } as unknown as ComplianceOrganizationApplicationService,
+      mainApiConnections as unknown as MainApiConnectionApplicationService,
+      mainApiPull as unknown as MainApiPullClient,
+    );
+  }
+
+  it('removes the customer from the list but keeps the row (soft delete)', async () => {
+    const repo = makeSoftDeleteRepo();
+    const service = makeDeleteService(repo);
+    const kept = await service.create({ merchantId: 'merchant-1', name: 'Kenya Red Cross' });
+    const gone = await service.create({ merchantId: 'merchant-1', name: 'UI Test Exempt Customer' });
+
+    const deleted = await service.delete('merchant-1', gone.id);
+
+    expect(deleted.deletedAt).toBeInstanceOf(Date);
+    expect(repo._store.has(gone.id)).toBe(true);
+    const listed = await service.list('merchant-1');
+    expect(listed.map((c) => c.id)).toEqual([kept.id]);
+  });
+
+  it("refuses another merchant's customer", async () => {
+    const repo = makeSoftDeleteRepo();
+    const service = makeDeleteService(repo);
+    const other = await service.create({ merchantId: 'merchant-2', name: 'Not Yours Ltd' });
+
+    await expect(service.delete('merchant-1', other.id)).rejects.toBeInstanceOf(NotFoundException);
+    expect(repo._store.get(other.id)?.deletedAt ?? null).toBeNull();
+  });
+
+  it('refuses a second delete and edits of a deleted customer', async () => {
+    const repo = makeSoftDeleteRepo();
+    const service = makeDeleteService(repo);
+    const created = await service.create({ merchantId: 'merchant-1', name: 'Grace Wanjiru' });
+    await service.delete('merchant-1', created.id);
+
+    await expect(service.delete('merchant-1', created.id)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.update('merchant-1', created.id, { name: 'Grace W.' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('a later ERP pull leaves a deleted customer deleted instead of re-creating it', async () => {
+    const repo = makeSoftDeleteRepo();
+    const service = makeDeleteService(repo);
+    await service.pullCustomers('tenant-1');
+    const [pulled] = [...repo._store.values()];
+    await service.delete('merchant-1', pulled.id as string);
+
+    const result = await service.pullCustomers('tenant-1');
+
+    expect(repo._store.size).toBe(1);
+    expect(repo._store.get(pulled.id as string)?.deletedAt).toBeInstanceOf(Date);
+    expect(result.results).toEqual([]);
+    expect(await service.list('merchant-1')).toEqual([]);
+  });
+
+  it('pulled-invoice matching no longer finds a deleted customer', async () => {
+    const repo = makeSoftDeleteRepo();
+    const service = makeDeleteService(repo);
+    await service.pullCustomers('tenant-1');
+    const [pulled] = [...repo._store.values()];
+    await service.delete('merchant-1', pulled.id as string);
+
+    expect(await service.findByExternalId('merchant-1', '14', 'QUICKBOOKS')).toBeNull();
   });
 });

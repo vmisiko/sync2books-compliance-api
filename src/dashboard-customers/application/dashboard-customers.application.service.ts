@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import type { Repository } from 'typeorm';
+import { IsNull, type Repository } from 'typeorm';
 import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import {
   MainApiConnectionApplicationService,
@@ -95,6 +95,7 @@ export class DashboardCustomersApplicationService {
     const qb = this.customerRepo
       .createQueryBuilder('c')
       .where('c.merchantId = :merchantId', { merchantId })
+      .andWhere('c.deletedAt IS NULL')
       .orderBy('c.createdAt', 'DESC');
 
     if (search && search.trim() !== '') {
@@ -125,6 +126,7 @@ export class DashboardCustomersApplicationService {
         merchantId,
         externalId,
         ...(sourceSystem ? { sourceSystem } : {}),
+        deletedAt: IsNull(),
       },
     });
   }
@@ -148,7 +150,7 @@ export class DashboardCustomersApplicationService {
     input: UpdateCustomerDto,
   ): Promise<CustomerOrmEntity> {
     const existing = await this.customerRepo.findOne({
-      where: { id, merchantId },
+      where: { id, merchantId, deletedAt: IsNull() },
     });
     if (!existing) throw new NotFoundException(`Customer ${id} not found`);
 
@@ -160,6 +162,27 @@ export class DashboardCustomersApplicationService {
       taxExempt: input.taxExempt ?? existing.taxExempt,
     });
     return this.customerRepo.save(existing);
+  }
+
+  /**
+   * Soft delete: the row drops out of the list, the Add Sale picker and
+   * pulled-invoice matching, and a later ERP pull leaves it deleted instead of
+   * re-creating it. Sales already issued to this customer keep their own copy
+   * of the buyer's name/PIN, so nothing on KRA's side changes. Deleting a
+   * customer here never touches the ERP.
+   */
+  async delete(merchantId: string, id: string): Promise<CustomerOrmEntity> {
+    const existing = await this.customerRepo.findOne({
+      where: { id, merchantId, deletedAt: IsNull() },
+    });
+    if (!existing) throw new NotFoundException(`Customer ${id} not found`);
+
+    existing.deletedAt = new Date();
+    const saved = await this.customerRepo.save(existing);
+    this.logger.log(
+      `Deleted customer ${id} (${existing.externalId ?? 'manual'}) for merchant ${merchantId}`,
+    );
+    return saved;
   }
 
   async getById(merchantId: string, id: string): Promise<CustomerOrmEntity> {
@@ -289,6 +312,11 @@ export class DashboardCustomersApplicationService {
           const existing = await this.customerRepo.findOne({
             where: { merchantId, externalId },
           });
+
+          // Deleted on the Customers page -- leave it deleted. Matching it
+          // (rather than filtering deleted rows out of this lookup) is what
+          // stops the pull from creating a fresh copy.
+          if (existing?.deletedAt) continue;
 
           const sourceSystem =
             mainApiCustomer.standardized?.sourceSystem ??

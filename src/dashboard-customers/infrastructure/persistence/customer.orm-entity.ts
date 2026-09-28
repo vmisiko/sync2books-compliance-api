@@ -47,6 +47,16 @@ export class CustomerOrmEntity {
   @Column('boolean', { default: false })
   taxExempt!: boolean;
 
+  /**
+   * Set when the customer is deleted from the Customers page. A plain column,
+   * deliberately NOT TypeORM's @DeleteDateColumn -- same reasoning as
+   * CatalogItemOrmEntity.deletedAt: getById must still resolve it for sales
+   * that already reference it. Also what keeps a later ERP pull from
+   * re-creating the row (see pullCustomers).
+   */
+  @Column({ type: 'datetime', nullable: true })
+  deletedAt!: Date | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 
