@@ -287,6 +287,10 @@ export interface MainApiCreateBillLineItem {
   totalAmount?: number;
   /** Required by CreateBillDto's line-item schema; a KRA purchase confirmation always represents a direct cost. */
   isDirectCost: boolean;
+  /** ERP-side account id the line posts to (QuickBooks Account Id, Odoo account.account id, ...) — from the Purchase Bills mapping. */
+  accountRef?: { id: string; name?: string };
+  /** ERP-side tax id for the line (QuickBooks TaxCode Id, Odoo account.tax id, ...) — from the Purchase Bills mapping. */
+  taxRateRef?: { id: string; name?: string };
 }
 
 export interface MainApiCreateBillRequest {
@@ -319,6 +323,48 @@ export interface MainApiCreateBillResponse {
    * a "not completed yet" placeholder when `awaitSync: false` was explicitly requested.
    */
   syncedToBookkeeping: boolean;
+}
+
+export interface MainApiCreateSupplierRequest {
+  supplierName: string;
+  taxNumber?: string;
+  emailAddress?: string;
+  phone?: string;
+  status: 'Active';
+}
+
+export interface MainApiCreateSupplierResponse {
+  supplier: {
+    id: string;
+    bookId?: string | null;
+    syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed';
+    [key: string]: unknown;
+  };
+  message: string;
+  syncBatchId: string;
+  /** Real outcome when called with `awaitSync: true` (the default here). */
+  syncedToBookkeeping: boolean;
+  /** The ERP's own rejection message when the awaited write failed. */
+  syncError?: string | null;
+}
+
+/** GET /connections/:connectionId/sync/bills/mappingOptions — every `id` is ERP-side, ready for a bill line's accountRef/taxRateRef. */
+export interface MainApiBillMappingOptions {
+  integrationKey: string;
+  accounts: Array<{
+    id: string;
+    name: string;
+    code?: string;
+    accountType: string;
+    isExpense: boolean;
+  }>;
+  taxes: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    usableForPurchases: boolean;
+  }>;
+  warnings: string[];
 }
 
 export interface MainApiCustomer {
@@ -551,6 +597,41 @@ export class MainApiPullClient {
       apiKey,
       `/bills/${connectionId}?awaitSync=${awaitSync}`,
       body,
+    );
+  }
+
+  /**
+   * POST /suppliers/connection/:connectionId — creates the vendor in the connected ERP. Requests
+   * `awaitSync=true` by default for the same reason `createBill` does: the caller needs the
+   * vendor's ERP id (`supplier.bookId`) before it can reference it on a Bill.
+   */
+  async createSupplier(
+    apiKey: string,
+    connectionId: string,
+    body: MainApiCreateSupplierRequest,
+    options: { awaitSync?: boolean } = {},
+  ): Promise<MainApiCreateSupplierResponse> {
+    const awaitSync = options.awaitSync ?? true;
+    return this.postJson<MainApiCreateSupplierResponse>(
+      apiKey,
+      `/suppliers/connection/${encodeURIComponent(connectionId)}?awaitSync=${awaitSync}`,
+      body,
+    );
+  }
+
+  /**
+   * GET /connections/:connectionId/sync/bills/mappingOptions — the accounts (read live from the
+   * ERP) and taxes a purchase Bill line can reference, backing the Mapping Center's Purchase
+   * Bills tab.
+   */
+  async getBillMappingOptions(
+    apiKey: string,
+    connectionId: string,
+  ): Promise<MainApiBillMappingOptions> {
+    return this.get<MainApiBillMappingOptions>(
+      apiKey,
+      `/connections/${encodeURIComponent(connectionId)}/sync/bills/mappingOptions`,
+      {},
     );
   }
 

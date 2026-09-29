@@ -8,6 +8,8 @@ import { DashboardSuppliersModule } from '../dashboard-suppliers/dashboard-suppl
 import { MainApiPullModule } from '../integration/main-api-pull/main-api-pull.module';
 import { OscuSyncStateOrmEntity } from '../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
 import { PurchaseInvoiceOrmEntity } from './infrastructure/persistence/purchase-invoice.orm-entity';
+import { PurchaseBillMappingOrmEntity } from './infrastructure/persistence/purchase-bill-mapping.orm-entity';
+import { PurchaseBillMappingService } from './application/purchase-bill-mapping.service';
 import { DashboardPurchasesApplicationService } from './application/dashboard-purchases.application.service';
 import { DashboardPurchasesController } from './presentation/dashboard-purchases.controller';
 
@@ -21,11 +23,12 @@ import { DashboardPurchasesController } from './presentation/dashboard-purchases
     MainApiPullModule,
     TypeOrmModule.forFeature([
       PurchaseInvoiceOrmEntity,
+      PurchaseBillMappingOrmEntity,
       OscuSyncStateOrmEntity,
     ]),
   ],
   controllers: [DashboardPurchasesController],
-  providers: [DashboardPurchasesApplicationService],
+  providers: [DashboardPurchasesApplicationService, PurchaseBillMappingService],
   exports: [DashboardPurchasesApplicationService],
 })
 export class DashboardPurchasesModule {}

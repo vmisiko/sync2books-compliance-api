@@ -153,7 +153,7 @@ export class PurchaseInvoiceOrmEntity {
   @Column('text', { nullable: true })
   erpSyncError!: string | null;
 
-  /** When `syncToErp` last succeeded (queued the bill — not when the ERP write itself completes, which is async). */
+  /** When `syncToErp` last succeeded — the ERP accepted the Bill (the push awaits the ERP write). */
   @Column('timestamp', { nullable: true })
   erpSyncedAt!: Date | null;
 

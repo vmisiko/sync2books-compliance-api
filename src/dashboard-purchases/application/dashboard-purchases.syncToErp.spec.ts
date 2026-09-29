@@ -5,6 +5,7 @@ import type { DashboardSuppliersApplicationService } from '../../dashboard-suppl
 import type { MainApiConnectionApplicationService } from '../../integration/main-api-pull/application/main-api-connection.application.service';
 import type { MainApiConnection } from '../../integration/main-api-pull/domain/entities/main-api-connection.entity';
 import type { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
+import type { PurchaseBillMappingService } from './purchase-bill-mapping.service';
 
 const MERCHANT_ID = 'merchant-1';
 const TENANT_ID = 'tenant-1';
@@ -80,13 +81,32 @@ function makeConnection(
   };
 }
 
+const MAPPED = {
+  integrationKey: 'quickbooks' as const,
+  connectionId: 'conn-1',
+  mainApiApiKey: 'key-1',
+  expenseAccount: { erpId: '80', erpName: 'Cost of Goods Sold' },
+  taxes: {
+    B: { erpId: '2', erpName: '16.0% S' },
+    A: { erpId: '12', erpName: 'Exempt' },
+  },
+};
+
 type Setup = {
   rows: PurchaseInvoiceOrmEntity[];
   save: jest.Mock;
-  getById: jest.Mock;
-  getForTenant: jest.Mock;
+  ensureInErp: jest.Mock;
+  resolveForSync: jest.Mock;
   createBill: jest.Mock;
 };
+
+function linked(bookId = 'qb-vendor-1') {
+  return {
+    status: 'linked',
+    created: false,
+    supplier: { id: 'supplier-1', bookId, name: 'ABC Supplies' },
+  };
+}
 
 function makeService(setup: Partial<Setup> & { rows: PurchaseInvoiceOrmEntity[] }) {
   const save = setup.save ?? jest.fn().mockImplementation(async (row) => row);
@@ -100,13 +120,10 @@ function makeService(setup: Partial<Setup> & { rows: PurchaseInvoiceOrmEntity[] 
         ReturnType<ComplianceOrganizationApplicationService['getTenantById']>
       >,
   };
-  const getById =
-    setup.getById ??
-    jest.fn().mockResolvedValue({ id: 'supplier-1', bookId: 'qb-vendor-1', name: 'ABC Supplies' });
-  const suppliers = { getById };
-  const getForTenant = setup.getForTenant ?? jest.fn().mockResolvedValue(makeConnection());
+  const ensureInErp = setup.ensureInErp ?? jest.fn().mockResolvedValue(linked());
+  const suppliers = { ensureInErp };
   const mainApiConnections = {
-    getForTenant,
+    getForTenant: jest.fn().mockResolvedValue(makeConnection()),
     resolveMerchantId: jest.fn().mockResolvedValue(MERCHANT_ID),
   };
   const createBill =
@@ -118,6 +135,8 @@ function makeService(setup: Partial<Setup> & { rows: PurchaseInvoiceOrmEntity[] 
       syncedToBookkeeping: true,
     });
   const mainApiPull = { createBill };
+  const resolveForSync = setup.resolveForSync ?? jest.fn().mockResolvedValue(MAPPED);
+  const billMapping = { resolveForSync };
 
   const service = new DashboardPurchasesApplicationService(
     repo as any,
@@ -129,9 +148,10 @@ function makeService(setup: Partial<Setup> & { rows: PurchaseInvoiceOrmEntity[] 
     undefined as any,
     mainApiConnections as unknown as MainApiConnectionApplicationService,
     mainApiPull as unknown as MainApiPullClient,
+    billMapping as unknown as PurchaseBillMappingService,
   );
 
-  return { service, repo, save, getById, getForTenant, createBill };
+  return { service, repo, save, ensureInErp, createBill };
 }
 
 describe('DashboardPurchasesApplicationService.syncToErp', () => {
@@ -151,6 +171,15 @@ describe('DashboardPurchasesApplicationService.syncToErp', () => {
         taxAmount: 16,
         totalAmount: 116,
         status: 'Open',
+        lineItems: [
+          expect.objectContaining({
+            unitAmount: 100,
+            quantity: 1,
+            subTotal: 100,
+            accountRef: { id: '80', name: 'Cost of Goods Sold' },
+            taxRateRef: { id: '2', name: '16.0% S' },
+          }),
+        ],
       }),
     );
     expect(row.erpSyncStatus).toBe('synced');
@@ -163,8 +192,8 @@ describe('DashboardPurchasesApplicationService.syncToErp', () => {
 
   it('fails every row with a clear message when no accounting system is connected', async () => {
     const row = makePurchaseRow();
-    const getForTenant = jest.fn().mockResolvedValue(makeConnection({}));
-    const { service, createBill } = makeService({ rows: [row], getForTenant });
+    const resolveForSync = jest.fn().mockResolvedValue(null);
+    const { service, createBill } = makeService({ rows: [row], resolveForSync });
 
     const result = await service.syncToErp(TENANT_ID, [row.id]);
 
@@ -197,18 +226,117 @@ describe('DashboardPurchasesApplicationService.syncToErp', () => {
     expect(row.erpSyncError).toMatch(/link this purchase to a supplier/i);
   });
 
-  it('refuses to sync when the matched supplier has no ERP-side bookId yet', async () => {
+  it('creates the supplier in the ERP first when it has no bookId yet, then pushes the bill against it', async () => {
     const row = makePurchaseRow();
-    const getById = jest
-      .fn()
-      .mockResolvedValue({ id: 'supplier-1', bookId: null, name: 'ABC Supplies' });
-    const { service, createBill } = makeService({ rows: [row], getById });
+    const ensureInErp = jest.fn().mockResolvedValue({ ...linked('qb-new-58'), created: true });
+    const { service, createBill } = makeService({ rows: [row], ensureInErp });
+
+    await service.syncToErp(TENANT_ID, [row.id]);
+
+    expect(ensureInErp).toHaveBeenCalledWith(TENANT_ID, 'supplier-1');
+    expect(createBill).toHaveBeenCalledWith(
+      'key-1',
+      'conn-1',
+      expect.objectContaining({ supplierRef: { id: 'qb-new-58', supplierName: 'ABC Supplies' } }),
+    );
+    expect(row.erpSyncStatus).toBe('synced');
+  });
+
+  it('reports the ERP\'s own error when the supplier cannot be created there', async () => {
+    const row = makePurchaseRow();
+    const ensureInErp = jest.fn().mockResolvedValue({
+      status: 'failed',
+      supplier: { id: 'supplier-1', bookId: null, name: 'ABC Supplies' },
+      error: 'Invalid email address',
+    });
+    const { service, createBill } = makeService({ rows: [row], ensureInErp });
 
     await service.syncToErp(TENANT_ID, [row.id]);
 
     expect(createBill).not.toHaveBeenCalled();
     expect(row.erpSyncStatus).toBe('sync_failed');
-    expect(row.erpSyncError).toMatch(/not linked to a record in your accounting system/i);
+    expect(row.erpSyncError).toBe(
+      'Could not create supplier "ABC Supplies" in your accounting system: Invalid email address',
+    );
+  });
+
+  it('pushes a shared supplier to the ERP only once per run', async () => {
+    const rows = [makePurchaseRow(), makePurchaseRow({ id: 'purchase-2', receiptNo: 'RCPT-2' })];
+    const { service, ensureInErp, createBill } = makeService({ rows });
+
+    await service.syncToErp(TENANT_ID, rows.map((r) => r.id));
+
+    expect(ensureInErp).toHaveBeenCalledTimes(1);
+    expect(createBill).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses to sync until a bill account is mapped', async () => {
+    const row = makePurchaseRow();
+    const resolveForSync = jest.fn().mockResolvedValue({ ...MAPPED, expenseAccount: null });
+    const { service, createBill } = makeService({ rows: [row], resolveForSync });
+
+    await service.syncToErp(TENANT_ID, [row.id]);
+
+    expect(createBill).not.toHaveBeenCalled();
+    expect(row.erpSyncError).toMatch(/Mapping Center → Purchase Bills/);
+  });
+
+  it('names every KRA tax type on the bill that has no ERP tax mapped', async () => {
+    const row = makePurchaseRow({
+      lineItems: [
+        { id: '1', description: 'Fuel', hsCode: '', qty: 1, unitPrice: 108, taxRate: 8, taxAmount: 8, total: 108 },
+        { id: '2', description: 'Export', hsCode: '', qty: 1, unitPrice: 50, taxRate: 0, taxAmount: 0, total: 50 },
+      ],
+      rawKraResponse: {
+        itemList: [
+          { itemSeq: 1, taxTyCd: 'E' },
+          { itemSeq: 2, taxTyCd: 'C' },
+        ],
+      },
+    });
+    const { service, createBill } = makeService({ rows: [row] });
+
+    await service.syncToErp(TENANT_ID, [row.id]);
+
+    expect(createBill).not.toHaveBeenCalled();
+    expect(row.erpSyncError).toMatch(/^Map KRA tax types C, E to a tax/);
+  });
+
+  it('sends net (VAT-exclusive) amounts, collapsing a line whose net does not split evenly per unit', async () => {
+    const row = makePurchaseRow({
+      lineItems: [
+        // 3 units, 100.00 net: 33.33 × 3 = 99.99, so it must post as one line of 100.00.
+        { id: '1', description: 'Paper', hsCode: '', qty: 3, unitPrice: 38.67, taxRate: 16, taxAmount: 16, total: 116 },
+        { id: '2', description: 'Pens', hsCode: '', qty: 2, unitPrice: 50, taxRate: 0, taxAmount: 0, total: 100 },
+      ],
+      rawKraResponse: {
+        itemList: [
+          { itemSeq: 1, taxTyCd: 'B' },
+          { itemSeq: 2, taxTyCd: 'A' },
+        ],
+      },
+    });
+    const { service, createBill } = makeService({ rows: [row] });
+
+    await service.syncToErp(TENANT_ID, [row.id]);
+
+    const body = createBill.mock.calls[0][2];
+    expect(body.lineItems[0]).toEqual(
+      expect.objectContaining({
+        description: 'Paper (qty 3)',
+        unitAmount: 100,
+        quantity: 1,
+        taxRateRef: { id: '2', name: '16.0% S' },
+      }),
+    );
+    expect(body.lineItems[1]).toEqual(
+      expect.objectContaining({
+        unitAmount: 50,
+        quantity: 2,
+        taxRateRef: { id: '12', name: 'Exempt' },
+      }),
+    );
+    expect(body).toEqual(expect.objectContaining({ subTotal: 200, taxAmount: 16, totalAmount: 216 }));
   });
 
   it('skips a purchase that is already synced instead of re-pushing it', async () => {
