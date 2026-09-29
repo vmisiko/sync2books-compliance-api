@@ -46,3 +46,20 @@ export class RegisterPurchaseLineItemDto {
   })
   productTypeCode!: string;
 }
+
+export class SavePurchaseBillMappingDto {
+  @ApiPropertyOptional({
+    description:
+      'ERP account id every purchase bill line posts to. null clears it; omit to leave unchanged.',
+    nullable: true,
+  })
+  expenseAccountId?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      "ERP tax id per KRA tax type, e.g. { B: '2', A: '12' }. null clears that type; omitted types are left unchanged.",
+    type: 'object',
+    additionalProperties: { type: 'string', nullable: true },
+  })
+  taxes?: Record<string, string | null>;
+}

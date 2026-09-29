@@ -248,6 +248,60 @@ synced skip, and a failed push recording the error without throwing).
 Both services: `tsc --noEmit` clean, full existing suites still green (257/257 in main-api,
 168/168 in compliance-api including the 11 new cases above).
 
+### Phase 2b — supplier push + account/tax mapping (2026-09-29) — done, live-verified
+
+Phase 2 could only push a Bill for a supplier that already had an ERP id, and it sent lines with
+no account and no tax. Four gaps closed:
+
+1. **Vendors are now created in the ERP.** "Create Supplier" on a purchase used to make a
+   local-only `dashboard_suppliers` row (no `bookId`), so `syncToErp()` always refused it.
+   `DashboardSuppliersApplicationService.ensureInErp()` now adopts a matching main-API vendor
+   (PIN first, then exact name; refresh-and-retry on a QuickBooks duplicate-name rejection) or
+   creates one via `POST /suppliers/connection/:connectionId?awaitSync=true` (new `awaitSync`
+   param, same pattern as bills). Called from Create Supplier and, for any supplier still
+   missing a `bookId`, from `syncToErp()` itself (at most once per supplier per run).
+2. **Link shows ERP state.** The Link dialog labels each supplier "In ERP" / "Local only"; a
+   local-only one is no longer a dead end since sync pushes it.
+3. **Account + tax per line.** New `dashboard_purchase_bill_mappings` (keyed by merchant *and*
+   integrationKey — every id is in one ERP's id space), edited in Mapping Center → Purchase
+   Bills (`GET/PUT dashboard-api/purchases/bill-mapping`). One bill account; one ERP tax per
+   KRA tax type A–E, read from each line's raw KRA `taxTyCd` (the stored `lineItems.taxRate`
+   defaults to 16 on A/C/D lines and is not trustworthy). `syncToErp()` refuses a purchase
+   with no bill account or an unmapped tax type, naming the missing letters. Options come
+   from main API's `GET /connections/:id/sync/bills/mappingOptions`, reworked to return
+   ERP-side ids: accounts read live from the ERP (the cached `accounts` table's AccountType
+   enum has no Expense/COGS members, so its sync drops exactly the accounts bills post to),
+   taxes from the TaxCode table with a purchase-usable flag (QuickBooks "Exempt Sale" and
+   Odoo `type_tax_use='sale'` taxes are sales-only). The sales-side Tax Mapping can't be
+   reused for this: those are sales codes.
+4. **Net amounts + QuickBooks tax.** KRA amounts are VAT-inclusive; lines now go out net
+   (`total - taxAmount`), header totals summed from the lines, and a net that doesn't split
+   evenly per unit posts as one line. `Bill.toQuickBooksBill()` now writes `TaxCodeRef`.
+
+Two more real bugs found while live-testing:
+- `CreateBillUseCase` rejected every **zero-tax** bill (`!bill.taxAmount`), as an opaque 500 —
+  zero-rated/exempt/non-VAT purchases could never sync. Fixed; its validation errors are now 400s.
+- Awaited ERP failures landed only on the sync item, so callers saw a generic "did not
+  complete" message. `awaitSync` responses (bill + supplier) now carry the sync item's error.
+
+Live-verified 2026-09-29 against the QuickBooks sandbox realm 9341456169531792 through the
+dashboard (Create Supplier → vendor 21; Sync to ERP → bills 26, 27 with account 78 and mapped
+TaxCodes) and against local Odoo through main API REST (vendor 20, bill 24, purchase 16% tax).
+At the time `GET /bills` could not be used to read the result, so the QuickBooks result was read
+from the stored `bookResponseData`.
+
+**Update 2026-09-29 — `GET /bills` fixed.** The `req.user` diagnosis above was stale:
+`getBills`/`updateBill` had already been moved to `@ApplicationContext()` in main-API commit
+`3856ea6` (2026-08-27). The real defects were: (a) `bills` had **no `company_id` column**, so
+`GET /bills` was scoped by Application alone and returned every compliance tenant's bills (the
+Odoo test company's bill appeared next to the QuickBooks company's); (b) `GetBillsQueryDto`
+did not declare `connectionId`, so the global `forbidNonWhitelisted` pipe 400'd it; (c) the
+bill use cases threw plain `Error`s, which surface as 500. Fixed in main API: `company_id` +
+`IDX_bills_application_company` (migration `042-add-company-id-to-bills.sql`, backfilled from
+`sync_batches`), `GET /bills` now **requires** `companyId` or `connectionId` (connection
+checked against the caller's Application), and `PUT /bills/:id` became
+`PUT /bills/:connectionId/:id` (no existing callers).
+
 ### Phase 3 — attachments (not built)
 
 1. Add an attachments relation to the purchase invoice (new join table or a JSON column,

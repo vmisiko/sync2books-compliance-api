@@ -110,6 +110,7 @@ function makeService(initialCounter: string, sendPurchaseTransaction: jest.Mock)
     undefined as never,
     mainApiConnections as never,
     undefined as never,
+    undefined as never,
   );
 
   return { service, row, store };

@@ -13,7 +13,10 @@ import {
   SUPPORTED_INTEGRATION_KEYS,
   type SupportedIntegrationKey,
 } from '../../integration/main-api-pull/application/main-api-connection.application.service';
-import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
+import {
+  MainApiPullClient,
+  type MainApiSupplier,
+} from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { OscuOperationsService } from '../../regulatory/oscu/presentation/oscu-operations.service';
 import { SupplierOrmEntity } from '../infrastructure/persistence/supplier.orm-entity';
 import type {
@@ -36,6 +39,22 @@ export type PullSuppliersResult = {
     error?: string;
   }>;
 };
+
+/**
+ * Outcome of making sure a dashboard Supplier exists as a vendor in the
+ * tenant's connected ERP. `linked` means it now carries a `bookId` —
+ * `created` says whether that took a new vendor or adopted one the ERP
+ * already had for the same PIN/name.
+ */
+export type SupplierErpPushResult =
+  | { status: 'linked'; supplier: SupplierOrmEntity; created: boolean }
+  | { status: 'failed'; supplier: SupplierOrmEntity; error: string }
+  | { status: 'skipped'; supplier: SupplierOrmEntity; reason: string };
+
+const normalizePin = (value: string | null | undefined) =>
+  (value ?? '').trim().toUpperCase();
+const normalizeName = (value: string | null | undefined) =>
+  (value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 
 const SOURCE_DISPLAY_NAME: Record<SupportedIntegrationKey, string> = {
   quickbooks: 'QuickBooks',
@@ -332,6 +351,155 @@ export class DashboardSuppliersApplicationService {
       failed: results.filter((r) => r.status === 'error').length,
       results,
     };
+  }
+
+  /**
+   * Makes sure this Supplier exists as a vendor in the tenant's connected
+   * ERP, so a purchase Bill can reference it (`supplierRef.id` must be the
+   * ERP's own id — `bookId`). A Supplier created from a purchase's eTIMS
+   * data starts life local-only; this is what turns it into a real vendor.
+   *
+   * Adopts before it creates: the ERP may already hold this vendor (added
+   * there directly, or never pulled), and QuickBooks rejects a second
+   * vendor with the same display name outright. So it first looks for a
+   * main-API supplier with the same PIN (or, failing that, the same name),
+   * and on a duplicate-name rejection refreshes main API's vendor cache from
+   * the ERP and looks again before giving up.
+   */
+  async ensureInErp(
+    complianceTenantId: string,
+    supplierId: string,
+  ): Promise<SupplierErpPushResult> {
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+    const supplier = await this.getById(merchantId, supplierId);
+    if (supplier.bookId) {
+      return { status: 'linked', supplier, created: false };
+    }
+
+    const connection =
+      await this.mainApiConnections.getForTenant(complianceTenantId);
+    const integrationKey = SUPPORTED_INTEGRATION_KEYS.find(
+      (key) => connection.integrations[key]?.connectionId,
+    );
+    const connectionId = integrationKey
+      ? connection.integrations[integrationKey]?.connectionId
+      : null;
+    if (!integrationKey || !connectionId) {
+      return {
+        status: 'skipped',
+        supplier,
+        reason:
+          'No connected accounting system for this tenant yet — connect QuickBooks or Odoo to create this supplier there.',
+      };
+    }
+
+    const adopt = async (): Promise<SupplierErpPushResult | null> => {
+      const match = await this.findErpVendor(
+        connection.mainApiApiKey,
+        connectionId,
+        supplier,
+      );
+      if (!match?.bookId) return null;
+      supplier.externalId = match.id;
+      supplier.bookId = match.bookId;
+      supplier.sourceSystem = integrationKey.toUpperCase();
+      return {
+        status: 'linked',
+        supplier: await this.supplierRepo.save(supplier),
+        created: false,
+      };
+    };
+
+    try {
+      const adopted = await adopt();
+      if (adopted) return adopted;
+
+      const response = await this.mainApiPull.createSupplier(
+        connection.mainApiApiKey,
+        connectionId,
+        {
+          supplierName: supplier.name,
+          taxNumber: supplier.tin ?? undefined,
+          emailAddress: supplier.email ?? undefined,
+          phone: supplier.phoneNumber ?? undefined,
+          status: 'Active',
+        },
+      );
+
+      if (response.syncedToBookkeeping && response.supplier.bookId) {
+        supplier.externalId = response.supplier.id;
+        supplier.bookId = String(response.supplier.bookId);
+        supplier.sourceSystem = integrationKey.toUpperCase();
+        return {
+          status: 'linked',
+          supplier: await this.supplierRepo.save(supplier),
+          created: true,
+        };
+      }
+
+      const error =
+        response.syncError ??
+        `The supplier was not created in your accounting system (status: ${response.supplier.syncStatus ?? 'unknown'}).`;
+
+      if (/duplicate/i.test(error)) {
+        await this.mainApiPull
+          .syncSuppliersFromBookkeeping(connection.mainApiApiKey, connectionId)
+          .catch((refreshError: unknown) =>
+            this.logger.warn(
+              `Vendor refresh after duplicate-name rejection failed: ${
+                refreshError instanceof Error
+                  ? refreshError.message
+                  : String(refreshError)
+              }`,
+            ),
+          );
+        const adoptedAfterRefresh = await adopt();
+        if (adoptedAfterRefresh) return adoptedAfterRefresh;
+      }
+
+      return { status: 'failed', supplier, error };
+    } catch (error) {
+      return {
+        status: 'failed',
+        supplier,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /** A main-API supplier (already in the ERP) matching this Supplier by PIN, else by exact name. */
+  private async findErpVendor(
+    apiKey: string,
+    connectionId: string,
+    supplier: SupplierOrmEntity,
+  ) {
+    // Paged rather than name-searched: a PIN match must win even when the
+    // ERP spells the vendor's name differently from its eTIMS filing.
+    const inErp: MainApiSupplier[] = [];
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const response = await this.mainApiPull.getSuppliers(
+        apiKey,
+        connectionId,
+        { page, limit: 100 },
+      );
+      inErp.push(...response.suppliers.filter((s) => s.bookId));
+      totalPages = response.totalPages || 1;
+      page += 1;
+    } while (page <= totalPages && page <= 20);
+
+    const pin = normalizePin(supplier.tin);
+    const name = normalizeName(supplier.name);
+    return (
+      (pin && inErp.find((s) => normalizePin(s.taxNumber) === pin)) ||
+      inErp.find(
+        (s) =>
+          normalizeName(s.supplierName) === name ||
+          normalizeName(s.contactName) === name,
+      ) ||
+      null
+    );
   }
 
   private async resolveMerchantId(complianceTenantId: string): Promise<string> {

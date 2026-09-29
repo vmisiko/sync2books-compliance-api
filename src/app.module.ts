@@ -45,6 +45,7 @@ import { MainApiConnectionOrmEntity } from './integration/main-api-pull/infrastr
 import { MainApiPullModule } from './integration/main-api-pull/main-api-pull.module';
 import { PlatformCorrelationModule } from './integration/platform-correlation.module';
 import { PurchaseInvoiceOrmEntity } from './dashboard-purchases/infrastructure/persistence/purchase-invoice.orm-entity';
+import { PurchaseBillMappingOrmEntity } from './dashboard-purchases/infrastructure/persistence/purchase-bill-mapping.orm-entity';
 import { SupplierOrmEntity } from './dashboard-suppliers/infrastructure/persistence/supplier.orm-entity';
 
 @Module({
@@ -83,6 +84,7 @@ import { SupplierOrmEntity } from './dashboard-suppliers/infrastructure/persiste
         OscuSyncStateOrmEntity,
         PaymentTypeMappingOrmEntity,
         PurchaseInvoiceOrmEntity,
+        PurchaseBillMappingOrmEntity,
         StockMovementOrmEntity,
         SupplierOrmEntity,
         TaxMappingOrmEntity,

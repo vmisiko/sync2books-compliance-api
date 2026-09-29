@@ -6,8 +6,12 @@ import {
   HttpStatus,
   Param,
   Post,
+  Put,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
+import type { DashboardRequestUser } from '../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -18,9 +22,11 @@ import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/g
 import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guards/active-tenant.guard';
 import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { DashboardPurchasesApplicationService } from '../application/dashboard-purchases.application.service';
+import { PurchaseBillMappingService } from '../application/purchase-bill-mapping.service';
 import {
   CreateSupplierFromPurchaseDto,
   LinkSupplierDto,
+  SavePurchaseBillMappingDto,
   PullPurchasesDto,
   PurchaseIdsDto,
   RegisterPurchaseLineItemDto,
@@ -33,7 +39,39 @@ import {
 export class DashboardPurchasesController {
   constructor(
     private readonly purchases: DashboardPurchasesApplicationService,
+    private readonly billMapping: PurchaseBillMappingService,
   ) {}
+
+  @Get('bill-mapping')
+  @ApiOperation({
+    summary:
+      "Purchase Bills mapping for the connected ERP: the account every bill line posts to and the ERP tax each KRA tax type (A-E) is written as, plus the ERP's live account/tax options and name-based suggestions for unmapped tax types",
+  })
+  @ApiResponse({ status: 200, description: 'Mapping, options and suggestions' })
+  async getBillMapping(@ActiveTenant() tenantId: string) {
+    const data = await this.billMapping.get(tenantId);
+    return { success: true, message: 'OK', data };
+  }
+
+  @Put('bill-mapping')
+  @ApiOperation({
+    summary:
+      'Save the Purchase Bills mapping. Ids are validated against the ERP\'s live options; null clears a row, an omitted key leaves it unchanged',
+  })
+  @ApiResponse({ status: 200, description: 'Saved mapping' })
+  async saveBillMapping(
+    @ActiveTenant() tenantId: string,
+    @Req() req: Request,
+    @Body() body: SavePurchaseBillMappingDto,
+  ) {
+    const user = req.user as DashboardRequestUser | undefined;
+    const data = await this.billMapping.save(
+      tenantId,
+      { expenseAccountId: body.expenseAccountId, taxes: body.taxes },
+      user?.email ?? null,
+    );
+    return { success: true, message: 'Purchase bill mapping saved', data };
+  }
 
   @Post('pull')
   @HttpCode(HttpStatus.OK)
