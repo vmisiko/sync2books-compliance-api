@@ -62,7 +62,7 @@ describe.each([
   beforeEach(async () => {
     svc = {
       list: jest.fn().mockResolvedValue([]),
-      create: jest.fn().mockResolvedValue({ id: 'new-row' }),
+      createWithErp: jest.fn().mockResolvedValue({ id: 'new-row' }),
       update: jest.fn().mockResolvedValue({ id: 'row-1' }),
       verifyKra: jest.fn().mockResolvedValue({ found: false }),
       [pull]: jest.fn().mockResolvedValue({ pulled: 0 }),
@@ -191,7 +191,7 @@ describe.each([
         .set(as(ORG_A))
         .send({ merchantId: 'company-a', name: 'Acme' })
         .expect(201);
-      expect(svc.create).toHaveBeenCalledTimes(1);
+      expect(svc.createWithErp).toHaveBeenCalledTimes(1);
     });
 
     it("403s a create under another organization's merchant", async () => {
@@ -200,7 +200,7 @@ describe.each([
         .set(as(ORG_A))
         .send({ merchantId: 'company-b', name: 'Planted' })
         .expect(403);
-      expect(svc.create).not.toHaveBeenCalled();
+      expect(svc.createWithErp).not.toHaveBeenCalled();
     });
 
     // Handler reads the body; a guard that looked only at the query would have
@@ -211,7 +211,7 @@ describe.each([
         .set(as(ORG_A))
         .send({ merchantId: 'company-b', name: 'Planted' })
         .expect(403);
-      expect(svc.create).not.toHaveBeenCalled();
+      expect(svc.createWithErp).not.toHaveBeenCalled();
     });
   });
 

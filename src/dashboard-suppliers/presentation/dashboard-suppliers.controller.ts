@@ -23,7 +23,11 @@ import { MerchantIdOptional } from '../../dashboard-identity/infrastructure/guar
 import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guards/active-tenant.guard';
 import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { DashboardSuppliersApplicationService } from '../application/dashboard-suppliers.application.service';
-import { CreateSupplierDto, UpdateSupplierDto } from './dto/supplier.dto';
+import {
+  CreateSupplierDto,
+  SupplierIdsDto,
+  UpdateSupplierDto,
+} from './dto/supplier.dto';
 
 /**
  * Guarded the same way as `DashboardCustomersController`: trusts `merchantId`
@@ -55,7 +59,23 @@ export class DashboardSuppliersController {
   @ApiResponse({ status: 201, description: 'Supplier created' })
   @ApiBadRequestResponse({ description: 'Validation failed' })
   async create(@Body() body: CreateSupplierDto) {
-    return this.suppliers.create(body);
+    return this.suppliers.createWithErp(body);
+  }
+
+  @Post('sync-to-erp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Create (or link, when the ERP already has a matching PIN/name) each selected supplier in the connected ERP. Per-supplier outcomes; one failure never aborts the rest.',
+  })
+  @ApiResponse({ status: 200, description: 'Per-supplier results' })
+  @MerchantIdOptional()
+  @UseGuards(ActiveTenantGuard)
+  async syncToErp(
+    @ActiveTenant() tenantId: string,
+    @Body() body: SupplierIdsDto,
+  ) {
+    return { results: await this.suppliers.syncManyToErp(tenantId, body.ids) };
   }
 
   @Patch(':id')

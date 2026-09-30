@@ -165,3 +165,31 @@ describe('DashboardSuppliersApplicationService.ensureInErp', () => {
     expect(createSupplier).not.toHaveBeenCalled();
   });
 });
+
+describe('DashboardSuppliersApplicationService.syncManyToErp', () => {
+  it('reports every selected supplier and keeps going after a failure', async () => {
+    const supplier = makeSupplier();
+    const { service, supplierRepo } = makeService({ supplier });
+    // Second id isn't this merchant's: the scoped lookup comes back empty.
+    supplierRepo.findOne
+      .mockResolvedValueOnce(supplier)
+      .mockResolvedValueOnce(null);
+
+    const results = await service.syncManyToErp(TENANT_ID, ['supplier-1', 'someone-elses']);
+
+    expect(results[0]).toEqual(expect.objectContaining({ id: 'supplier-1', status: 'linked', created: true }));
+    expect(results[1]).toEqual(expect.objectContaining({ id: 'someone-elses', status: 'failed' }));
+  });
+
+  it('tags a Business Central vendor with the underscored SourceSystem value', async () => {
+    const supplier = makeSupplier();
+    const { service } = makeService({
+      supplier,
+      integrations: { 'microsoft-dynamics-365-business-central': { connectionId: 'conn-bc' } },
+    });
+
+    await service.ensureInErp(TENANT_ID, 'supplier-1');
+
+    expect(supplier.sourceSystem).toBe('MICROSOFT_DYNAMICS_365_BUSINESS_CENTRAL');
+  });
+});

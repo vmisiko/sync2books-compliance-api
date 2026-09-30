@@ -18,6 +18,12 @@ import {
   type MainApiSupplier,
 } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { OscuOperationsService } from '../../regulatory/oscu/presentation/oscu-operations.service';
+import {
+  normalizeName,
+  normalizePin,
+  sourceSystemForIntegrationKey,
+  type ContactErpSyncResult,
+} from '../../shared/application/erp-contact-sync';
 import { SupplierOrmEntity } from '../infrastructure/persistence/supplier.orm-entity';
 import type {
   CreateSupplierDto,
@@ -50,11 +56,6 @@ export type SupplierErpPushResult =
   | { status: 'linked'; supplier: SupplierOrmEntity; created: boolean }
   | { status: 'failed'; supplier: SupplierOrmEntity; error: string }
   | { status: 'skipped'; supplier: SupplierOrmEntity; reason: string };
-
-const normalizePin = (value: string | null | undefined) =>
-  (value ?? '').trim().toUpperCase();
-const normalizeName = (value: string | null | undefined) =>
-  (value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 
 const SOURCE_DISPLAY_NAME: Record<SupportedIntegrationKey, string> = {
   quickbooks: 'QuickBooks',
@@ -155,6 +156,32 @@ export class DashboardSuppliersApplicationService {
         (c) => (c.tin ?? '').trim().toUpperCase() === normalized,
       ) ?? null
     );
+  }
+
+  /**
+   * Add Supplier from the dashboard, optionally pushing it to the ERP in the
+   * same request (the dialog's "Sync to ERP" toggle). A failed push never
+   * undoes the local row — the outcome is reported in `erp`, and the
+   * supplier can be synced again later from the list.
+   */
+  async createWithErp(input: CreateSupplierDto): Promise<
+    SupplierOrmEntity & { erp?: Omit<ContactErpSyncResult, 'id' | 'name'> }
+  > {
+    const created = await this.create(input);
+    if (!input.syncToErp) return created;
+    const r = await this.ensureInErpForMerchant(input.merchantId, created.id);
+    return Object.assign(r.supplier, {
+      erp: {
+        status: r.status,
+        created: r.status === 'linked' ? r.created : undefined,
+        message:
+          r.status === 'failed'
+            ? r.error
+            : r.status === 'skipped'
+              ? r.reason
+              : undefined,
+      },
+    });
   }
 
   async update(
@@ -402,7 +429,7 @@ export class DashboardSuppliersApplicationService {
       if (!match?.bookId) return null;
       supplier.externalId = match.id;
       supplier.bookId = match.bookId;
-      supplier.sourceSystem = integrationKey.toUpperCase();
+      supplier.sourceSystem = sourceSystemForIntegrationKey(integrationKey);
       return {
         status: 'linked',
         supplier: await this.supplierRepo.save(supplier),
@@ -429,7 +456,7 @@ export class DashboardSuppliersApplicationService {
       if (response.syncedToBookkeeping && response.supplier.bookId) {
         supplier.externalId = response.supplier.id;
         supplier.bookId = String(response.supplier.bookId);
-        supplier.sourceSystem = integrationKey.toUpperCase();
+        supplier.sourceSystem = sourceSystemForIntegrationKey(integrationKey);
         return {
           status: 'linked',
           supplier: await this.supplierRepo.save(supplier),
@@ -465,6 +492,57 @@ export class DashboardSuppliersApplicationService {
         error: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  /** ensureInErp for a caller that knows the merchant (Add Supplier), not the tenant. */
+  async ensureInErpForMerchant(
+    merchantId: string,
+    supplierId: string,
+  ): Promise<SupplierErpPushResult> {
+    const tenant =
+      await this.organization.getTenantBySync2booksCompanyId(merchantId);
+    if (!tenant) throw new NotFoundException(`Business ${merchantId} not found`);
+    return this.ensureInErp(tenant.id, supplierId);
+  }
+
+  /**
+   * Bulk "Sync to ERP" from the Suppliers page: ensureInErp for each id,
+   * sequentially (QuickBooks rate-limits, and a later id may be adopted by
+   * the vendor refresh an earlier one triggered). One failure never aborts
+   * the rest. Ids outside this tenant's merchant come back `failed` (not
+   * found), never touched.
+   */
+  async syncManyToErp(
+    complianceTenantId: string,
+    ids: string[],
+  ): Promise<ContactErpSyncResult[]> {
+    if (!ids?.length) throw new BadRequestException('No suppliers selected');
+    const results: ContactErpSyncResult[] = [];
+    for (const id of [...new Set(ids)]) {
+      try {
+        const r = await this.ensureInErp(complianceTenantId, id);
+        results.push({
+          id,
+          name: r.supplier.name,
+          status: r.status,
+          created: r.status === 'linked' ? r.created : undefined,
+          message:
+            r.status === 'failed'
+              ? r.error
+              : r.status === 'skipped'
+                ? r.reason
+                : undefined,
+        });
+      } catch (error) {
+        results.push({
+          id,
+          name: '',
+          status: 'failed',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return results;
   }
 
   /** A main-API supplier (already in the ERP) matching this Supplier by PIN, else by exact name. */
