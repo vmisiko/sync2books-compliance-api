@@ -17,12 +17,28 @@ export interface IStockRepository {
   listByBranch(branchId?: string): Promise<InventoryStock[]>;
   /** Every stock row for one item, under whatever branch ids it's keyed by. */
   listByItem(itemId: string): Promise<InventoryStock[]>;
+  /**
+   * Stock rows for a set of items in one read -- the batched form of
+   * listByItem, for a caller that already holds a tenant's item ids (the
+   * Item Sync list). inventory_stock carries no merchantId, so tenant scope
+   * comes entirely from the ids the caller passes: never pass ids that were
+   * not read through a merchant-scoped query.
+   */
+  listByItems(itemIds: string[]): Promise<InventoryStock[]>;
 }
 
 export interface IStockMovementRepository {
   append(movement: StockMovement): Promise<StockMovement>;
+  /**
+   * `stock_movements` carries no merchantId, so a tenant-facing caller scopes
+   * the read with `itemIds` -- the ids it already resolved through a
+   * merchant-scoped query. When set, only movements of those items are
+   * returned, and an empty array returns nothing (it is a scope, not "no
+   * filter"). Omit `itemIds` only for callers that are not acting for a tenant.
+   */
   list(params: {
     itemId?: string;
+    itemIds?: string[];
     branchId?: string;
     limit?: number;
   }): Promise<StockMovement[]>;

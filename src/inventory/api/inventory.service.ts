@@ -245,6 +245,46 @@ export class InventoryService {
     }
   }
 
+  /**
+   * Strict counterpart of {@link toCanonicalBranchId} for the operations a
+   * person (or the main API) invokes by naming an item and a branch:
+   * adjust, transfer, and KRA ledger repair.
+   *
+   * {@link toCanonicalBranchId} deliberately lets an id it cannot resolve
+   * through, so a stale or foreign branch id still lands a stock row -- keyed
+   * by a branch that is not the item's tenant's. The item's own tenant then
+   * finds no eTIMS connection for that branch and both KRA pushes are skipped,
+   * leaving stock that exists locally, on another business's branch, and never
+   * reaches KRA. Here an id that resolves to no branch of the item's tenant is
+   * refused instead.
+   *
+   * Still tolerant where there is nothing to check against: no organization
+   * service wired (plain unit specs), an unknown item, or an item whose tenant
+   * is not provisioned in compliance-api at all.
+   */
+  private async requireBranchInItemTenant(
+    itemId: string,
+    branchId: string,
+  ): Promise<string> {
+    if (!this.organization || !this.itemRepo) return branchId;
+    const [item] = await this.itemRepo.findByIds([itemId]);
+    if (!item) return branchId;
+    const tenant = await this.organization.getTenantByMerchantId(
+      item.merchantId,
+    );
+    if (!tenant) return branchId;
+    const canonical = await this.organization.resolveCanonicalBranchId(
+      tenant.id,
+      branchId,
+    );
+    if (!canonical) {
+      throw new BadRequestException(
+        `Branch ${branchId} does not belong to the business that owns item ${itemId}`,
+      );
+    }
+    return canonical;
+  }
+
   private shouldSyncMovementsToEtims(): boolean {
     return (process.env.ETIMS_STOCK_SYNC ?? '').toLowerCase() === 'true';
   }
@@ -1013,7 +1053,7 @@ export class InventoryService {
     ledgerEntry: EtimsPushOutcome;
     stockMaster: EtimsPushOutcome;
   }> {
-    const branchId = await this.toCanonicalBranchId(
+    const branchId = await this.requireBranchInItemTenant(
       params.itemId,
       params.branchId,
     );
@@ -1293,6 +1333,13 @@ export class InventoryService {
     );
   }
 
+  /**
+   * UNSCOPED: with no branchId this returns every tenant's rows, and even with
+   * one it does not check the branch's owner. `inventory_stock` has no
+   * merchantId, so a caller acting for a tenant must not use this -- resolve
+   * the tenant's item ids and use {@link listStockForItems} (see
+   * DashboardInventoryApplicationService.listStock).
+   */
   async listStock(branchId?: string) {
     return this.stockRepo.listByBranch(branchId);
   }
@@ -1302,8 +1349,15 @@ export class InventoryService {
     return this.stockRepo.listByItem(itemId);
   }
 
+  /** Batched listStockForItem -- the caller is responsible for passing only ids it already scoped to a tenant. */
+  async listStockForItems(itemIds: string[]) {
+    return this.stockRepo.listByItems(itemIds);
+  }
+
+  /** Pass `itemIds` (already scoped to a tenant) when acting for one -- see IStockMovementRepository.list. */
   async listMovements(params: {
     itemId?: string;
+    itemIds?: string[];
     branchId?: string;
     limit?: number;
   }) {
@@ -1325,13 +1379,17 @@ export class InventoryService {
     referenceId?: string;
     unitPrice?: number;
   }) {
+    const branchId = await this.requireBranchInItemTenant(
+      params.itemId,
+      params.branchId,
+    );
     const signedQty =
       params.action === 'DEDUCT'
         ? -Math.abs(params.quantity)
         : Math.abs(params.quantity);
     return this.recordMovement({
       itemId: params.itemId,
-      branchId: params.branchId,
+      branchId,
       movementType: MovementType.ADJUSTMENT,
       quantity: signedQty,
       referenceType: params.movementTypeCode
@@ -1352,11 +1410,21 @@ export class InventoryService {
     unitPrice?: number;
   }) {
     await this.assertSameMerchant(params.itemId, params.receivingItemId);
+    // Both ends are checked before either movement is written, so a bad
+    // destination can't leave the source already debited.
+    const fromBranchId = await this.requireBranchInItemTenant(
+      params.itemId,
+      params.fromBranchId,
+    );
+    const toBranchId = await this.requireBranchInItemTenant(
+      params.receivingItemId,
+      params.toBranchId,
+    );
 
     const refId = params.referenceId ?? `xfer-${Date.now()}`;
     const out = await this.recordMovement({
       itemId: params.itemId,
-      branchId: params.fromBranchId,
+      branchId: fromBranchId,
       movementType: MovementType.TRANSFER_OUT,
       quantity: params.quantity,
       referenceType: 'TRANSFER',
@@ -1367,7 +1435,7 @@ export class InventoryService {
     try {
       const into = await this.recordMovement({
         itemId: params.receivingItemId,
-        branchId: params.toBranchId,
+        branchId: toBranchId,
         movementType: MovementType.TRANSFER_IN,
         quantity: params.quantity,
         referenceType: 'TRANSFER',
@@ -1379,7 +1447,7 @@ export class InventoryService {
       // Best-effort compensation: undo the out movement.
       await this.recordMovement({
         itemId: params.itemId,
-        branchId: params.fromBranchId,
+        branchId: fromBranchId,
         movementType: MovementType.ADJUSTMENT,
         quantity: Math.abs(params.quantity),
         referenceType: 'TRANSFER_COMPENSATE',

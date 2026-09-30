@@ -12,3 +12,6 @@ export const STOCK_MOVEMENT_REPO = 'IStockMovementRepository';
 export const DASHBOARD_USER_REPO = 'IDashboardUserRepository';
 export const MAIN_API_CONNECTION_REPO = 'IMainApiConnectionRepository';
 export const DASHBOARD_ORGANIZATION_REPO = 'IDashboardOrganizationRepository';
+export const COMPLIANCE_APPLICATION_REPO = 'IComplianceApplicationRepository';
+export const COMPLIANCE_API_KEY_REPO = 'IComplianceApiKeyRepository';
+export const RATE_LIMIT_STORE = 'IRateLimitStore';

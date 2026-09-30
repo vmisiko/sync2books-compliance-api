@@ -47,19 +47,23 @@ export class DashboardInventoryController {
 
   @Get('stock')
   @ApiOperation({ summary: 'List current stock levels, optionally filtered by branch' })
-  async listStock(@Query('branchId') branchId?: string) {
-    const stock = await this.inventory.listStock(branchId);
+  async listStock(
+    @ActiveTenant() tenantId: string,
+    @Query('branchId') branchId?: string,
+  ) {
+    const stock = await this.inventory.listStock(tenantId, branchId);
     return { success: true, message: 'OK', data: { stock } };
   }
 
   @Get('movements')
   @ApiOperation({ summary: 'List stock movement history, optionally filtered by item/branch' })
   async listMovements(
+    @ActiveTenant() tenantId: string,
     @Query('itemId') itemId?: string,
     @Query('branchId') branchId?: string,
     @Query('limit') limit?: string,
   ) {
-    const movements = await this.inventory.listMovements({
+    const movements = await this.inventory.listMovements(tenantId, {
       itemId,
       branchId,
       limit: limit ? parseInt(limit, 10) : undefined,
@@ -73,8 +77,11 @@ export class DashboardInventoryController {
       'Manually add or deduct stock -- the only way a manually-created item (no ERP source) ever gets a quantity',
   })
   @ApiResponse({ status: 200, description: 'Stock adjusted' })
-  async adjust(@Body() body: DashboardAdjustStockDto) {
-    const result = await this.inventory.adjust(body);
+  async adjust(
+    @ActiveTenant() tenantId: string,
+    @Body() body: DashboardAdjustStockDto,
+  ) {
+    const result = await this.inventory.adjust(tenantId, body);
     return { success: true, message: 'Stock adjusted', data: result };
   }
 
@@ -85,8 +92,11 @@ export class DashboardInventoryController {
       'Transfer stock between branches -- internal bookkeeping only, no KRA submission',
   })
   @ApiResponse({ status: 200, description: 'Stock transferred' })
-  async transfer(@Body() body: DashboardTransferStockDto) {
-    const result = await this.inventory.transfer(body);
+  async transfer(
+    @ActiveTenant() tenantId: string,
+    @Body() body: DashboardTransferStockDto,
+  ) {
+    const result = await this.inventory.transfer(tenantId, body);
     return { success: true, message: 'Stock transferred', data: result };
   }
 
@@ -100,8 +110,11 @@ export class DashboardInventoryController {
       'an rsdQty gap because it moves both sides equally.',
   })
   @ApiResponse({ status: 200, description: 'Ledger repair outcome' })
-  async repairKraLedger(@Body() body: DashboardRepairKraLedgerDto) {
-    const result = await this.inventory.repairKraLedger(body);
+  async repairKraLedger(
+    @ActiveTenant() tenantId: string,
+    @Body() body: DashboardRepairKraLedgerDto,
+  ) {
+    const result = await this.inventory.repairKraLedger(tenantId, body);
     return { success: true, message: 'OK', data: result };
   }
 

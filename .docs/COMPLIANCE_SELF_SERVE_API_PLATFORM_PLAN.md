@@ -153,7 +153,9 @@ architecture document that claims tenant isolation.
 6. Tests: for each surface, a spec proving org A cannot read or write org B (the repo's `tenant-scope-audit`
    skill covers exactly this).
 
-### P1 — Compliance applications and API keys *(~1 week)*
+### P1 — Compliance applications and API keys ✅ *done 2026-09-21*
+
+*Delivered in `src/developer-platform/`. Deviations from the plan below: rate limiting is per-application (not per-key) so rotating a key can't buy a second allowance; `Idempotency-Key` parsing is built and tested but not yet attached to a route (it lands with `POST /v1/sales` in P2); the `/v1` surface so far is only `GET /v1/me` and `GET /v1/businesses[/:id]`, enough to prove the guard chain live.*
 
 1. Entities above + `ComplianceApiKeyGuard`: `x-api-key` → hash lookup → active key → application →
    organisation; attach `req.apiCaller = {applicationId, organizationId, environment, scopes}`.
@@ -166,7 +168,9 @@ architecture document that claims tenant isolation.
 5. `Idempotency-Key` on POSTs — the document layer already has `idempotencyKey`
    (`merchantId:sourceDocumentId:documentType`), so this is mostly surfacing what exists.
 
-### P2 — The public `/v1` surface *(~1 week)*
+### P2 — The public `/v1` surface ✅ *done 2026-09-21*
+
+*Delivered in `src/developer-platform/presentation/v1/`, live-verified against the KRA sandbox (item registered, sale + credit note accepted with CU numbers, receipt + COPY PDFs, stock in/out) and against a second organisation's real ids (10 attacks, all refused, DB unchanged). Deviations from the table below: **no `/v1/lookups/branches`** -- that was the OSCU `branchList` pass-through, which stays internal; use `GET /v1/businesses/:id/branches`. Receipts are `GET /v1/sales/:id/receipt` (no `.pdf` variant). **Added** `POST /v1/sales/:id/retry`, `GET /v1/items/:id`, `GET /v1/lookups/code-classes`, `GET /v1/lookups/classifications/:code`. Credit notes reverse a sale in full only. Pagination is forward-only (`nextCursor`). Every resource route takes an explicit `businessId`.*
 
 A deliberately small, stable API mapped onto existing use cases — not a rename of all 140 routes:
 

@@ -100,3 +100,69 @@ describe('StockTypeOrmRepository.applyDelta -- split-branch-keying guard', () =>
     expect(await repo.getStock('item-3', 'branch-uuid-1')).not.toBeNull();
   });
 });
+
+describe('StockTypeOrmRepository.listByItems', () => {
+  function row(itemId: string, branchId = 'branch-1'): InventoryStockOrmEntity {
+    return {
+      id: `${itemId}:${branchId}`,
+      itemId,
+      branchId,
+      quantityOnHand: 1,
+      reservedQuantity: 0,
+      version: 1,
+      lastMovementAt: null,
+      updatedAt: new Date(),
+    } as InventoryStockOrmEntity;
+  }
+
+  function buildRepository(stored: InventoryStockOrmEntity[]) {
+    const find = jest.fn(async ({ where: { itemId } }: any) => {
+      // TypeORM's In(...) is a FindOperator whose `.value` is the id list.
+      const wanted = new Set<string>(itemId.value);
+      return stored.filter((r) => wanted.has(r.itemId));
+    });
+    const repo = new StockTypeOrmRepository(
+      undefined as any,
+      { find } as any,
+      undefined as any,
+    );
+    return { repo, find };
+  }
+
+  it('returns rows for every requested item, across branches', async () => {
+    const { repo } = buildRepository([
+      row('a', 'branch-1'),
+      row('a', 'branch-2'),
+      row('b'),
+      row('not-requested'),
+    ]);
+
+    const result = await repo.listByItems(['a', 'b']);
+
+    expect(result.map((r) => `${r.itemId}:${r.branchId}`).sort()).toEqual([
+      'a:branch-1',
+      'a:branch-2',
+      'b:branch-1',
+    ]);
+  });
+
+  it('splits a large id list into bounded queries and still returns every row', async () => {
+    const ids = Array.from({ length: 1200 }, (_, i) => `item-${i}`);
+    const { repo, find } = buildRepository(ids.map((id) => row(id)));
+
+    const result = await repo.listByItems(ids);
+
+    expect(result).toHaveLength(1200);
+    expect(find).toHaveBeenCalledTimes(3);
+    for (const [args] of find.mock.calls) {
+      expect((args as any).where.itemId.value.length).toBeLessThanOrEqual(500);
+    }
+  });
+
+  it('does not query at all for an empty id list', async () => {
+    const { repo, find } = buildRepository([row('a')]);
+
+    expect(await repo.listByItems([])).toEqual([]);
+    expect(find).not.toHaveBeenCalled();
+  });
+});

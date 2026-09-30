@@ -25,6 +25,8 @@ import {
 import { MappingSuggestionService } from '../../regulatory/oscu/application/mapping-suggestion.service';
 import { taxCategoryForCode } from '../../regulatory/oscu/mapping/oscu-tax-rates';
 import type { CreateItemDto } from '../presentation/dto/create-item.dto';
+import type { InventoryStock } from '../../inventory/domain/entities/inventory-stock.entity';
+import { attachStock, type CatalogItemWithStock } from './item-stock';
 
 const SOURCE_DISPLAY_NAME: Record<SupportedIntegrationKey, string> = {
   quickbooks: 'QuickBooks',
@@ -355,9 +357,78 @@ export class DashboardItemsApplicationService {
     return result.item;
   }
 
-  async listItems(complianceTenantId: string) {
+  /**
+   * The catalog list with each item's stock embedded (see ItemStockSummary),
+   * so the Item Sync page reads one response instead of joining items to
+   * `inventory_stock` itself. Stock is read at request time from the same
+   * rows every writer maintains via applyDelta -- nothing is stored on the
+   * item, so it can't drift from the ledger.
+   */
+  async listItems(
+    complianceTenantId: string,
+  ): Promise<{ items: CatalogItemWithStock[] }> {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
-    return this.catalog.listItems(merchantId);
+    const { items } = await this.catalog.listItems(merchantId);
+    return { items: await this.withStock(complianceTenantId, items) };
+  }
+
+  /**
+   * Adds stock to items this service has just returned from a mutation
+   * (create / edit / bulk edit). The dashboard swaps the returned item into
+   * its list, so an item without `stock` would blank its quantity until the
+   * next full reload. Callers must pass items already scoped to the tenant.
+   *
+   * An item id is not enough on its own: `inventory_stock` is keyed by
+   * (item, branch) and carries no tenant, and two businesses can share one
+   * item id (same `sync2booksCompanyId`). A row sitting on another business's
+   * branch -- however it got there -- would otherwise be summed into this
+   * business's total while its branch list, which the detail drawer renders,
+   * never shows it. So rows are also limited to this tenant's own branches.
+   *
+   * A row may key its branch by `ComplianceBranch.id` or, if it predates
+   * branch canonicalization, by that branch's `sync2booksBranchId` (`'00'`).
+   * Both are this tenant's, so both are kept -- but the alias is rewritten to
+   * the canonical id and merged into any row already there, so the total and
+   * the per-branch list the drawer reads can't disagree about one branch.
+   * `sync2booksBranchId` is only unique per tenant, which is safe here
+   * because the lookup is built from this tenant's branches alone.
+   */
+  async withStock(
+    complianceTenantId: string,
+    items: CatalogItem[],
+  ): Promise<CatalogItemWithStock[]> {
+    if (items.length === 0) return [];
+    const [rows, branches] = await Promise.all([
+      this.inventory.listStockForItems(items.map((item) => item.id)),
+      this.organization.listBranches(complianceTenantId),
+    ]);
+
+    const canonicalBranchId = new Map<string, string>();
+    for (const branch of branches) {
+      if (branch.sync2booksBranchId) {
+        canonicalBranchId.set(branch.sync2booksBranchId, branch.id);
+      }
+    }
+    for (const branch of branches) canonicalBranchId.set(branch.id, branch.id);
+
+    const merged = new Map<string, InventoryStock>();
+    for (const row of rows) {
+      const branchId = canonicalBranchId.get(row.branchId);
+      if (!branchId) continue;
+      const key = `${row.itemId}\u0000${branchId}`;
+      const existing = merged.get(key);
+      merged.set(
+        key,
+        existing
+          ? {
+              ...existing,
+              quantityOnHand: existing.quantityOnHand + row.quantityOnHand,
+              reservedQuantity: existing.reservedQuantity + row.reservedQuantity,
+            }
+          : { ...row, branchId },
+      );
+    }
+    return attachStock(items, [...merged.values()]);
   }
 
   /**

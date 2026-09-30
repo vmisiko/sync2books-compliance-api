@@ -99,25 +99,103 @@ export class DashboardInventoryApplicationService {
     return this.organization.listBranches(complianceTenantId);
   }
 
-  async listStock(branchId?: string) {
-    return this.inventory.listStock(branchId);
+  /**
+   * `inventory_stock` and `stock_movements` have no merchantId, and a branch id
+   * is not a tenant boundary either (legacy rows are keyed by `'00'`, which is
+   * only unique per tenant). So the two reads below scope by the tenant's own
+   * item ids and, when the caller names a branch, refuse one that isn't the
+   * tenant's. A foreign branch answers "not found", indistinguishable from one
+   * that doesn't exist -- same as {@link assertItemBelongsToTenant}.
+   *
+   * Returns the merchant id the tenant's items are keyed by.
+   */
+  private async resolveReadScope(
+    complianceTenantId: string,
+    branchId?: string,
+  ): Promise<string> {
+    const tenant = await this.organization.getTenantById(complianceTenantId);
+    if (!tenant) {
+      throw new NotFoundException(`Tenant ${complianceTenantId} not found`);
+    }
+    if (branchId) {
+      const canonical = await this.organization.resolveCanonicalBranchId(
+        tenant.id,
+        branchId,
+      );
+      if (!canonical) {
+        throw new NotFoundException(`Branch ${branchId} not found`);
+      }
+    }
+    return tenant.sync2booksCompanyId ?? tenant.id;
   }
 
-  async listMovements(params: {
-    itemId?: string;
-    branchId?: string;
-    limit?: number;
-  }) {
-    return this.inventory.listMovements(params);
+  async listStock(complianceTenantId: string, branchId?: string) {
+    const merchantId = await this.resolveReadScope(
+      complianceTenantId,
+      branchId,
+    );
+    const itemIds = await this.catalog.listItemIdsForMerchant(merchantId);
+    if (itemIds.length === 0) return [];
+    const rows = await this.inventory.listStockForItems(itemIds);
+    return branchId ? rows.filter((row) => row.branchId === branchId) : rows;
   }
 
-  async transfer(input: {
-    itemId: string;
-    fromBranchId: string;
-    toBranchId: string;
-    quantity: number;
-    unitPrice?: number;
-  }) {
+  async listMovements(
+    complianceTenantId: string,
+    params: {
+      itemId?: string;
+      branchId?: string;
+      limit?: number;
+    },
+  ) {
+    const merchantId = await this.resolveReadScope(
+      complianceTenantId,
+      params.branchId,
+    );
+    if (params.itemId) {
+      await this.assertItemBelongsToTenant(complianceTenantId, params.itemId);
+    }
+    const itemIds = await this.catalog.listItemIdsForMerchant(merchantId);
+    return this.inventory.listMovements({ ...params, itemIds });
+  }
+
+  /**
+   * The item ids on adjust/transfer/repair-ledger arrive in the request body,
+   * and a dashboard JWT plus `x-tenant-id` only proves the caller may act for
+   * that business -- not that the item they named is one of its items. Without
+   * this a caller could restock, transfer or re-declare to KRA another
+   * business's item. Answers "not found" rather than "forbidden" so a foreign
+   * item id is indistinguishable from one that doesn't exist.
+   *
+   * The branch is checked separately, against the item's tenant, inside
+   * InventoryService (see requireBranchInItemTenant).
+   */
+  private async assertItemBelongsToTenant(
+    complianceTenantId: string,
+    itemId: string,
+  ): Promise<void> {
+    const tenant = await this.organization.getTenantById(complianceTenantId);
+    if (!tenant) {
+      throw new NotFoundException(`Tenant ${complianceTenantId} not found`);
+    }
+    const item = await this.catalog.getItemById(itemId);
+    const merchantId = tenant.sync2booksCompanyId ?? tenant.id;
+    if (!item || item.merchantId !== merchantId) {
+      throw new NotFoundException(`Item ${itemId} not found`);
+    }
+  }
+
+  async transfer(
+    complianceTenantId: string,
+    input: {
+      itemId: string;
+      fromBranchId: string;
+      toBranchId: string;
+      quantity: number;
+      unitPrice?: number;
+    },
+  ) {
+    await this.assertItemBelongsToTenant(complianceTenantId, input.itemId);
     return this.inventory.transferStock({
       itemId: input.itemId,
       fromBranchId: input.fromBranchId,
@@ -135,14 +213,18 @@ export class DashboardInventoryApplicationService {
    * are never touched by it. Also useful for QuickBooks-sourced items when a
    * one-off correction is needed outside the normal reconcile cycle.
    */
-  async adjust(input: {
-    itemId: string;
-    branchId: string;
-    quantity: number;
-    action: 'ADD' | 'DEDUCT';
-    referenceId?: string;
-    unitPrice?: number;
-  }) {
+  async adjust(
+    complianceTenantId: string,
+    input: {
+      itemId: string;
+      branchId: string;
+      quantity: number;
+      action: 'ADD' | 'DEDUCT';
+      referenceId?: string;
+      unitPrice?: number;
+    },
+  ) {
+    await this.assertItemBelongsToTenant(complianceTenantId, input.itemId);
     return this.inventory.adjustStock(input);
   }
 
@@ -156,11 +238,15 @@ export class DashboardInventoryApplicationService {
    * and closes nothing while making the ledger messier. This changes only
    * KRA's side, records no local movement, and is safe to run twice.
    */
-  async repairKraLedger(input: {
-    itemId: string;
-    branchId: string;
-    kraLedgerQty?: number;
-  }) {
+  async repairKraLedger(
+    complianceTenantId: string,
+    input: {
+      itemId: string;
+      branchId: string;
+      kraLedgerQty?: number;
+    },
+  ) {
+    await this.assertItemBelongsToTenant(complianceTenantId, input.itemId);
     return this.inventory.repairKraStockLedger(input);
   }
 
