@@ -13,7 +13,16 @@ import {
   SUPPORTED_INTEGRATION_KEYS,
   type SupportedIntegrationKey,
 } from '../../integration/main-api-pull/application/main-api-connection.application.service';
-import { MainApiPullClient } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
+import {
+  MainApiPullClient,
+  type MainApiCustomer,
+} from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
+import {
+  normalizeName,
+  normalizePin,
+  sourceSystemForIntegrationKey,
+  type ContactErpSyncResult,
+} from '../../shared/application/erp-contact-sync';
 import { OscuOperationsService } from '../../regulatory/oscu/presentation/oscu-operations.service';
 import { CustomerOrmEntity } from '../infrastructure/persistence/customer.orm-entity';
 import type {
@@ -21,6 +30,12 @@ import type {
   UpdateCustomerDto,
   VerifyKraResponseDto,
 } from '../presentation/dto/customer.dto';
+
+/** Outcome of making sure a dashboard Customer exists in the connected ERP — see ensureInErp. */
+export type CustomerErpPushResult =
+  | { status: 'linked'; customer: CustomerOrmEntity; created: boolean }
+  | { status: 'failed'; customer: CustomerOrmEntity; error: string }
+  | { status: 'skipped'; customer: CustomerOrmEntity; reason: string };
 
 export type PullCustomersResult = {
   merchantId: string;
@@ -140,6 +155,32 @@ export class DashboardCustomersApplicationService {
       taxExempt: input.taxExempt ?? false,
     });
     return this.customerRepo.save(entity);
+  }
+
+  /**
+   * Add Customer from the dashboard, optionally pushing it to the ERP in the
+   * same request (the dialog's "Sync to ERP" toggle). A failed push never
+   * undoes the local row — the outcome is reported in `erp`, and the
+   * customer can be synced again later from the list.
+   */
+  async createWithErp(input: CreateCustomerDto): Promise<
+    CustomerOrmEntity & { erp?: Omit<ContactErpSyncResult, 'id' | 'name'> }
+  > {
+    const created = await this.create(input);
+    if (!input.syncToErp) return created;
+    const r = await this.ensureInErpForMerchant(input.merchantId, created.id);
+    return Object.assign(r.customer, {
+      erp: {
+        status: r.status,
+        created: r.status === 'linked' ? r.created : undefined,
+        message:
+          r.status === 'failed'
+            ? r.error
+            : r.status === 'skipped'
+              ? r.reason
+              : undefined,
+      },
+    });
   }
 
   async update(
@@ -347,6 +388,201 @@ export class DashboardCustomersApplicationService {
       failed: results.filter((r) => r.status === 'error').length,
       results,
     };
+  }
+
+  /**
+   * Makes sure this Customer exists in the tenant's connected ERP. Mirrors
+   * DashboardSuppliersApplicationService.ensureInErp: adopt a main-API
+   * customer with the same PIN (else exact name) before creating one, and
+   * on a duplicate-name rejection refresh main API's cache from the ERP and
+   * look again.
+   *
+   * "In the ERP" for a customer means `externalId` is set: a pull stores
+   * the ERP's own id there (not main API's prefixed record id — see
+   * pullCustomers), which is what DashboardInvoicesApplicationService
+   * matches a pulled invoice's customerRef against. A push stores the same
+   * value, so a pushed customer and a pulled one are interchangeable.
+   */
+  async ensureInErp(
+    complianceTenantId: string,
+    customerId: string,
+  ): Promise<CustomerErpPushResult> {
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+    const customer = await this.getById(merchantId, customerId);
+    if (customer.externalId) {
+      return { status: 'linked', customer, created: false };
+    }
+
+    const connection =
+      await this.mainApiConnections.getForTenant(complianceTenantId);
+    const integrationKey = SUPPORTED_INTEGRATION_KEYS.find(
+      (key) => connection.integrations[key]?.connectionId,
+    );
+    const connectionId = integrationKey
+      ? connection.integrations[integrationKey]?.connectionId
+      : null;
+    if (!integrationKey || !connectionId) {
+      return {
+        status: 'skipped',
+        customer,
+        reason:
+          'No connected accounting system for this tenant yet — connect QuickBooks or Odoo to create this customer there.',
+      };
+    }
+
+    const link = async (bookId: string) => {
+      customer.externalId = bookId;
+      customer.sourceSystem = sourceSystemForIntegrationKey(integrationKey);
+      return this.customerRepo.save(customer);
+    };
+    const adopt = async (): Promise<CustomerErpPushResult | null> => {
+      const match = await this.findErpCustomer(
+        connection.mainApiApiKey,
+        connectionId,
+        customer,
+      );
+      if (!match?.bookId) return null;
+      return {
+        status: 'linked',
+        customer: await link(match.bookId),
+        created: false,
+      };
+    };
+
+    try {
+      const adopted = await adopt();
+      if (adopted) return adopted;
+
+      const response = await this.mainApiPull.createCustomer(
+        connection.mainApiApiKey,
+        connectionId,
+        {
+          name: customer.name,
+          taxId: customer.tin ?? undefined,
+          email: customer.email ?? undefined,
+          phone: customer.phoneNumber ?? undefined,
+          // Main API defaults a customer's currency to USD when none is sent,
+          // and QuickBooks rejects a USD customer in a single-currency (KES)
+          // company ("Multi Currency should be enabled"). Everything this
+          // platform handles is KES -- same assumption as the purchase Bill push.
+          currency: 'KES',
+        },
+      );
+
+      if (response.syncedToBookkeeping && response.customer.bookId) {
+        return {
+          status: 'linked',
+          customer: await link(String(response.customer.bookId)),
+          created: true,
+        };
+      }
+
+      const error =
+        response.syncError ??
+        `The customer was not created in your accounting system (status: ${response.customer.syncStatus ?? 'unknown'}).`;
+
+      if (/duplicate/i.test(error)) {
+        await this.mainApiPull
+          .syncCustomersFromBookkeeping(connection.mainApiApiKey, connectionId)
+          .catch((refreshError: unknown) =>
+            this.logger.warn(
+              `Customer refresh after duplicate-name rejection failed: ${
+                refreshError instanceof Error
+                  ? refreshError.message
+                  : String(refreshError)
+              }`,
+            ),
+          );
+        const adoptedAfterRefresh = await adopt();
+        if (adoptedAfterRefresh) return adoptedAfterRefresh;
+      }
+
+      return { status: 'failed', customer, error };
+    } catch (error) {
+      return {
+        status: 'failed',
+        customer,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /** ensureInErp for a caller that knows the merchant (Add Customer), not the tenant. */
+  async ensureInErpForMerchant(
+    merchantId: string,
+    customerId: string,
+  ): Promise<CustomerErpPushResult> {
+    const tenant =
+      await this.organization.getTenantBySync2booksCompanyId(merchantId);
+    if (!tenant) throw new NotFoundException(`Business ${merchantId} not found`);
+    return this.ensureInErp(tenant.id, customerId);
+  }
+
+  /** Bulk "Sync to ERP" from the Customers page — see the suppliers twin. */
+  async syncManyToErp(
+    complianceTenantId: string,
+    ids: string[],
+  ): Promise<ContactErpSyncResult[]> {
+    if (!ids?.length) throw new BadRequestException('No customers selected');
+    const results: ContactErpSyncResult[] = [];
+    for (const id of [...new Set(ids)]) {
+      try {
+        const r = await this.ensureInErp(complianceTenantId, id);
+        results.push({
+          id,
+          name: r.customer.name,
+          status: r.status,
+          created: r.status === 'linked' ? r.created : undefined,
+          message:
+            r.status === 'failed'
+              ? r.error
+              : r.status === 'skipped'
+                ? r.reason
+                : undefined,
+        });
+      } catch (error) {
+        results.push({
+          id,
+          name: '',
+          status: 'failed',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return results;
+  }
+
+  /** A main-API customer (already in the ERP) matching this Customer by PIN, else by exact name. */
+  private async findErpCustomer(
+    apiKey: string,
+    connectionId: string,
+    customer: CustomerOrmEntity,
+  ): Promise<MainApiCustomer | null> {
+    const inErp: MainApiCustomer[] = [];
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const response = await this.mainApiPull.getCustomers(
+        apiKey,
+        connectionId,
+        { page, limit: 100 },
+      );
+      inErp.push(...response.customers.filter((c) => c.bookId));
+      totalPages = response.totalPages || 1;
+      page += 1;
+    } while (page <= totalPages && page <= 20);
+
+    const pin = normalizePin(customer.tin);
+    const name = normalizeName(customer.name);
+    return (
+      (pin && inErp.find((c) => normalizePin(c.taxId) === pin)) ||
+      inErp.find(
+        (c) =>
+          normalizeName(c.name) === name ||
+          normalizeName(c.companyName) === name,
+      ) ||
+      null
+    );
   }
 
   private async resolveMerchantId(complianceTenantId: string): Promise<string> {

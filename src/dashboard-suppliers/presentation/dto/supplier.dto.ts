@@ -22,6 +22,14 @@ export class CreateSupplierDto {
       'ERP provenance override for suppliers created from a non-ERP source (e.g. "ETIMS" for a supplier created from an unmatched KRA purchase). Omit for the normal manually-added-by-a-human path, which leaves this null.',
   })
   sourceSystem?: string;
+
+  @ApiProperty({
+    required: false,
+    default: false,
+    description:
+      'Also create (or link) this supplier in the connected ERP right away. The response then carries an `erp` outcome.',
+  })
+  syncToErp?: boolean;
 }
 
 export class UpdateSupplierDto {
@@ -80,4 +88,9 @@ export class VerifyKraResponseDto {
       'Raw OSCU selectTaxpayerInfo response, for callers that need fields not surfaced above',
   })
   raw!: unknown;
+}
+
+export class SupplierIdsDto {
+  @ApiProperty({ type: [String] })
+  ids!: string[];
 }

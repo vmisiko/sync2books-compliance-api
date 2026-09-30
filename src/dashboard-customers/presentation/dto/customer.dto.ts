@@ -23,6 +23,14 @@ export class CreateCustomerDto {
       'Whether this customer holds a KRA tax exemption -- defaults the "Invoice Type" on Add Sale to EXEMPT for them.',
   })
   taxExempt?: boolean;
+
+  @ApiProperty({
+    required: false,
+    default: false,
+    description:
+      'Also create (or link) this customer in the connected ERP right away. The response then carries an `erp` outcome.',
+  })
+  syncToErp?: boolean;
 }
 
 export class UpdateCustomerDto {
@@ -83,4 +91,9 @@ export class VerifyKraResponseDto {
       'Raw OSCU selectTaxpayerInfo response, for callers that need fields not surfaced above',
   })
   raw!: unknown;
+}
+
+export class CustomerIdsDto {
+  @ApiProperty({ type: [String] })
+  ids!: string[];
 }

@@ -26,6 +26,7 @@ import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators
 import { DashboardCustomersApplicationService } from '../application/dashboard-customers.application.service';
 import {
   CreateCustomerDto,
+  CustomerIdsDto,
   UpdateCustomerDto,
 } from './dto/customer.dto';
 
@@ -58,7 +59,23 @@ export class DashboardCustomersController {
   @ApiResponse({ status: 201, description: 'Customer created' })
   @ApiBadRequestResponse({ description: 'Validation failed' })
   async create(@Body() body: CreateCustomerDto) {
-    return this.customers.create(body);
+    return this.customers.createWithErp(body);
+  }
+
+  @Post('sync-to-erp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Create (or link, when the ERP already has a matching PIN/name) each selected customer in the connected ERP. Per-customer outcomes; one failure never aborts the rest.',
+  })
+  @ApiResponse({ status: 200, description: 'Per-customer results' })
+  @MerchantIdOptional()
+  @UseGuards(ActiveTenantGuard)
+  async syncToErp(
+    @ActiveTenant() tenantId: string,
+    @Body() body: CustomerIdsDto,
+  ) {
+    return { results: await this.customers.syncManyToErp(tenantId, body.ids) };
   }
 
   @Patch(':id')

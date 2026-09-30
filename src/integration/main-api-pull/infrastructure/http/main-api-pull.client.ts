@@ -325,6 +325,30 @@ export interface MainApiCreateBillResponse {
   syncedToBookkeeping: boolean;
 }
 
+export interface MainApiCreateCustomerRequest {
+  name: string;
+  taxId?: string;
+  email?: string;
+  phone?: string;
+  /** ISO code. Always send it -- main API otherwise defaults to USD. */
+  currency?: string;
+}
+
+export interface MainApiCreateCustomerResponse {
+  customer: {
+    id: string;
+    bookId?: string | null;
+    syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed';
+    [key: string]: unknown;
+  };
+  message: string;
+  syncBatchId: string;
+  /** Real outcome when called with `awaitSync: true` (the default here). */
+  syncedToBookkeeping: boolean;
+  /** The ERP's own rejection message when the awaited write failed. */
+  syncError?: string | null;
+}
+
 export interface MainApiCreateSupplierRequest {
   supplierName: string;
   taxNumber?: string;
@@ -615,6 +639,25 @@ export class MainApiPullClient {
     return this.postJson<MainApiCreateSupplierResponse>(
       apiKey,
       `/suppliers/connection/${encodeURIComponent(connectionId)}?awaitSync=${awaitSync}`,
+      body,
+    );
+  }
+
+  /**
+   * POST /customers/:connectionId — creates the customer in the connected ERP,
+   * awaiting the write by default (same reason as createSupplier: the caller
+   * needs the ERP's own id back).
+   */
+  async createCustomer(
+    apiKey: string,
+    connectionId: string,
+    body: MainApiCreateCustomerRequest,
+    options: { awaitSync?: boolean } = {},
+  ): Promise<MainApiCreateCustomerResponse> {
+    const awaitSync = options.awaitSync ?? true;
+    return this.postJson<MainApiCreateCustomerResponse>(
+      apiKey,
+      `/customers/${encodeURIComponent(connectionId)}?awaitSync=${awaitSync}`,
       body,
     );
   }
