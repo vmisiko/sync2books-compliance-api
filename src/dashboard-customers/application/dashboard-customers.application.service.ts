@@ -461,6 +461,11 @@ export class DashboardCustomersApplicationService {
           taxId: customer.tin ?? undefined,
           email: customer.email ?? undefined,
           phone: customer.phoneNumber ?? undefined,
+          // Main API defaults a customer's currency to USD when none is sent,
+          // and QuickBooks rejects a USD customer in a single-currency (KES)
+          // company ("Multi Currency should be enabled"). Everything this
+          // platform handles is KES -- same assumption as the purchase Bill push.
+          currency: 'KES',
         },
       );
 

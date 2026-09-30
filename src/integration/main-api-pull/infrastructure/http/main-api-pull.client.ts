@@ -330,6 +330,8 @@ export interface MainApiCreateCustomerRequest {
   taxId?: string;
   email?: string;
   phone?: string;
+  /** ISO code. Always send it -- main API otherwise defaults to USD. */
+  currency?: string;
 }
 
 export interface MainApiCreateCustomerResponse {

@@ -114,6 +114,7 @@ describe('DashboardCustomersApplicationService.ensureInErp', () => {
       taxId: 'P051234567A',
       email: undefined,
       phone: undefined,
+      currency: 'KES',
     });
     expect(result).toEqual(expect.objectContaining({ status: 'linked', created: true }));
     expect(customer.externalId).toBe('77');
