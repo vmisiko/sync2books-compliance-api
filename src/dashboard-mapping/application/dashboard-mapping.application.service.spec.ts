@@ -331,6 +331,159 @@ describe('DashboardMappingApplicationService', () => {
     });
   });
 
+  describe('pullTaxRates -> purchase-only taxes', () => {
+    // Odoo ships each tax as a same-named sale/purchase pair (two account.tax
+    // records), which used to show up as duplicate Tax Mapping rows.
+    function odooRate(
+      id: string,
+      name: string,
+      appliesTo: 'sales' | 'purchases' | null,
+    ): MainApiTaxRateListResponse['taxRates'][number] {
+      return {
+        id,
+        name,
+        status: 'Active',
+        effectiveTaxRate: 15,
+        totalTaxRate: 15,
+        connectionId: 'odoo-conn-1',
+        standardized: { sourceSystem: SourceSystem.ODOO, appliesTo },
+      };
+    }
+
+    it('keeps the sales tax of a same-named pair and skips its purchase twin', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null, 'odoo-conn-1'),
+        fakeMainApiPull([
+          odooRate('rate-sale', '15%', 'sales'),
+          odooRate('rate-purchase', '15%', 'purchases'),
+        ]),
+      );
+
+      const result = await service.pullTaxRates(TENANT_ID, 'odoo');
+
+      expect(result.attempted).toBe(1);
+      expect(result.skippedPurchaseOnly).toBe(1);
+      expect(result.results.map((r) => r.externalId)).toEqual(['rate-sale']);
+      const rows = await taxRepo.find({ where: { merchantId: MERCHANT_ID } });
+      expect(rows.map((r) => r.externalId)).toEqual(['rate-sale']);
+    });
+
+    it('still pulls a rate whose side is unknown (QuickBooks, or a main API without appliesTo)', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null, 'odoo-conn-1'),
+        fakeMainApiPull([odooRate('rate-unknown', '15%', null)]),
+      );
+
+      const result = await service.pullTaxRates(TENANT_ID, 'odoo');
+
+      expect(result.attempted).toBe(1);
+      expect(result.skippedPurchaseOnly).toBe(0);
+    });
+
+    it('removes unapproved rows earlier pulls created for purchase taxes, but leaves an approved one', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null, 'odoo-conn-1'),
+        fakeMainApiPull([
+          odooRate('rate-sale', '15%', 'sales'),
+          odooRate('rate-purchase', '15%', 'purchases'),
+          odooRate('rate-purchase-approved', '2% WH', 'purchases'),
+        ]),
+      );
+      await taxRepo.save([
+        taxRepo.create({
+          id: 'taxmap-stale',
+          merchantId: MERCHANT_ID,
+          sourceSystem: SourceSystem.ODOO,
+          status: MappingStatus.UNMAPPED,
+          active: false,
+          confidenceScore: 0,
+          internalTaxCategory: null,
+          taxTyCd: null,
+          externalId: 'rate-purchase',
+          externalValue: '15%',
+        }),
+        taxRepo.create({
+          id: 'taxmap-approved',
+          merchantId: MERCHANT_ID,
+          sourceSystem: SourceSystem.ODOO,
+          status: MappingStatus.MAPPED,
+          active: true,
+          confidenceScore: 100,
+          internalTaxCategory: TaxCategory.OTHER,
+          taxTyCd: 'D',
+          externalId: 'rate-purchase-approved',
+          externalValue: '2% WH',
+        }),
+      ]);
+
+      await service.pullTaxRates(TENANT_ID, 'odoo');
+
+      expect(await taxRepo.findOne({ where: { id: 'taxmap-stale' } })).toBeNull();
+      expect(
+        await taxRepo.findOne({ where: { id: 'taxmap-approved' } }),
+      ).not.toBeNull();
+    });
+
+    it('never resolves a purchase-only TaxCode as taxCodeId, and un-resolves one an earlier pull set', async () => {
+      const service = await buildService(
+        fakeOrg(),
+        fakeConnections(null, 'odoo-conn-1'),
+        fakeMainApiPull(
+          [],
+          [
+            {
+              id: 'code-purchase',
+              name: '16% Standard',
+              active: true,
+              taxable: true,
+              taxGroup: false,
+              connectionId: 'odoo-conn-1',
+              salesTaxRateRefs: [],
+              purchaseTaxRateRefs: [{ id: '11', name: '16% Standard' }],
+            },
+            {
+              id: 'code-sale',
+              name: '16% Standard',
+              active: true,
+              taxable: true,
+              taxGroup: false,
+              connectionId: 'odoo-conn-1',
+              salesTaxRateRefs: [{ id: '10', name: '16% Standard' }],
+              purchaseTaxRateRefs: [],
+            },
+          ],
+        ),
+      );
+      await taxRepo.save(
+        taxRepo.create({
+          id: 'taxmap-vat',
+          merchantId: MERCHANT_ID,
+          sourceSystem: SourceSystem.ODOO,
+          status: MappingStatus.MAPPED,
+          active: true,
+          confidenceScore: 100,
+          internalTaxCategory: TaxCategory.VAT_STANDARD,
+          taxTyCd: 'B',
+          taxCodeId: 'code-purchase',
+          taxCodeExternalValue: '16% Standard',
+          taxCodeConfidenceScore: 100,
+        }),
+      );
+
+      const result = await service.pullTaxRates(TENANT_ID, 'odoo');
+
+      expect(result.taxCodes.skippedPurchaseOnly).toBe(1);
+      expect(result.taxCodes.results.map((r) => r.externalId)).toEqual([
+        'code-sale',
+      ]);
+      const row = await taxRepo.findOne({ where: { id: 'taxmap-vat' } });
+      expect(row?.taxCodeId).toBe('code-sale');
+    });
+  });
+
   describe('pullTaxRates -> tax codes (taxCodeId resolution)', () => {
     it('resolves taxCodeId onto the tax-rate-created row for the same category', async () => {
       const service = await buildService(

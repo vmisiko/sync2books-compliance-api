@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { TaxMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/tax-mapping.orm-entity';
 import { PaymentTypeMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/payment-type-mapping.orm-entity';
 import { UnitMappingOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/unit-mapping.orm-entity';
@@ -358,7 +358,21 @@ export class DashboardMappingApplicationService {
       internalTaxCategory: string | null;
     }> = [];
 
+    // Tax mappings describe what goes on a KRA sales invoice, so a purchase-
+    // only tax has no place here — Purchase Bills maps those separately. Odoo
+    // ships each tax as a same-named sale/purchase pair, so letting these
+    // through showed up as duplicate rows.
+    const purchaseOnly = response.taxRates.filter(
+      (r) => r.standardized?.appliesTo === 'purchases',
+    );
+    await this.removeUnapprovedTaxRows(
+      merchantId,
+      sourceSystem,
+      purchaseOnly.map((r) => r.id),
+    );
+
     for (const rate of response.taxRates) {
+      if (rate.standardized?.appliesTo === 'purchases') continue;
       const externalValue = rate.displayName || rate.name;
       const suggestion = this.suggestions.suggestTaxMapping(
         rate.name,
@@ -422,9 +436,34 @@ export class DashboardMappingApplicationService {
         .length,
       unmapped: results.filter((r) => r.status === MappingStatus.UNMAPPED)
         .length,
+      skippedPurchaseOnly: purchaseOnly.length,
       results,
       taxCodes,
     };
+  }
+
+  /**
+   * Deletes rows earlier pulls created for rates that no longer belong in
+   * the Tax Mapping tab. Leaves an approved (active) row alone — that's a
+   * human decision a pull doesn't get to undo — and logs it instead.
+   */
+  private async removeUnapprovedTaxRows(
+    merchantId: string,
+    sourceSystem: SourceSystem,
+    externalIds: string[],
+  ): Promise<void> {
+    if (externalIds.length === 0) return;
+    const rows = await this.taxRepo.find({
+      where: { merchantId, sourceSystem, externalId: In(externalIds) },
+    });
+    const approved = rows.filter((r) => r.active);
+    const stale = rows.filter((r) => !r.active);
+    if (stale.length) await this.taxRepo.remove(stale);
+    for (const row of approved) {
+      this.logger.warn(
+        `Tax mapping ${row.id} (merchant ${merchantId}) is approved but points at purchase-only tax "${row.externalValue}" — left in place; a reviewer should re-map it to a sales tax.`,
+      );
+    }
   }
 
   /**
@@ -724,7 +763,18 @@ export class DashboardMappingApplicationService {
       taxCodeId: string | null;
     }> = [];
 
+    // taxCodeId is what gets written onto a sales line, so a purchase-only
+    // code must never win the slot. A code with neither side listed (e.g.
+    // QuickBooks "Exempt Sale", Business Central tax groups) stays eligible.
+    const isPurchaseOnly = (code: (typeof response.taxCodes)[number]) =>
+      code.salesTaxRateRefs.length === 0 && code.purchaseTaxRateRefs.length > 0;
+    const purchaseOnlyIds = response.taxCodes
+      .filter(isPurchaseOnly)
+      .map((c) => c.id);
+    await this.clearTaxCodeIds(merchantId, purchaseOnlyIds);
+
     for (const code of response.taxCodes) {
+      if (isPurchaseOnly(code)) continue;
       const suggestion = this.suggestions.suggestTaxCodeMapping(code.name);
 
       if (!suggestion) {
@@ -763,8 +813,30 @@ export class DashboardMappingApplicationService {
       resolved: results.filter((r) => r.taxCodeId !== null).length,
       unmapped: results.filter((r) => r.status === MappingStatus.UNMAPPED)
         .length,
+      skippedPurchaseOnly: purchaseOnlyIds.length,
       results,
     };
+  }
+
+  /**
+   * Un-resolves taxCodeId on any row an earlier pull pointed at one of these
+   * codes, so the pull that follows can fill the slot with a sales code.
+   * Applies to approved rows too: taxCodeId is enrichment, not the reviewed
+   * KRA code (see upsertTaxCodeSuggestion).
+   */
+  private async clearTaxCodeIds(
+    merchantId: string,
+    taxCodeIds: string[],
+  ): Promise<void> {
+    if (taxCodeIds.length === 0) return;
+    await this.taxRepo.update(
+      { merchantId, taxCodeId: In(taxCodeIds) },
+      {
+        taxCodeId: null,
+        taxCodeExternalValue: null,
+        taxCodeConfidenceScore: null,
+      },
+    );
   }
 
   /**
