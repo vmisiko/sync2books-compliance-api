@@ -52,6 +52,12 @@ export interface MainApiStandardizedParty {
 /** No tax-category bucket here either — see MainApiStandardizedItem's doc comment. */
 export interface MainApiStandardizedTax {
   sourceSystem: SourceSystem;
+  /**
+   * Which side of the ledger the tax applies to — tax rates only. Null means the ERP doesn't
+   * say (QuickBooks), so treat it as "could be either". Optional because a main API deployed
+   * before this field existed omits it.
+   */
+  appliesTo?: 'sales' | 'purchases' | 'both' | null;
 }
 
 export interface MainApiStandardizedInvoice {
