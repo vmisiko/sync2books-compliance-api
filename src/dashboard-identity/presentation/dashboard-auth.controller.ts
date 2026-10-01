@@ -22,6 +22,7 @@ import {
 import type { Request, Response } from 'express';
 import { DashboardAuthApplicationService } from '../application/dashboard-auth.application.service';
 import { DashboardJwtAuthGuard } from '../infrastructure/guards/dashboard-jwt-auth.guard';
+import { DashboardAdminGuard } from '../infrastructure/guards/dashboard-admin.guard';
 import {
   GoogleOAuthConfiguredGuard,
   MicrosoftOAuthConfiguredGuard,
@@ -205,12 +206,12 @@ export class DashboardAuthController {
   }
 
   @Post('members')
-  @UseGuards(DashboardJwtAuthGuard)
+  @UseGuards(DashboardJwtAuthGuard, DashboardAdminGuard)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary:
-      "Generate a shareable invite link for a teammate to join the caller's organisation and set their own password. No email is sent (v1 has no email delivery) — copy the returned link and share it yourself. Nothing is created for them until they actually accept it.",
+      "Admin only. Generate a shareable invite link for a teammate to join the caller's organisation and set their own password. No email is sent (v1 has no email delivery) — copy the returned link and share it yourself. Nothing is created for them until they actually accept it.",
   })
   async inviteMember(@Req() req: Request, @Body() body: CreateMemberDto) {
     const requestUser = req.user as DashboardRequestUser;
@@ -258,11 +259,11 @@ export class DashboardAuthController {
   }
 
   @Patch('members/:id')
-  @UseGuards(DashboardJwtAuthGuard)
+  @UseGuards(DashboardJwtAuthGuard, DashboardAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary:
-      "Change a teammate's role or active/deactivated status. Scoped to the caller's organisation. Deactivating rejects self-deactivation and deactivating the org's last active admin.",
+      "Admin only. Change a teammate's role or active/deactivated status. Scoped to the caller's organisation. Rejects self-deactivation, and deactivating or demoting the org's last active admin.",
   })
   async updateMember(
     @Req() req: Request,
@@ -280,11 +281,11 @@ export class DashboardAuthController {
   }
 
   @Post('members/:id/reset-password')
-  @UseGuards(DashboardJwtAuthGuard)
+  @UseGuards(DashboardJwtAuthGuard, DashboardAdminGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary:
-      "Generate a shareable link that lets an existing teammate set a brand-new password. No email is sent (v1 has no email delivery) — copy the returned link and share it yourself. Nothing changes for them until the link is used.",
+      "Admin only. Generate a shareable link that lets an existing teammate set a brand-new password. No email is sent (v1 has no email delivery) — copy the returned link and share it yourself. Nothing changes for them until the link is used.",
   })
   async resetMemberPassword(@Req() req: Request, @Param('id') id: string) {
     const requestUser = req.user as DashboardRequestUser;

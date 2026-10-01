@@ -1,5 +1,9 @@
 import { JwtService } from '@nestjs/jwt';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { DashboardAuthApplicationService } from './dashboard-auth.application.service';
 import type { DashboardUser } from '../domain/entities/dashboard-user.entity';
 import { DashboardRole } from '../../shared/domain/enums/dashboard-role.enum';
@@ -70,6 +74,20 @@ describe('DashboardAuthApplicationService invite flow', () => {
 
   beforeEach(() => {
     organizations.getById.mockClear();
+  });
+
+  it('createInvite rejects a role outside the DashboardRole enum', async () => {
+    const { service, usersRepo } = makeService();
+
+    await expect(
+      service.createInvite({
+        email: 'peter@company.co.ke',
+        displayName: 'Peter Otieno',
+        role: 'superadmin' as DashboardRole,
+        organizationId: 'org-1',
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(usersRepo.findByEmail).not.toHaveBeenCalled();
   });
 
   it('createInvite issues a link containing a #token fragment, not a query string', async () => {
@@ -530,5 +548,61 @@ describe('DashboardAuthApplicationService updateMember deactivation guards', () 
 
     expect(updated.status).toBe('active');
     expect(usersRepo.save).toHaveBeenCalled();
+  });
+
+  it('rejects demoting the last active admin, including themselves', async () => {
+    const admin = makeUser({ id: 'admin-1', role: DashboardRole.ADMIN });
+    const accountant = makeUser({
+      id: 'accountant-1',
+      email: 'accountant@company.co.ke',
+      role: DashboardRole.ACCOUNTANT,
+    });
+    const { service, usersRepo } = makeService(
+      makeUsersRepo([admin, accountant]),
+    );
+
+    await expect(
+      service.updateMember('org-1', admin.id, admin.id, {
+        role: DashboardRole.ACCOUNTANT,
+      }),
+    ).rejects.toThrow('Cannot demote the last active admin');
+    expect(usersRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('allows demoting an admin when another active admin remains', async () => {
+    const admin1 = makeUser({ id: 'admin-1', role: DashboardRole.ADMIN });
+    const admin2 = makeUser({
+      id: 'admin-2',
+      email: 'admin2@company.co.ke',
+      role: DashboardRole.ADMIN,
+    });
+    const { service } = makeService(makeUsersRepo([admin1, admin2]));
+
+    const updated = await service.updateMember('org-1', admin2.id, admin1.id, {
+      role: DashboardRole.CFO,
+    });
+
+    expect(updated.role).toBe(DashboardRole.CFO);
+  });
+
+  it.each([
+    ['role', { role: 'superadmin' as DashboardRole }],
+    ['role', { role: 'Admin' as DashboardRole }],
+    ['status', { status: 'suspended' as never }],
+  ])('rejects an out-of-enum %s without saving', async (_field, input) => {
+    const admin = makeUser({ id: 'admin-1', role: DashboardRole.ADMIN });
+    const accountant = makeUser({
+      id: 'accountant-1',
+      email: 'accountant@company.co.ke',
+      role: DashboardRole.ACCOUNTANT,
+    });
+    const { service, usersRepo } = makeService(
+      makeUsersRepo([admin, accountant]),
+    );
+
+    await expect(
+      service.updateMember('org-1', admin.id, accountant.id, input),
+    ).rejects.toThrow(BadRequestException);
+    expect(usersRepo.save).not.toHaveBeenCalled();
   });
 });
