@@ -190,7 +190,7 @@ export class DashboardSuppliersApplicationService {
 
   /**
    * Saves the edit here, then — when the supplier is already in the connected
-   * ERP and a field the ERP holds changed (name, PIN, phone, email) — passes
+   * ERP and the edit carries a field the ERP holds (name, PIN, phone, email) — passes
    * it on through main API, so the vendor there doesn't keep the old details.
    * The ERP outcome rides back as `erp`; a failed ERP update never undoes
    * the local edit.
@@ -205,12 +205,6 @@ export class DashboardSuppliersApplicationService {
     });
     if (!existing) throw new NotFoundException(`Supplier ${id} not found`);
 
-    const before = {
-      name: existing.name,
-      tin: existing.tin,
-      phoneNumber: existing.phoneNumber,
-      email: existing.email,
-    };
     Object.assign(existing, {
       name: input.name ?? existing.name,
       tin: input.tin ?? existing.tin,
@@ -219,10 +213,12 @@ export class DashboardSuppliersApplicationService {
     });
     const saved = await this.supplierRepo.save(existing);
 
-    const changed = (Object.keys(before) as Array<keyof typeof before>).some(
-      (key) => (before[key] ?? null) !== (saved[key] ?? null),
+    // Any save carrying a field the ERP holds re-sends them -- also how a
+    // failed ERP update is retried (saving again, even unchanged).
+    const touchesErp = (['name', 'tin', 'phoneNumber', 'email'] as const).some(
+      (key) => input[key] !== undefined,
     );
-    if (!changed || !saved.bookId) return saved;
+    if (!touchesErp || !saved.bookId) return saved;
     return Object.assign(saved, {
       erp: await this.pushUpdateToErp(merchantId, saved),
     });

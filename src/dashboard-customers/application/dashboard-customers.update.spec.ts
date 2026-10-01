@@ -80,7 +80,7 @@ describe('DashboardCustomersApplicationService.update -- ERP push', () => {
     expect(result.erp).toEqual({ status: 'failed', message: 'Duplicate Name Exists Error' });
   });
 
-  it("doesn't call the ERP for a customer that isn't in it, or for a local-only change", async () => {
+  it("doesn't call the ERP for a customer that isn't in it, or for a tax-exempt-only change", async () => {
     const notInErp = makeService(makeCustomer({ externalId: null }));
     const r1 = await notInErp.service.update(MERCHANT_ID, 'customer-1', { tin: 'P051234567Z' });
 
@@ -100,5 +100,15 @@ describe('DashboardCustomersApplicationService.update -- ERP push', () => {
 
     expect(updateCustomer).not.toHaveBeenCalled();
     expect(result.erp?.status).toBe('skipped');
+  });
+});
+
+describe('DashboardCustomersApplicationService.update -- retry', () => {
+  it('re-sends the details on an unchanged save, so a failed ERP update can be retried', async () => {
+    const { service, updateCustomer } = makeService(makeCustomer({ tin: 'P051234567Z' }));
+
+    await service.update(MERCHANT_ID, 'customer-1', { name: 'Amani Business Park Ltd', tin: 'P051234567Z' });
+
+    expect(updateCustomer).toHaveBeenCalledTimes(1);
   });
 });
