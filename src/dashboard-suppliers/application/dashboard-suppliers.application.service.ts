@@ -22,7 +22,9 @@ import {
   normalizeName,
   normalizePin,
   sourceSystemForIntegrationKey,
+  toContactErpUpdateResult,
   type ContactErpSyncResult,
+  type ContactErpUpdateResult,
 } from '../../shared/application/erp-contact-sync';
 import { SupplierOrmEntity } from '../infrastructure/persistence/supplier.orm-entity';
 import type {
@@ -164,7 +166,9 @@ export class DashboardSuppliersApplicationService {
    * undoes the local row — the outcome is reported in `erp`, and the
    * supplier can be synced again later from the list.
    */
-  async createWithErp(input: CreateSupplierDto): Promise<
+  async createWithErp(
+    input: CreateSupplierDto,
+  ): Promise<
     SupplierOrmEntity & { erp?: Omit<ContactErpSyncResult, 'id' | 'name'> }
   > {
     const created = await this.create(input);
@@ -184,23 +188,131 @@ export class DashboardSuppliersApplicationService {
     });
   }
 
+  /**
+   * Saves the edit here, then — when the supplier is already in the connected
+   * ERP and a field the ERP holds changed (name, PIN, phone, email) — passes
+   * it on through main API, so the vendor there doesn't keep the old details.
+   * The ERP outcome rides back as `erp`; a failed ERP update never undoes
+   * the local edit.
+   */
   async update(
     merchantId: string,
     id: string,
     input: UpdateSupplierDto,
-  ): Promise<SupplierOrmEntity> {
+  ): Promise<SupplierOrmEntity & { erp?: ContactErpUpdateResult }> {
     const existing = await this.supplierRepo.findOne({
       where: { id, merchantId },
     });
     if (!existing) throw new NotFoundException(`Supplier ${id} not found`);
 
+    const before = {
+      name: existing.name,
+      tin: existing.tin,
+      phoneNumber: existing.phoneNumber,
+      email: existing.email,
+    };
     Object.assign(existing, {
       name: input.name ?? existing.name,
       tin: input.tin ?? existing.tin,
       phoneNumber: input.phoneNumber ?? existing.phoneNumber,
       email: input.email ?? existing.email,
     });
-    return this.supplierRepo.save(existing);
+    const saved = await this.supplierRepo.save(existing);
+
+    const changed = (Object.keys(before) as Array<keyof typeof before>).some(
+      (key) => (before[key] ?? null) !== (saved[key] ?? null),
+    );
+    if (!changed || !saved.bookId) return saved;
+    return Object.assign(saved, {
+      erp: await this.pushUpdateToErp(merchantId, saved),
+    });
+  }
+
+  private async pushUpdateToErp(
+    merchantId: string,
+    supplier: SupplierOrmEntity,
+  ): Promise<ContactErpUpdateResult> {
+    try {
+      const tenant =
+        await this.organization.getTenantBySync2booksCompanyId(merchantId);
+      if (!tenant) return { status: 'skipped', message: 'Business not found.' };
+      const connection = await this.mainApiConnections.getForTenant(tenant.id);
+      const integrationKey = SUPPORTED_INTEGRATION_KEYS.find(
+        (key) => connection.integrations[key]?.connectionId,
+      );
+      const connectionId = integrationKey
+        ? connection.integrations[integrationKey]?.connectionId
+        : null;
+      if (!integrationKey || !connectionId) {
+        return {
+          status: 'skipped',
+          message:
+            'No accounting system is connected, so only the copy here was updated.',
+        };
+      }
+      if (
+        supplier.sourceSystem &&
+        supplier.sourceSystem !== sourceSystemForIntegrationKey(integrationKey)
+      ) {
+        return {
+          status: 'skipped',
+          message: `This supplier is linked to ${supplier.sourceSystem}, not the accounting system connected now.`,
+        };
+      }
+
+      const mainApiSupplier = await this.findMainApiSupplierByBookId(
+        connection.mainApiApiKey,
+        connectionId,
+        supplier.bookId!,
+      );
+      if (!mainApiSupplier) {
+        return {
+          status: 'failed',
+          message: `Couldn't find this vendor in ${SOURCE_DISPLAY_NAME[integrationKey]} any more — pull suppliers, then try again.`,
+        };
+      }
+
+      const response = await this.mainApiPull.updateSupplier(
+        connection.mainApiApiKey,
+        mainApiSupplier.id,
+        {
+          supplierName: supplier.name,
+          taxNumber: supplier.tin || undefined,
+          emailAddress: supplier.email || undefined,
+          phone: supplier.phoneNumber || undefined,
+        },
+      );
+      return toContactErpUpdateResult(response.erpSync);
+    } catch (error) {
+      return {
+        status: 'failed',
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  private async findMainApiSupplierByBookId(
+    apiKey: string,
+    connectionId: string,
+    bookId: string,
+  ): Promise<MainApiSupplier | null> {
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const response = await this.mainApiPull.getSuppliers(
+        apiKey,
+        connectionId,
+        {
+          page,
+          limit: 100,
+        },
+      );
+      const match = response.suppliers.find((s) => String(s.bookId) === bookId);
+      if (match) return match;
+      totalPages = response.totalPages || 1;
+      page += 1;
+    } while (page <= totalPages && page <= 20);
+    return null;
   }
 
   async getById(merchantId: string, id: string): Promise<SupplierOrmEntity> {
@@ -501,7 +613,8 @@ export class DashboardSuppliersApplicationService {
   ): Promise<SupplierErpPushResult> {
     const tenant =
       await this.organization.getTenantBySync2booksCompanyId(merchantId);
-    if (!tenant) throw new NotFoundException(`Business ${merchantId} not found`);
+    if (!tenant)
+      throw new NotFoundException(`Business ${merchantId} not found`);
     return this.ensureInErp(tenant.id, supplierId);
   }
 

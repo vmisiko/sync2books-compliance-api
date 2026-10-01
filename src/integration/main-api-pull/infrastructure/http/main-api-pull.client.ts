@@ -275,6 +275,30 @@ export interface MainApiSupplier {
   standardized?: MainApiStandardizedParty | null;
 }
 
+export interface MainApiUpdateSupplierRequest {
+  supplierName?: string;
+  taxNumber?: string;
+  emailAddress?: string;
+  phone?: string;
+}
+
+export interface MainApiUpdateCustomerRequest {
+  name?: string;
+  taxId?: string;
+  email?: string;
+  phone?: string;
+}
+
+/** What main API's PUT /customers/:id and PUT /suppliers/:id say happened in the ERP. */
+export interface MainApiContactUpdateResponse {
+  erpSync?: {
+    status: 'synced' | 'skipped' | 'failed';
+    integrationKey?: string;
+    reason?: string;
+    error?: string;
+  };
+}
+
 export interface MainApiSupplierListResponse {
   suppliers: MainApiSupplier[];
   total: number;
@@ -664,6 +688,36 @@ export class MainApiPullClient {
     return this.postJson<MainApiCreateCustomerResponse>(
       apiKey,
       `/customers/${encodeURIComponent(connectionId)}?awaitSync=${awaitSync}`,
+      body,
+    );
+  }
+
+  /**
+   * PUT /suppliers/:id — updates the main-API supplier and pushes the change to
+   * its ERP vendor. `supplierCode` is the `id` GET /suppliers returns. The ERP
+   * outcome comes back as `erpSync` (absent on a main API that predates it).
+   */
+  async updateSupplier(
+    apiKey: string,
+    supplierCode: string,
+    body: MainApiUpdateSupplierRequest,
+  ): Promise<MainApiContactUpdateResponse> {
+    return this.putJson<MainApiContactUpdateResponse>(
+      apiKey,
+      `/suppliers/${encodeURIComponent(supplierCode)}`,
+      body,
+    );
+  }
+
+  /** PUT /customers/:id — same as updateSupplier, for a customer (`customerCode` = the list's `id`). */
+  async updateCustomer(
+    apiKey: string,
+    customerCode: string,
+    body: MainApiUpdateCustomerRequest,
+  ): Promise<MainApiContactUpdateResponse> {
+    return this.putJson<MainApiContactUpdateResponse>(
+      apiKey,
+      `/customers/${encodeURIComponent(customerCode)}`,
       body,
     );
   }
