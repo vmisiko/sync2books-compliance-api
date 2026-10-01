@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -24,6 +25,21 @@ import { dashboardAppUrl } from '../infrastructure/oauth/dashboard-app-url';
 import { MailerService } from '../../mailer/mailer.service';
 
 const BCRYPT_ROUNDS = 10;
+const DASHBOARD_ROLES = Object.values(DashboardRole) as string[];
+const MEMBER_STATUSES: readonly string[] = ['active', 'deactivated'];
+
+/**
+ * There's no global ValidationPipe, so the DTOs' enum annotations are
+ * documentation only -- without this, any string would be written straight
+ * into the role column and later compared against a closed enum.
+ */
+function assertDashboardRole(role: unknown): asserts role is DashboardRole {
+  if (typeof role !== 'string' || !DASHBOARD_ROLES.includes(role)) {
+    throw new BadRequestException(
+      `role must be one of: ${DASHBOARD_ROLES.join(', ')}`,
+    );
+  }
+}
 const ACCESS_TOKEN_TTL_SECONDS = 3600;
 /** Short-lived -- just long enough for the "what's your company name?" hop between the OAuth callback redirect and /auth/oauth/complete. */
 const OAUTH_TICKET_TTL = '15m';
@@ -425,6 +441,7 @@ export class DashboardAuthApplicationService {
    * the old link expires simply issues a second, independent link.
    */
   async createInvite(input: CreateInviteInput): Promise<CreateInviteResult> {
+    assertDashboardRole(input.role);
     const normalizedEmail = input.email.trim().toLowerCase();
     const existing = await this.users.findByEmail(normalizedEmail);
     if (existing) {
@@ -716,9 +733,9 @@ export class DashboardAuthApplicationService {
   /**
    * Role/status edits, scoped to the caller's own organization -- a member
    * from a different org 404s, never a silent no-op or cross-org leak.
-   * Deactivation carries two guard rails so an admin can't lock the
-   * organization (or themselves) out: no self-deactivation, and no
-   * deactivating the last active admin.
+   * Admin-only at the route (DashboardAdminGuard). Guard rails so an admin
+   * can't lock the organization (or themselves) out: no self-deactivation,
+   * and no deactivating or demoting the last active admin.
    */
   async updateMember(
     organizationId: string,
@@ -726,31 +743,47 @@ export class DashboardAuthApplicationService {
     memberId: string,
     input: { role?: DashboardRole; status?: DashboardUserStatus },
   ): Promise<DashboardAuthResult['user']> {
+    if (input.role !== undefined) assertDashboardRole(input.role);
+    if (input.status !== undefined && !MEMBER_STATUSES.includes(input.status)) {
+      throw new BadRequestException(
+        `status must be one of: ${MEMBER_STATUSES.join(', ')}`,
+      );
+    }
+
     const member = await this.users.findById(memberId);
     if (!member || member.organizationId !== organizationId) {
       throw new NotFoundException(`Member ${memberId} not found`);
     }
 
-    if (input.status === 'deactivated' && member.status !== 'deactivated') {
-      if (memberId === callerId) {
-        throw new ConflictException('You cannot deactivate your own account');
-      }
+    const deactivating =
+      input.status === 'deactivated' && member.status !== 'deactivated';
+    if (deactivating && memberId === callerId) {
+      throw new ConflictException('You cannot deactivate your own account');
+    }
 
-      if (member.role === DashboardRole.ADMIN) {
-        const orgMembers = await this.users.listByOrganizationId(
-          organizationId,
+    // Demoting the last admin locks the organisation out of member
+    // management just as surely as deactivating them -- only admins can
+    // invite, change roles or issue reset links.
+    const demoting =
+      input.role !== undefined && input.role !== DashboardRole.ADMIN;
+    if (
+      member.role === DashboardRole.ADMIN &&
+      member.status !== 'deactivated' &&
+      (deactivating || demoting)
+    ) {
+      const orgMembers = await this.users.listByOrganizationId(organizationId);
+      const otherActiveAdmins = orgMembers.filter(
+        (u) =>
+          u.id !== memberId &&
+          u.role === DashboardRole.ADMIN &&
+          u.status === 'active',
+      );
+      if (otherActiveAdmins.length === 0) {
+        throw new ConflictException(
+          deactivating
+            ? 'Cannot deactivate the last active admin in this organisation'
+            : 'Cannot demote the last active admin in this organisation',
         );
-        const otherActiveAdmins = orgMembers.filter(
-          (u) =>
-            u.id !== memberId &&
-            u.role === DashboardRole.ADMIN &&
-            u.status === 'active',
-        );
-        if (otherActiveAdmins.length === 0) {
-          throw new ConflictException(
-            'Cannot deactivate the last active admin in this organisation',
-          );
-        }
       }
     }
 

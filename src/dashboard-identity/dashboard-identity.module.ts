@@ -11,6 +11,7 @@ import { dashboardJwtSecret } from './infrastructure/dashboard-jwt.secret';
 import { DashboardJwtAuthGuard } from './infrastructure/guards/dashboard-jwt-auth.guard';
 import { ActiveTenantGuard } from './infrastructure/guards/active-tenant.guard';
 import { MerchantOwnershipGuard } from './infrastructure/guards/merchant-ownership.guard';
+import { DashboardAdminGuard } from './infrastructure/guards/dashboard-admin.guard';
 import {
   GoogleOAuthConfiguredGuard,
   MicrosoftOAuthConfiguredGuard,
@@ -53,12 +54,14 @@ import { DashboardAuthController } from './presentation/dashboard-auth.controlle
     MicrosoftOAuthConfiguredGuard,
     ActiveTenantGuard,
     MerchantOwnershipGuard,
+    DashboardAdminGuard,
     DashboardUserSeed,
   ],
   exports: [
     DashboardJwtAuthGuard,
     ActiveTenantGuard,
     MerchantOwnershipGuard,
+    DashboardAdminGuard,
     DASHBOARD_USER_REPO,
     DashboardAuthApplicationService,
   ],
