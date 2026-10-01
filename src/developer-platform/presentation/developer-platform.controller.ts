@@ -16,6 +16,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { Request } from 'express';
+import { DashboardAdminGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-admin.guard';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
 import type { DashboardRequestUser } from '../../dashboard-identity/infrastructure/strategies/dashboard-jwt.strategy';
 import { DeveloperPlatformApplicationService } from '../application/developer-platform.application.service';
@@ -31,10 +32,13 @@ import { UpdateApplicationDto } from './dto/update-application.dto';
  * never from the request — the service re-checks it on every call regardless,
  * because ownership is not something a controller should be trusted to have
  * done.
+ *
+ * Admin-only: these routes mint credentials that act for every business in
+ * the organisation and outlive the session that created them.
  */
 @Controller('dashboard-api/developer')
 @ApiTags('Developer platform (dashboard)')
-@UseGuards(DashboardJwtAuthGuard)
+@UseGuards(DashboardJwtAuthGuard, DashboardAdminGuard)
 @ApiBearerAuth()
 export class DeveloperPlatformController {
   constructor(private readonly platform: DeveloperPlatformApplicationService) {}
