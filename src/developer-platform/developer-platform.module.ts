@@ -6,6 +6,7 @@ import {
   COMPLIANCE_API_KEY_REPO,
   COMPLIANCE_APPLICATION_REPO,
   RATE_LIMIT_STORE,
+  SALE_CALLBACK_STORE,
 } from '../shared/tokens';
 import { DeveloperPlatformApplicationService } from './application/developer-platform.application.service';
 import { ApiRateLimitGuard } from './infrastructure/guards/api-rate-limit.guard';
@@ -24,6 +25,9 @@ import { V1MeController } from './presentation/v1/v1-me.controller';
 import { V1SalesController } from './presentation/v1/v1-sales.controller';
 import { V1StockController } from './presentation/v1/v1-stock.controller';
 import { V1ScopeService } from './application/v1-scope.service';
+import { SaleCallbackService } from './application/sale-callback.service';
+import { SaleCallbackOrmEntity } from './infrastructure/persistence/sale-callback.orm-entity';
+import { SaleCallbackTypeOrmStore } from './infrastructure/persistence/sale-callback.typeorm.store';
 import { CatalogModule } from '../catalog/catalog.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { SalesModule } from '../sales/sales.module';
@@ -42,6 +46,7 @@ import { SalesModule } from '../sales/sales.module';
     TypeOrmModule.forFeature([
       ComplianceApplicationOrmEntity,
       ComplianceApiKeyOrmEntity,
+      SaleCallbackOrmEntity,
     ]),
     ComplianceOrganizationModule,
     DashboardIdentityModule,
@@ -72,6 +77,8 @@ import { SalesModule } from '../sales/sales.module';
     { provide: RATE_LIMIT_STORE, useFactory: createRateLimitStore },
     DeveloperPlatformApplicationService,
     V1ScopeService,
+    { provide: SALE_CALLBACK_STORE, useClass: SaleCallbackTypeOrmStore },
+    SaleCallbackService,
     ComplianceApiKeyGuard,
     TenantScopeGuard,
     ApiRateLimitGuard,

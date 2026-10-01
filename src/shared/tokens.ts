@@ -15,3 +15,4 @@ export const DASHBOARD_ORGANIZATION_REPO = 'IDashboardOrganizationRepository';
 export const COMPLIANCE_APPLICATION_REPO = 'IComplianceApplicationRepository';
 export const COMPLIANCE_API_KEY_REPO = 'IComplianceApiKeyRepository';
 export const RATE_LIMIT_STORE = 'IRateLimitStore';
+export const SALE_CALLBACK_STORE = 'ISaleCallbackStore';

@@ -196,6 +196,19 @@ button. Admin-only via the existing `DashboardRole`.
 
 ### P4 — Outbound webhooks to merchant systems *(~1 week)*
 
+> **Simplified 2026-10-01 — built as per-sale callbacks, DigiTax-style.** The only result a developer
+> needs pushed is a sale's eTIMS outcome, so instead of webhook endpoints + event subscriptions, `POST
+> /v1/sales` and `POST /v1/credit-notes` take an optional `callbackUrl`. When the sale reaches a KRA
+> result (`sale.completed` / `sale.failed`) — from the original request, `/retry`, or a dashboard retry —
+> the `GET /v1/sales/:id` sale object is POSTed there. Non-2xx/timeouts retry with backoff (7 attempts,
+> ~10.5 h, per-minute sweep); delivery state (`status`, `attempts`, `lastResponseStatus`, `lastError`,
+> `deliveredAt`) is on `sale.callback`, and `POST /v1/sales/:id/callback/resend` re-delivers. Public https
+> hosts only (literal and resolved-address checks, redirects not followed). Code:
+> `src/developer-platform/application/sale-callback.service.ts`, table `sale_callbacks`.
+> **Not done:** payload signing — receivers should confirm via `GET /v1/sales/:id` until a per-application
+> signing secret exists (needs P3's UI to reveal it). The design below is kept for if broader events
+> are ever needed.
+
 Events: `document.accepted`, `document.rejected`, `item.registered`, `item.registration_failed`,
 `stock.synced`, `receipt.ready`. HMAC-SHA256 over the raw body, `X-Compliance-Signature`, timestamped to stop
 replay, exponential backoff with a real scheduler (main API's retry cron is commented out — don't inherit

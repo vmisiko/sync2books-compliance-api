@@ -22,7 +22,10 @@ import { round2 } from '../../../regulatory/oscu/mapping/oscu-tax-rates';
 import { ComplianceStatus } from '../../../shared/domain/enums/compliance-status.enum';
 import { DocumentType } from '../../../shared/domain/enums/document-type.enum';
 import { SourceSystem } from '../../../shared/domain/enums/source-system.enum';
+import { SaleCallbackService } from '../../application/sale-callback.service';
 import { V1ScopeService } from '../../application/v1-scope.service';
+import { callbackUrlProblem } from '../../domain/callback-url';
+import { toV1Callback } from '../../domain/sale-callback';
 import { ApiKeyScope } from '../../domain/api-key-scope.enum';
 import { RequiredApiTenantId } from '../../infrastructure/decorators/api-caller.decorator';
 import { IdempotencyKey } from '../../infrastructure/decorators/idempotency-key.decorator';
@@ -39,7 +42,7 @@ import {
   requiredString,
   withIndex,
 } from './v1-input';
-import { toV1Sale, type V1Sale } from './v1-views';
+import { toV1Sale } from './v1-views';
 
 const MAX_LINES = 200;
 /** OSCU rfdRsnCd: 01 missing quantity, 02 missing data, 03 damaged, 04 wasted, 05 shortage, 06 refund. */
@@ -55,6 +58,7 @@ export class V1SalesController {
   constructor(
     private readonly sales: SalesService,
     private readonly scope: V1ScopeService,
+    private readonly callbacks: SaleCallbackService,
   ) {}
 
   // ─── Sales ──────────────────────────────────────────────────────────────
@@ -72,6 +76,7 @@ export class V1SalesController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const body = readBody(rawBody);
+    const callbackUrl = readCallbackUrl(body);
     const merchantId = await this.scope.merchantIdFor(tenantId);
 
     const traderInvoiceNumber = requiredString(body, 'traderInvoiceNumber', {
@@ -182,6 +187,11 @@ export class V1SalesController {
       return { data: { sale: await this.saleView(documentId) } };
     }
 
+    if (callbackUrl) {
+      // Registered before submission: the result is announced from inside
+      // the pipeline, and a callback registered after it would miss it.
+      await this.callbacks.register(documentId, merchantId, callbackUrl);
+    }
     await this.runPipeline(documentId);
     return this.respondToOutcome(documentId, res);
   }
@@ -292,6 +302,36 @@ export class V1SalesController {
     return { data: { sale } };
   }
 
+  @Post('sales/:id/callback/resend')
+  @HttpCode(200)
+  @RequireScopes(ApiKeyScope.SALES_WRITE)
+  @ApiOperation({
+    summary:
+      "Deliver the sale's latest result to its callbackUrl again, once, now. For an endpoint that was down long enough to exhaust the automatic retries.",
+  })
+  async resendCallback(
+    @RequiredApiTenantId() tenantId: string,
+    @Param('id') id: string,
+  ) {
+    const merchantId = await this.scope.merchantIdFor(tenantId);
+    await this.scope.requireSale(merchantId, id);
+
+    const existing = await this.callbacks.findForDocument(id);
+    if (!existing) {
+      throw new NotFoundException(
+        'This sale was created without a callbackUrl.',
+      );
+    }
+    if (!existing.outcomeKey) {
+      throw new ConflictException(
+        'This sale has no result from KRA yet; its callback is sent when it does.',
+      );
+    }
+    return {
+      data: { callback: toV1Callback(await this.callbacks.resend(id)) },
+    };
+  }
+
   // ─── Credit notes ───────────────────────────────────────────────────────
 
   @Post('credit-notes')
@@ -307,6 +347,7 @@ export class V1SalesController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const body = readBody(rawBody);
+    const callbackUrl = readCallbackUrl(body);
     const merchantId = await this.scope.merchantIdFor(tenantId);
 
     const traderInvoiceNumber = requiredString(body, 'traderInvoiceNumber', {
@@ -396,14 +437,23 @@ export class V1SalesController {
       return { data: { sale: await this.saleView(documentId) } };
     }
 
+    if (callbackUrl) {
+      // Registered before submission: the result is announced from inside
+      // the pipeline, and a callback registered after it would miss it.
+      await this.callbacks.register(documentId, merchantId, callbackUrl);
+    }
     await this.runPipeline(documentId);
     return this.respondToOutcome(documentId, res);
   }
 
   // ─── helpers ────────────────────────────────────────────────────────────
 
-  private async saleView(documentId: string): Promise<V1Sale> {
-    return toV1Sale(await this.sales.getNormalizedSaleReport(documentId));
+  private async saleView(documentId: string) {
+    const [report, callback] = await Promise.all([
+      this.sales.getNormalizedSaleReport(documentId),
+      this.callbacks.findForDocument(documentId),
+    ]);
+    return { ...toV1Sale(report), callback: toV1Callback(callback) };
   }
 
   /**
@@ -480,6 +530,14 @@ function readCustomer(body: Record<string, unknown>) {
     phone: optionalString(customer, 'phone', { max: 30 }),
     email: optionalString(customer, 'email', { max: 200 }),
   };
+}
+
+function readCallbackUrl(body: Record<string, unknown>): string | undefined {
+  const url = optionalString(body, 'callbackUrl');
+  if (url === undefined) return undefined;
+  const problem = callbackUrlProblem(url);
+  if (problem) throw new BadRequestException(`callbackUrl ${problem}`);
+  return url;
 }
 
 function isoOrThrow(value: string, field: string): string {

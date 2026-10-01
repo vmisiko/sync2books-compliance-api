@@ -39,6 +39,7 @@ import { ComplianceEventOrmEntity } from './sales/infrastructure/persistence/com
 import { ComplianceLineOrmEntity } from './sales/infrastructure/persistence/compliance-line.orm-entity';
 import { CustomerOrmEntity } from './dashboard-customers/infrastructure/persistence/customer.orm-entity';
 import { ComplianceApiKeyOrmEntity } from './developer-platform/infrastructure/persistence/compliance-api-key.orm-entity';
+import { SaleCallbackOrmEntity } from './developer-platform/infrastructure/persistence/sale-callback.orm-entity';
 import { ComplianceApplicationOrmEntity } from './developer-platform/infrastructure/persistence/compliance-application.orm-entity';
 import { DashboardUserOrmEntity } from './dashboard-identity/infrastructure/persistence/dashboard-user.orm-entity';
 import { DashboardOrganizationOrmEntity } from './dashboard-organization/infrastructure/persistence/dashboard-organization.orm-entity';
@@ -70,6 +71,7 @@ import { SupplierOrmEntity } from './dashboard-suppliers/infrastructure/persiste
       entities: [
         CatalogItemOrmEntity,
         ComplianceApiKeyOrmEntity,
+        SaleCallbackOrmEntity,
         ComplianceApplicationOrmEntity,
         ComplianceBranchOrmEntity,
         ComplianceDocumentOrmEntity,

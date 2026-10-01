@@ -63,6 +63,17 @@ import {
   ITEM_REPO,
 } from '../../shared/tokens';
 
+export type SaleOutcomeListener = (
+  document: ComplianceDocument,
+) => Promise<void>;
+
+/** Statuses that are a result from KRA's side, as opposed to work in progress. */
+const OUTCOME_STATUSES: ReadonlySet<ComplianceStatus> = new Set([
+  ComplianceStatus.ACCEPTED,
+  ComplianceStatus.REJECTED,
+  ComplianceStatus.FAILED,
+]);
+
 /**
  * Sales (Documents) application service.
  *
@@ -72,6 +83,7 @@ import {
 @Injectable()
 export class SalesService {
   private readonly logger = new Logger(SalesService.name);
+  private readonly outcomeListeners: SaleOutcomeListener[] = [];
 
   constructor(
     @Inject(DOCUMENT_REPO)
@@ -214,7 +226,7 @@ export class SalesService {
   }
 
   async submitDocument(documentId: string) {
-    return submitDocumentUseCase(
+    const result = await submitDocumentUseCase(
       documentId,
       this.documentRepo,
       this.connectionRepo,
@@ -222,6 +234,45 @@ export class SalesService {
       this.etimsAdapter,
       this.syncStateRepo,
     );
+    await this.announceOutcome(documentId);
+    return result;
+  }
+
+  /**
+   * Subscribe to documents reaching a KRA result (ACCEPTED, REJECTED or
+   * FAILED). A listener rather than an injected dependency because the
+   * subscriber -- the `/v1` sale callbacks -- lives in a module that imports
+   * this one.
+   */
+  onOutcome(listener: SaleOutcomeListener): void {
+    this.outcomeListeners.push(listener);
+  }
+
+  /**
+   * Tell every listener where `documentId` stands, if it has reached a
+   * result. A listener failing never fails the submission that triggered it.
+   */
+  private async announceOutcome(documentId: string): Promise<void> {
+    if (this.outcomeListeners.length === 0) return;
+    try {
+      const document = await this.documentRepo.findById(documentId);
+      if (!document || !OUTCOME_STATUSES.has(document.complianceStatus)) {
+        return;
+      }
+      for (const listener of this.outcomeListeners) {
+        try {
+          await listener(document);
+        } catch (err) {
+          this.logger.error(
+            `outcome listener failed for document=${documentId}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    } catch (err) {
+      this.logger.error(
+        `could not announce outcome for document=${documentId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   async resyncInvoiceSequenceFromKra(
@@ -241,7 +292,7 @@ export class SalesService {
    * REJECTED/FAILED -> RETRYING hand-off.
    */
   async retrySales(input: RetrySalesInput): Promise<RetrySalesResult> {
-    return retrySalesToEtims(input, {
+    const result = await retrySalesToEtims(input, {
       documentRepo: this.documentRepo,
       connectionRepo: this.connectionRepo,
       eventRepo: this.eventRepo,
@@ -255,6 +306,12 @@ export class SalesService {
       prepareDocument: (id) => this.prepareDocument(id),
       refreshLineOscuCodes: (id) => this.refreshLineOscuCodes(id),
     });
+    // The use case submits through submitDocumentUseCase directly, not
+    // through this.submitDocument, so the outcomes are announced here.
+    for (const r of result.results) {
+      await this.announceOutcome(r.documentId);
+    }
+    return result;
   }
 
   /**
@@ -824,6 +881,7 @@ export class SalesService {
           ...current,
           complianceStatus: ComplianceStatus.FAILED,
         });
+        await this.announceOutcome(documentId);
       }
     }
   }

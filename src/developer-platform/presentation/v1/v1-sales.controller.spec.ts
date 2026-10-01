@@ -69,6 +69,7 @@ function build(opts: {
   createdNew?: boolean;
   submit?: () => Promise<unknown>;
   finalReport?: Record<string, unknown>;
+  callback?: Record<string, unknown> | null;
 } = {}) {
   const ownedItems = new Set(opts.ownedItems ?? ['item-1']);
   const scope = {
@@ -105,6 +106,12 @@ function build(opts: {
     getEtimsReceiptPdf: jest.fn(async () => Buffer.from('%PDF')),
   };
 
+  const callbacks = {
+    register: jest.fn(async () => undefined),
+    findForDocument: jest.fn(async () => opts.callback ?? null),
+    resend: jest.fn(async () => ({ ...opts.callback, status: 'delivered', attempts: 1 })),
+  };
+
   const res = {
     statusCode: 0,
     headers: {} as Record<string, string>,
@@ -121,8 +128,9 @@ function build(opts: {
   };
 
   return {
-    controller: new V1SalesController(sales as never, scope),
+    controller: new V1SalesController(sales as never, scope, callbacks as never),
     sales,
+    callbacks,
     scope,
     res: res as never,
     raw: res,
@@ -329,6 +337,123 @@ describe('V1SalesController', () => {
       const { controller, res } = build();
       const out = await controller.createSale(TENANT, goodBody, null, res);
       expect(out.data.sale.saleDate).toBe('2026-09-21');
+    });
+  });
+
+  describe('callbackUrl', () => {
+    const delivered = {
+      documentId: 'doc-1',
+      url: 'https://erp.example.com/hooks/etims',
+      status: 'delivered',
+      event: 'sale.completed',
+      outcomeKey: 'ACCEPTED:1',
+      attempts: 1,
+      lastAttemptAt: new Date('2026-10-01T08:00:00Z'),
+      lastResponseStatus: 200,
+      lastError: null,
+      deliveredAt: new Date('2026-10-01T08:00:00Z'),
+      nextAttemptAt: null,
+    };
+
+    it('registers the callback before the sale is submitted', async () => {
+      const { controller, sales, callbacks, res } = build();
+      await controller.createSale(
+        TENANT,
+        { ...goodBody, callbackUrl: 'https://erp.example.com/hooks/etims' },
+        null,
+        res,
+      );
+      expect(callbacks.register).toHaveBeenCalledWith(
+        'doc-1',
+        MERCHANT,
+        'https://erp.example.com/hooks/etims',
+      );
+      // The result is announced from inside submission; registering after it
+      // would miss the very outcome the caller asked to hear about.
+      expect(callbacks.register.mock.invocationCallOrder[0]).toBeLessThan(
+        sales.submitDraftDocument.mock.invocationCallOrder[0],
+      );
+    });
+
+    it.each([
+      ['http://erp.example.com/hook', 'must use https'],
+      ['https://169.254.169.254/latest/meta-data', 'must be a public host'],
+      ['https://localhost/hook', 'must be a public host'],
+      ['not a url', 'must be an absolute URL'],
+    ])('rejects %s before anything is created', async (url, reason) => {
+      const { controller, sales, res } = build();
+      await expect(
+        controller.createSale(TENANT, { ...goodBody, callbackUrl: url }, null, res),
+      ).rejects.toThrow(`callbackUrl ${reason}`);
+      expect(sales.createDocument).not.toHaveBeenCalled();
+    });
+
+    it('does not register anything on an idempotent replay', async () => {
+      const { controller, callbacks, res } = build({ createdNew: false });
+      await controller.createSale(
+        TENANT,
+        { ...goodBody, callbackUrl: 'https://erp.example.com/hooks/etims' },
+        'key-1',
+        res,
+      );
+      expect(callbacks.register).not.toHaveBeenCalled();
+    });
+
+    it('shows delivery state on the sale', async () => {
+      const { controller } = build({
+        ownedSales: { 'doc-1': { id: 'doc-1' } },
+        callback: delivered,
+      });
+      const out = await controller.getSale(TENANT, 'doc-1');
+      expect(out.data.sale.callback).toEqual({
+        url: 'https://erp.example.com/hooks/etims',
+        status: 'delivered',
+        event: 'sale.completed',
+        attempts: 1,
+        lastAttemptAt: '2026-10-01T08:00:00.000Z',
+        lastResponseStatus: 200,
+        lastError: null,
+        deliveredAt: '2026-10-01T08:00:00.000Z',
+        nextAttemptAt: null,
+      });
+    });
+
+    it('is null on a sale created without one', async () => {
+      const { controller } = build({ ownedSales: { 'doc-1': { id: 'doc-1' } } });
+      const out = await controller.getSale(TENANT, 'doc-1');
+      expect(out.data.sale.callback).toBeNull();
+    });
+
+    describe('POST /v1/sales/:id/callback/resend', () => {
+      it('re-delivers the latest result', async () => {
+        const { controller, callbacks } = build({
+          ownedSales: { 'doc-1': { id: 'doc-1' } },
+          callback: { ...delivered, status: 'failed' },
+        });
+        const out = await controller.resendCallback(TENANT, 'doc-1');
+        expect(callbacks.resend).toHaveBeenCalledWith('doc-1');
+        expect(out.data.callback?.status).toBe('delivered');
+      });
+
+      it("404s another business's sale without touching its callback", async () => {
+        const { controller, callbacks } = build({ ownedSales: {}, callback: delivered });
+        await expect(controller.resendCallback(TENANT, 'doc-1')).rejects.toThrow(NotFoundException);
+        expect(callbacks.resend).not.toHaveBeenCalled();
+      });
+
+      it('404s a sale created without a callbackUrl', async () => {
+        const { controller } = build({ ownedSales: { 'doc-1': { id: 'doc-1' } } });
+        await expect(controller.resendCallback(TENANT, 'doc-1')).rejects.toThrow(NotFoundException);
+      });
+
+      it('409s a sale with no result yet', async () => {
+        const { controller, callbacks } = build({
+          ownedSales: { 'doc-1': { id: 'doc-1' } },
+          callback: { ...delivered, status: 'awaiting_outcome', outcomeKey: null },
+        });
+        await expect(controller.resendCallback(TENANT, 'doc-1')).rejects.toThrow(ConflictException);
+        expect(callbacks.resend).not.toHaveBeenCalled();
+      });
     });
   });
 
