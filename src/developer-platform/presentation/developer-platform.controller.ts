@@ -130,6 +130,8 @@ export class DeveloperPlatformController {
       organizationId: user.organizationId,
       applicationId,
       environment: dto.environment,
+      businessId: dto.businessId ?? null,
+      allBusinesses: dto.allBusinesses === true,
       name: dto.name ?? null,
       scopes: dto.scopes,
       expiresAt: parseExpiry(dto.expiresAt),

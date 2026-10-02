@@ -12,6 +12,7 @@ function caller(overrides: Partial<ApiCaller> = {}): ApiCaller {
     applicationId: 'app-1',
     organizationId: 'org-1',
     environment: ConnectionEnvironment.SANDBOX,
+    businessId: null,
     scopes: [ApiKeyScope.SALES_WRITE],
     rateLimitPerMin: 3,
     ...overrides,

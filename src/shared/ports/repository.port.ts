@@ -19,6 +19,10 @@ export interface IComplianceDocumentRepository {
     merchantId: string,
     documentNumber: string,
   ): Promise<ComplianceDocument | null>;
+  /** Every credit note raised against one sale, oldest first. */
+  findCreditNotesByOriginalSaleId(
+    originalSaleId: string,
+  ): Promise<ComplianceDocument[]>;
 }
 
 export interface IComplianceEventRepository {

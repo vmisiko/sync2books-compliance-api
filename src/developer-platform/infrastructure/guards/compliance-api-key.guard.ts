@@ -92,6 +92,7 @@ export class ComplianceApiKeyGuard implements CanActivate {
       applicationId: application.id,
       organizationId: application.organizationId,
       environment: record.environment,
+      businessId: record.businessId ?? null,
       scopes: record.scopes,
       rateLimitPerMin: application.rateLimitPerMin,
     };

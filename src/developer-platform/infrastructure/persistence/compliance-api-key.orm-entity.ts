@@ -22,6 +22,11 @@ export class ComplianceApiKeyOrmEntity {
   @Column('varchar')
   environment!: ConnectionEnvironment;
 
+  /** Null = organisation-wide. See ComplianceApiKey.businessId. */
+  @Index()
+  @Column('varchar', { nullable: true })
+  businessId!: string | null;
+
   @Index()
   @Column('varchar')
   keyPrefix!: string;

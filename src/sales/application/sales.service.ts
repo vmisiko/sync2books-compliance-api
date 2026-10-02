@@ -151,6 +151,13 @@ export class SalesService {
    * number but a different idempotency key is a caller mistake worth a 409,
    * not a second invoice filed with KRA.
    */
+  /** The credit notes raised against a sale, oldest first. */
+  async findCreditNotesForSale(
+    originalSaleId: string,
+  ): Promise<ComplianceDocument[]> {
+    return this.documentRepo.findCreditNotesByOriginalSaleId(originalSaleId);
+  }
+
   async findSaleByTraderNumber(
     merchantId: string,
     documentNumber: string,

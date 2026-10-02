@@ -21,6 +21,9 @@ export class V1MeController {
       data: {
         applicationId: caller.applicationId,
         environment: caller.environment,
+        // The business a bound key is limited to; null means organisation-wide.
+        businessId: caller.businessId,
+        scope: caller.businessId ? 'business' : 'organization',
         scopes: caller.scopes,
         rateLimitPerMin: caller.rateLimitPerMin,
       },

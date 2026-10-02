@@ -82,6 +82,36 @@ describe('V1ItemsController', () => {
     await expect(controller.get(TENANT, 'foreign')).rejects.toThrow(NotFoundException);
   });
 
+  describe('unitPrice', () => {
+    it('hands the price a caller sends to the catalog', async () => {
+      const { controller, catalog } = build();
+      await controller.upsert(TENANT, { ...body, unitPrice: 1160 });
+      expect(catalog.registerItem).toHaveBeenCalledWith(
+        expect.objectContaining({ unitPrice: 1160 }),
+      );
+    });
+
+    it('returns the stored price from create, list and get, so what was written can be read back', async () => {
+      const priced = item({ unitPrice: 1160 });
+      const catalog = {
+        registerItem: jest.fn(async () => ({ item: priced })),
+        listItems: jest.fn(async () => [priced]),
+      };
+      const scope = { ...scopeFor(), requireItem: jest.fn(async () => priced) };
+      const controller = new V1ItemsController(catalog as never, scope as never);
+
+      expect((await controller.upsert(TENANT, { ...body, unitPrice: 1160 })).data.item.unitPrice).toBe(1160);
+      expect((await controller.list(TENANT)).data.items[0].unitPrice).toBe(1160);
+      expect((await controller.get(TENANT, 'item-1')).data.item.unitPrice).toBe(1160);
+    });
+
+    it('is null, not missing, when an item has no default price', async () => {
+      const { controller } = build();
+      const out = await controller.list(TENANT);
+      expect(out.data.items[0]).toHaveProperty('unitPrice', null);
+    });
+  });
+
   describe('register', () => {
     it('registers exactly the one owned item', async () => {
       const { controller, catalog } = build();

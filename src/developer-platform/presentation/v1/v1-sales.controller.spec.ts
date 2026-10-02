@@ -70,6 +70,7 @@ function build(opts: {
   submit?: () => Promise<unknown>;
   finalReport?: Record<string, unknown>;
   callback?: Record<string, unknown> | null;
+  creditNotes?: Array<Record<string, unknown>>;
 } = {}) {
   const ownedItems = new Set(opts.ownedItems ?? ['item-1']);
   const scope = {
@@ -92,6 +93,7 @@ function build(opts: {
 
   const sales = {
     findSaleByTraderNumber: jest.fn(async () => opts.existingByNumber ?? null),
+    findCreditNotesForSale: jest.fn(async () => opts.creditNotes ?? []),
     createDocument: jest.fn(async () => ({
       created: opts.createdNew ?? true,
       document: { id: 'doc-1' },
@@ -615,6 +617,100 @@ describe('V1SalesController', () => {
       await expect(
         controller.createCreditNote(TENANT, { ...body, reason: '99' }, null, res),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    describe('a sale can be credited once', () => {
+      const credit = (over: Record<string, unknown>) => ({
+        id: 'cn-1',
+        documentNumber: 'CN-000',
+        sourceDocumentId: 'an-earlier-key',
+        complianceStatus: ComplianceStatus.ACCEPTED,
+        ...over,
+      });
+
+      it('refuses a second credit note for a sale KRA already credited, without filing it', async () => {
+        const { controller, sales, res } = build({
+          ownedSales: { 'sale-1': accepted },
+          creditNotes: [credit({})],
+        });
+        const error = await controller.createCreditNote(TENANT, body, null, res).catch((e) => e);
+        expect(error.getStatus()).toBe(409);
+        expect(error.getResponse()).toMatchObject({
+          code: 'already_credited',
+          creditNoteId: 'cn-1',
+        });
+        expect(error.getResponse().message).toContain('CN-000');
+        expect(sales.createDocument).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ComplianceStatus.DRAFT,
+        ComplianceStatus.VALIDATED,
+        ComplianceStatus.READY_FOR_SUBMISSION,
+        ComplianceStatus.SUBMITTED,
+        ComplianceStatus.RETRYING,
+      ])('refuses while an earlier credit note is still %s, and says how to recover', async (status) => {
+        const { controller, sales, res } = build({
+          ownedSales: { 'sale-1': accepted },
+          creditNotes: [credit({ complianceStatus: status })],
+        });
+        const error = await controller.createCreditNote(TENANT, body, null, res).catch((e) => e);
+        expect(error.getStatus()).toBe(409);
+        expect(error.getResponse().code).toBe('credit_note_in_progress');
+        expect(error.getResponse().message).toContain('/retry');
+        expect(sales.createDocument).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ComplianceStatus.FAILED,
+        ComplianceStatus.REJECTED,
+        ComplianceStatus.CANCELLED,
+      ])('lets a new credit note through after an earlier one ended %s', async (status) => {
+        const { controller, sales, res } = build({
+          ownedSales: { 'sale-1': accepted },
+          creditNotes: [credit({ complianceStatus: status })],
+        });
+        await controller.createCreditNote(TENANT, body, null, res);
+        expect(sales.createDocument).toHaveBeenCalledTimes(1);
+      });
+
+      it('lets an idempotent replay through to its own result, even though that credit note is accepted', async () => {
+        const { controller, sales, res, raw } = build({
+          ownedSales: { 'sale-1': accepted },
+          creditNotes: [credit({ sourceDocumentId: 'key-1' })],
+          createdNew: false,
+        });
+        await controller.createCreditNote(TENANT, body, 'key-1', res);
+        expect(sales.createDocument).toHaveBeenCalledTimes(1);
+        expect(raw.headers['Idempotent-Replayed']).toBe('true');
+      });
+
+      it('treats a repeat without a key as a replay when the trader number matches', async () => {
+        const { controller, sales, res } = build({
+          ownedSales: { 'sale-1': accepted },
+          creditNotes: [credit({ sourceDocumentId: 'CN-001' })],
+          createdNew: false,
+        });
+        await controller.createCreditNote(TENANT, body, null, res);
+        expect(sales.createDocument).toHaveBeenCalledTimes(1);
+      });
+
+      it('refuses a different key for a sale that is already credited', async () => {
+        const { controller, sales, res } = build({
+          ownedSales: { 'sale-1': accepted },
+          creditNotes: [credit({ sourceDocumentId: 'key-1' })],
+        });
+        await expect(
+          controller.createCreditNote(TENANT, body, 'key-2', res),
+        ).rejects.toThrow(ConflictException);
+        expect(sales.createDocument).not.toHaveBeenCalled();
+      });
+
+      it('only looks at credit notes for this sale', async () => {
+        const { controller, sales, res } = build({ ownedSales: { 'sale-1': accepted } });
+        await controller.createCreditNote(TENANT, body, null, res);
+        expect(sales.findCreditNotesForSale).toHaveBeenCalledWith('sale-1');
+      });
     });
   });
 });

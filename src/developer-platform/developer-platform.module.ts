@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ComplianceOrganizationModule } from '../compliance-organization/compliance-organization.module';
+import { DashboardPurchasesModule } from '../dashboard-purchases/dashboard-purchases.module';
 import { DashboardIdentityModule } from '../dashboard-identity/dashboard-identity.module';
 import {
   COMPLIANCE_API_KEY_REPO,
@@ -22,6 +23,7 @@ import { V1BusinessesController } from './presentation/v1/v1-businesses.controll
 import { V1ItemsController } from './presentation/v1/v1-items.controller';
 import { V1LookupsController } from './presentation/v1/v1-lookups.controller';
 import { V1MeController } from './presentation/v1/v1-me.controller';
+import { V1PurchasesController } from './presentation/v1/v1-purchases.controller';
 import { V1SalesController } from './presentation/v1/v1-sales.controller';
 import { V1StockController } from './presentation/v1/v1-stock.controller';
 import { V1ScopeService } from './application/v1-scope.service';
@@ -51,6 +53,7 @@ import { SalesModule } from '../sales/sales.module';
     ComplianceOrganizationModule,
     DashboardIdentityModule,
     CatalogModule,
+    DashboardPurchasesModule,
     InventoryModule,
     SalesModule,
   ],
@@ -62,6 +65,7 @@ import { SalesModule } from '../sales/sales.module';
     V1StockController,
     V1SalesController,
     V1LookupsController,
+    V1PurchasesController,
   ],
   providers: [
     ComplianceApplicationTypeOrmRepository,

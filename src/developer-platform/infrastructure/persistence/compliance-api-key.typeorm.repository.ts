@@ -10,6 +10,7 @@ function toDomain(e: ComplianceApiKeyOrmEntity): ComplianceApiKey {
     id: e.id,
     applicationId: e.applicationId,
     environment: e.environment,
+    businessId: e.businessId ?? null,
     keyPrefix: e.keyPrefix,
     keyHash: e.keyHash,
     lastFour: e.lastFour,
