@@ -89,6 +89,8 @@ export function codeForStatus(status: number): string {
       return 'unprocessable';
     case 429:
       return 'rate_limited';
+    case 502:
+      return 'upstream_error';
     default:
       return status >= 500 ? 'internal_error' : 'error';
   }

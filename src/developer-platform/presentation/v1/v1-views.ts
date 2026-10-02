@@ -1,4 +1,5 @@
 import type { CatalogItem } from '../../../catalog/domain/entities/catalog-item.entity';
+import type { PurchaseInvoiceDto } from '../../../dashboard-purchases/application/dashboard-purchases.application.service';
 import type { SaleReportDto } from '../../../sales/controller/dto/sales-report.dto';
 
 /**
@@ -113,4 +114,33 @@ function toIsoDate(ddMmYyyy: string | null): string | null {
   if (!ddMmYyyy) return null;
   const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(ddMmYyyy);
   return match ? `${match[3]}-${match[2]}-${match[1]}` : ddMmYyyy;
+}
+
+/**
+ * A supplier invoice KRA has on record for this business (eTIMS purchase
+ * data). Built from an allow-list like every `/v1` view: the dashboard's own
+ * DTO also carries ERP sync state, its internal supplier link and the raw KRA
+ * record's device metadata, none of which are part of this contract.
+ */
+export function toV1Purchase(p: PurchaseInvoiceDto) {
+  return {
+    id: p.id,
+    status: p.confirmationStatus,
+    supplier: { name: p.supplierName, pin: p.supplierPin },
+    supplierInvoiceNumber: p.receiptNo,
+    invoiceDate: p.invoiceDate.slice(0, 10),
+    branch: p.branch,
+    totals: { subtotal: p.subtotal, vat: p.vat, total: p.total },
+    lines: p.lineItems.map((l) => ({
+      description: l.description,
+      hsCode: l.hsCode || null,
+      quantity: l.qty,
+      unitPrice: l.unitPrice,
+      taxRate: l.taxRate,
+      taxAmount: l.taxAmount,
+      total: l.total,
+    })),
+    // Why the last attempt to confirm this invoice to KRA failed, if it did.
+    confirmationError: p.kraConfirmError,
+  };
 }

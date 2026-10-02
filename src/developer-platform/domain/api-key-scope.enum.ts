@@ -10,6 +10,7 @@ export enum ApiKeyScope {
   SALES_READ = 'sales:read',
   SALES_WRITE = 'sales:write',
   STOCK_WRITE = 'stock:write',
+  PURCHASES_READ = 'purchases:read',
   LOOKUPS_READ = 'lookups:read',
 }
 
