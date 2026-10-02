@@ -88,6 +88,7 @@ describe('SalesService.getNormalizedSaleReport tax type resolution', () => {
       findByIdempotencyKey: jest.fn(),
       findBySourceInvoiceId: jest.fn(),
       findSaleByDocumentNumber: jest.fn().mockResolvedValue(null),
+      findCreditNotesByOriginalSaleId: jest.fn().mockResolvedValue([]),
       findByMerchant: jest.fn(),
     };
     const eventRepo: IComplianceEventRepository = {
@@ -192,6 +193,7 @@ describe('SalesService.getNormalizedSaleReport etimsUrl branch segment', () => {
       findByIdempotencyKey: jest.fn(),
       findBySourceInvoiceId: jest.fn(),
       findSaleByDocumentNumber: jest.fn().mockResolvedValue(null),
+      findCreditNotesByOriginalSaleId: jest.fn().mockResolvedValue([]),
       findByMerchant: jest.fn(),
     };
     const eventRepo: IComplianceEventRepository = {

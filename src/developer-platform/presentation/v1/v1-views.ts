@@ -96,6 +96,8 @@ export function toV1Item(item: CatalogItem) {
     classificationCode: item.classificationCode || null,
     unitCode: item.unitCode || null,
     packagingUnitCode: item.packagingUnitCode || null,
+    // The default price (OSCU dftPrc). Accepted on write, so it is returned on read.
+    unitPrice: item.unitPrice ?? null,
     stockTracked: item.isStockItem,
     registrationStatus: item.registrationStatus,
     // Why an item is not yet sellable, so a developer isn't left guessing why

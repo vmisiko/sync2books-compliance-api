@@ -14,6 +14,7 @@ function repos(originalSale: Partial<ComplianceDocument> | null) {
     findByIdempotencyKey: jest.fn().mockResolvedValue(null),
     findBySourceInvoiceId: jest.fn(),
     findSaleByDocumentNumber: jest.fn().mockResolvedValue(originalSale),
+    findCreditNotesByOriginalSaleId: jest.fn().mockResolvedValue([]),
     findByMerchant: jest.fn(),
   };
   const itemRepo: IComplianceItemRepository = {

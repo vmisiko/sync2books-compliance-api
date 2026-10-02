@@ -234,6 +234,24 @@ export class ComplianceDocumentTypeOrmRepository implements IComplianceDocumentR
    * The SALE a credit note refers to by trader invoice number, scoped to the
    * merchant -- trader numbers are only unique per tenant.
    */
+  async findCreditNotesByOriginalSaleId(
+    originalSaleId: string,
+  ): Promise<ComplianceDocument[]> {
+    const rows = await this.documentRepo.find({
+      where: { originalSaleId, documentType: DocumentType.CREDIT_NOTE },
+      order: { createdAt: 'ASC' },
+    });
+    const documents: ComplianceDocument[] = [];
+    for (const row of rows) {
+      const lines = await this.lineRepo.find({
+        where: { documentId: row.id },
+        order: { createdAt: 'ASC' },
+      });
+      documents.push(docOrmToDomain(row, lines));
+    }
+    return documents;
+  }
+
   async findSaleByDocumentNumber(
     merchantId: string,
     documentNumber: string,
