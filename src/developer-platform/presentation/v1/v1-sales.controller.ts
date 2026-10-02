@@ -380,6 +380,34 @@ export class V1SalesController {
       });
     }
 
+    // A credit note reverses its sale in full, so a sale can be credited once.
+    // Ask here instead of filing a second one and letting KRA refuse it: that
+    // leaves a failed document behind and answers with KRA's own wording. A
+    // replay of this same request is not "another" credit note, so the one it
+    // already created is left out and falls through to the idempotent replay.
+    const sourceDocumentId = idempotencyKey ?? traderInvoiceNumber;
+    const others = (await this.sales.findCreditNotesForSale(original.id)).filter(
+      (c) => c.sourceDocumentId !== sourceDocumentId,
+    );
+    const credited = others.find(
+      (c) => c.complianceStatus === ComplianceStatus.ACCEPTED,
+    );
+    if (credited) {
+      throw new ConflictException({
+        code: 'already_credited',
+        message: `This sale has already been credited by credit note ${credited.documentNumber}. A credit note reverses a sale in full, so it can only be issued once.`,
+        creditNoteId: credited.id,
+      });
+    }
+    const pending = others.find((c) => CREDIT_NOTE_IN_FLIGHT.has(c.complianceStatus));
+    if (pending) {
+      throw new ConflictException({
+        code: 'credit_note_in_progress',
+        message: `Credit note ${pending.documentNumber} for this sale has not reached a result from KRA yet. Wait for it, or re-drive it with POST /v1/sales/{id}/retry, instead of issuing another.`,
+        creditNoteId: pending.id,
+      });
+    }
+
     // Mirrors the original line for line, in the same convention it was stored
     // in, so the structural check (total = subtotal + tax) holds whether the
     // sale came through this API or another path.
@@ -539,6 +567,15 @@ function readCallbackUrl(body: Record<string, unknown>): string | undefined {
   if (problem) throw new BadRequestException(`callbackUrl ${problem}`);
   return url;
 }
+
+/** Credit notes that are still working towards a KRA verdict. */
+const CREDIT_NOTE_IN_FLIGHT = new Set<ComplianceStatus>([
+  ComplianceStatus.DRAFT,
+  ComplianceStatus.VALIDATED,
+  ComplianceStatus.READY_FOR_SUBMISSION,
+  ComplianceStatus.SUBMITTED,
+  ComplianceStatus.RETRYING,
+]);
 
 function isoOrThrow(value: string, field: string): string {
   return requiredDate({ [field]: value }, field);
