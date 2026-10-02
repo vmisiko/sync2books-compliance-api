@@ -121,6 +121,19 @@ export class SalesService {
   }
 
   /**
+   * The document, only if it belongs to `merchantId`. A missing document and
+   * another merchant's document are both `null`, so a caller answering with a
+   * 404 can't be used to tell whether an id exists under someone else's account.
+   */
+  async findDocumentForMerchant(
+    documentId: string,
+    merchantId: string,
+  ): Promise<ComplianceDocument | null> {
+    const document = await this.documentRepo.findById(documentId);
+    return document && document.merchantId === merchantId ? document : null;
+  }
+
+  /**
    * Looks up the document created from a given Main-API `Invoice` id, scoped
    * to a merchant. Backs the dashboard's receipt-attachment-status/
    * retry-receipt-attachment proxy routes (see `DashboardInvoicesApplicationService`).

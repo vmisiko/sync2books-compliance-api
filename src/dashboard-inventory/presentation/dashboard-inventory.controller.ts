@@ -19,12 +19,16 @@ import {
 import { DashboardInventoryApplicationService } from '../application/dashboard-inventory.application.service';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
 import { MerchantOwnershipGuard } from '../../dashboard-identity/infrastructure/guards/merchant-ownership.guard';
+import { MerchantIdOptional } from '../../dashboard-identity/infrastructure/guards/merchant-id-optional.decorator';
 import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guards/active-tenant.guard';
 import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { DashboardAdjustStockDto } from './dto/dashboard-adjust-stock.dto';
 import { DashboardTransferStockDto } from './dto/dashboard-transfer-stock.dto';
 import { DashboardRepairKraLedgerDto } from './dto/dashboard-repair-kra-ledger.dto';
 
+// ActiveTenantGuard scopes every route here by x-tenant-id; a merchantId in the
+// request, where a route takes one, is additionally verified by MerchantOwnershipGuard.
+@MerchantIdOptional()
 @Controller('dashboard-api/inventory')
 @ApiTags('Dashboard inventory (Mode B)')
 @UseGuards(DashboardJwtAuthGuard, ActiveTenantGuard, MerchantOwnershipGuard)

@@ -11,6 +11,7 @@ import { PlatformOscuCallbackService } from '../integration/platform-outbound/pl
 import { Sync2BooksCorrelationPersistenceService } from '../integration/platform-outbound/sync2books-correlation-persistence.service';
 import { InvoiceReceiptPushbackService } from '../integration/platform-outbound/invoice-receipt-pushback.service';
 import { MerchantOwnershipGuard } from '../dashboard-identity/infrastructure/guards/merchant-ownership.guard';
+import { SaleOwnershipGuard } from './controller/sale-ownership.guard';
 import { AssertedMerchantGuard } from '../integration/asserted-merchant.guard';
 import { MailerService } from '../mailer/mailer.service';
 
@@ -19,6 +20,7 @@ describe('Express credit note controllers', () => {
   let dashboardController: DashboardSalesController;
   let salesService: {
     getDocument: jest.Mock;
+    findDocumentForMerchant: jest.Mock;
     createDocument: jest.Mock;
     validateDocument: jest.Mock;
     prepareDocument: jest.Mock;
@@ -77,6 +79,15 @@ describe('Express credit note controllers', () => {
   beforeEach(async () => {
     salesService = {
       getDocument: jest.fn().mockResolvedValue({ document: acceptedSale }),
+      // The dashboard route answers a saleId under another merchant exactly like
+      // an unknown one; this stands in for that merchant-scoped lookup.
+      findDocumentForMerchant: jest
+        .fn()
+        .mockImplementation(async (id: string, merchantId: string) =>
+          id === acceptedSale.id && merchantId === acceptedSale.merchantId
+            ? acceptedSale
+            : null,
+        ),
       createDocument: jest.fn().mockResolvedValue({
         document: { id: 'cn-1' },
         created: true,
@@ -123,6 +134,8 @@ describe('Express credit note controllers', () => {
       // These specs exercise controller behaviour, not authorization; the
       // guards' own specs cover the tenant checks.
       .overrideGuard(MerchantOwnershipGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(SaleOwnershipGuard)
       .useValue({ canActivate: () => true })
       .overrideGuard(AssertedMerchantGuard)
       .useValue({ canActivate: () => true })

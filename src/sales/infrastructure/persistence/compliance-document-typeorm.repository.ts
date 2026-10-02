@@ -308,9 +308,11 @@ export class ComplianceDocumentTypeOrmRepository implements IComplianceDocumentR
       throw new Error('Cannot use both beforeId and afterId');
     }
 
+    // Cursors resolve within the merchant: an id from another merchant is
+    // ignored, not used to filter this merchant's rows by someone else's createdAt.
     if (beforeId) {
       const cursorRow = await this.documentRepo.findOne({
-        where: { id: beforeId },
+        where: { id: beforeId, merchantId },
       });
       if (cursorRow) {
         qb.andWhere(
@@ -325,7 +327,7 @@ export class ComplianceDocumentTypeOrmRepository implements IComplianceDocumentR
 
     if (afterId) {
       const cursorRow = await this.documentRepo.findOne({
-        where: { id: afterId },
+        where: { id: afterId, merchantId },
       });
       if (cursorRow) {
         qb.andWhere(

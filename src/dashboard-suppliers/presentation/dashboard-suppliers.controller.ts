@@ -19,6 +19,7 @@ import {
 } from '@nestjs/swagger';
 import { DashboardJwtAuthGuard } from '../../dashboard-identity/infrastructure/guards/dashboard-jwt-auth.guard';
 import { MerchantOwnershipGuard } from '../../dashboard-identity/infrastructure/guards/merchant-ownership.guard';
+import { MerchantIdOptional } from '../../dashboard-identity/infrastructure/guards/merchant-id-optional.decorator';
 import { ActiveTenantGuard } from '../../dashboard-identity/infrastructure/guards/active-tenant.guard';
 import { ActiveTenant } from '../../dashboard-identity/infrastructure/decorators/active-tenant.decorator';
 import { DashboardSuppliersApplicationService } from '../application/dashboard-suppliers.application.service';
@@ -75,6 +76,7 @@ export class DashboardSuppliersController {
       'Pull suppliers (via the main API) and upsert them locally, matched by external supplier id. Defaults to whichever ERP is actually connected -- pass ?source= explicitly (quickbooks | odoo | microsoft-dynamics-365-business-central) when more than one is connected.',
   })
   @ApiResponse({ status: 200, description: 'Pull result' })
+  @MerchantIdOptional()
   @UseGuards(ActiveTenantGuard)
   async pull(
     @ActiveTenant() tenantId: string,
