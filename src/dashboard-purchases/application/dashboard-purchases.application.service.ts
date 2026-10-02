@@ -30,6 +30,7 @@ import type { ICatalogItemRepository } from '../../catalog/domain/ports/item-rep
 import type { CatalogItem } from '../../catalog/domain/entities/catalog-item.entity';
 import {
   PurchaseInvoiceOrmEntity,
+  type PurchaseConfirmationStatus,
   type PurchaseLineItemJson,
 } from '../infrastructure/persistence/purchase-invoice.orm-entity';
 import {
@@ -76,6 +77,16 @@ export type ConfirmError = {
   id: string;
   receiptNo: string;
   message: string;
+};
+
+export type PurchasePullBranchResult = {
+  branchId: string;
+  kraBhfId: string | null;
+  displayName: string | null;
+  status: 'ok' | 'failed';
+  /** Invoices KRA returned for this branch on this pull (0 when it failed). */
+  fetched: number;
+  error: string | null;
 };
 
 export type PurchaseInvoiceDto = {
@@ -160,11 +171,28 @@ export class DashboardPurchasesApplicationService {
     complianceTenantId: string,
     options: { branchId?: string; autoMarkPendingReview?: boolean } = {},
   ): Promise<{ data: PurchaseInvoiceDto[]; total: number }> {
+    await this.pullBranches(complianceTenantId, options);
+    return this.list(complianceTenantId);
+  }
+
+  /**
+   * Pulls and upserts, branch by branch, and says how each branch went.
+   *
+   * One branch failing must not stop the others, so failures are collected
+   * rather than thrown. `pull` ignores the report (the dashboard just shows
+   * whatever is stored); the public API cannot, because an empty list after a
+   * KRA failure is indistinguishable from "you have no purchases".
+   */
+  async pullBranches(
+    complianceTenantId: string,
+    options: { branchId?: string; autoMarkPendingReview?: boolean } = {},
+  ): Promise<PurchasePullBranchResult[]> {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const branches = (
       await this.organization.listBranches(complianceTenantId)
     ).filter((b) => !options.branchId || b.id === options.branchId);
 
+    const results: PurchasePullBranchResult[] = [];
     for (const branch of branches) {
       try {
         // `sync2booksBranchId ?? branch.id` -- same fallback
@@ -197,16 +225,30 @@ export class DashboardPurchasesApplicationService {
             options.autoMarkPendingReview ?? true,
           );
         }
+        results.push({
+          branchId: branch.id,
+          kraBhfId: branch.kraBhfId ?? null,
+          displayName: branch.displayName ?? null,
+          status: 'ok',
+          fetched: records.length,
+          error: null,
+        });
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         this.logger.warn(
-          `Purchase pull failed for merchant=${merchantId} branch=${branch.id}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          `Purchase pull failed for merchant=${merchantId} branch=${branch.id}: ${message}`,
         );
+        results.push({
+          branchId: branch.id,
+          kraBhfId: branch.kraBhfId ?? null,
+          displayName: branch.displayName ?? null,
+          status: 'failed',
+          fetched: 0,
+          error: message.slice(0, 300),
+        });
       }
     }
-
-    return this.list(complianceTenantId);
+    return results;
   }
 
   async list(
@@ -219,6 +261,58 @@ export class DashboardPurchasesApplicationService {
     });
     const data = rows.map((r) => this.toDto(r));
     return { data, total: data.length };
+  }
+
+  /**
+   * One page of this business's purchase invoices, newest first, for the
+   * public API. The cursor is the id of the last row of the previous page and
+   * is looked up among this business's own rows only, so it cannot be used to
+   * probe for another business's invoices (an unknown or foreign cursor is a
+   * 404). Paging happens over the business's own rows in memory: a business's
+   * purchase invoices are bounded by what its suppliers file with KRA.
+   */
+  async listPage(
+    complianceTenantId: string,
+    options: {
+      cursor?: string;
+      pageSize: number;
+      status?: PurchaseConfirmationStatus;
+      startDate?: string;
+      endDate?: string;
+    },
+  ): Promise<{
+    data: PurchaseInvoiceDto[];
+    next: string | null;
+  }> {
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+    const rows = (
+      await this.repo.find({
+        where: {
+          merchantId,
+          ...(options.status ? { confirmationStatus: options.status } : {}),
+        },
+        order: { invoiceDate: 'DESC', createdAt: 'DESC', id: 'DESC' },
+      })
+    ).filter((r) => {
+      const day = r.invoiceDate.slice(0, 10);
+      return (
+        (!options.startDate || day >= options.startDate) &&
+        (!options.endDate || day <= options.endDate)
+      );
+    });
+
+    let start = 0;
+    if (options.cursor) {
+      const at = rows.findIndex((r) => r.id === options.cursor);
+      if (at < 0) throw new NotFoundException('Cursor not found');
+      start = at + 1;
+    }
+    const page = rows.slice(start, start + options.pageSize);
+    const hasMore = start + options.pageSize < rows.length;
+    return {
+      data: page.map((r) => this.toDto(r)),
+      next: hasMore ? page[page.length - 1].id : null,
+    };
   }
 
   async getById(
