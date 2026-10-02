@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ParameterRedactingTypeOrmLogger } from './shared/utils/parameter-redacting-typeorm-logger';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -99,6 +100,9 @@ import { SupplierOrmEntity } from './dashboard-suppliers/infrastructure/persiste
       ],
       synchronize: true,
       logging: true,
+      // Statements are logged, their parameters are not: they include KRA device
+      // communication keys, emails and tokens. See ParameterRedactingTypeOrmLogger.
+      logger: new ParameterRedactingTypeOrmLogger(true),
     }),
     OscuReferenceModule,
     OscuMappingModule,
