@@ -40,6 +40,8 @@ export class V1BusinessesController {
       environment: ConnectionEnvironment;
     }> = [];
     for (const tenant of tenants) {
+      // A key bound to one business sees only that business.
+      if (caller.businessId && tenant.id !== caller.businessId) continue;
       const environment = await this.organizations.getTenantEnvironment(
         tenant.id,
       );

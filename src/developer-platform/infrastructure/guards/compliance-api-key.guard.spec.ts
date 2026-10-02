@@ -39,6 +39,7 @@ function apiKey(overrides: Partial<ComplianceApiKey> = {}): ComplianceApiKey {
     id: 'key-1',
     applicationId: 'app-1',
     environment: ConnectionEnvironment.SANDBOX,
+    businessId: null,
     keyPrefix: SECRET.keyPrefix,
     keyHash: SECRET.keyHash,
     lastFour: SECRET.lastFour,
@@ -113,9 +114,18 @@ describe('ComplianceApiKeyGuard', () => {
       applicationId: 'app-1',
       organizationId: 'org-1',
       environment: ConnectionEnvironment.SANDBOX,
+      businessId: null,
       scopes: [ApiKeyScope.SALES_WRITE, ApiKeyScope.CATALOG_READ],
       rateLimitPerMin: 120,
     });
+  });
+
+  it('carries the business a key is bound to into the caller', async () => {
+    const { guard } = guardFor(apiKey({ businessId: 'tenant-1' }));
+    const { context, req } = ctx({ 'x-api-key': SECRET.plaintext });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(req.apiCaller?.businessId).toBe('tenant-1');
   });
 
   it('accepts the key as a bearer token, for clients that cannot set custom headers', async () => {

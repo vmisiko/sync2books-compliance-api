@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ComplianceOrganizationApplicationService } from '../../../compliance-organization/application/compliance-organization.application.service';
 import { ConnectionEnvironment } from '../../../shared/domain/enums/connection-environment.enum';
-import type { ApiKeyRequest } from './api-caller';
+import type { ApiCaller, ApiKeyRequest } from './api-caller';
 
 /**
  * The one place a public API request is bound to a business.
@@ -45,6 +45,26 @@ export class TenantScopeGuard implements CanActivate {
     }
 
     const businessId = extractBusinessId(req);
+
+    // A key issued for one business is that business on every call: it needs no
+    // `businessId`, and naming any other one is refused rather than resolved.
+    // The refusal is the same whether the other id is real or not, so a bound
+    // key cannot be used to learn which business ids exist.
+    if (caller.businessId) {
+      if (businessId !== null) {
+        const requested =
+          await this.organizations.getTenantByMerchantId(businessId);
+        if (!requested || requested.id !== caller.businessId) {
+          throw new ForbiddenException(BOUND_KEY_MESSAGE);
+        }
+      }
+      const bound = await this.organizations.getTenantById(caller.businessId);
+      if (!bound || bound.organizationId !== caller.organizationId) {
+        throw new ForbiddenException(BOUND_KEY_MESSAGE);
+      }
+      return this.admit(req, bound, caller);
+    }
+
     if (businessId === null) return true;
 
     // Businesses provisioned through the accounting-platform path carry a
@@ -67,6 +87,15 @@ export class TenantScopeGuard implements CanActivate {
       );
     }
 
+    return this.admit(req, tenant, caller);
+  }
+
+  /** The environment rail, then bind the request to the business. */
+  private async admit(
+    req: ApiKeyRequest,
+    tenant: { id: string; displayName: string | null },
+    caller: ApiCaller,
+  ): Promise<boolean> {
     const environment = await this.organizations.getTenantEnvironment(
       tenant.id,
     );
@@ -106,6 +135,9 @@ function extractBusinessId(req: ApiKeyRequest): string | null {
   const trimmed = raw.trim();
   return trimmed === '' ? null : trimmed;
 }
+
+const BOUND_KEY_MESSAGE =
+  'This API key is limited to a single business and cannot act for another one.';
 
 function describeKey(environment: ConnectionEnvironment): string {
   return environment === ConnectionEnvironment.PRODUCTION ? 'live' : 'test';

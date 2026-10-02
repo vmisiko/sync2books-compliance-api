@@ -12,6 +12,7 @@ import {
   DEFAULT_RATE_LIMIT_PER_MIN,
   DeveloperPlatformApplicationService,
 } from './developer-platform.application.service';
+import type { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import type { IComplianceApiKeyRepository } from './ports/compliance-api-key.repository.port';
 import type { IComplianceApplicationRepository } from './ports/compliance-application.repository.port';
 
@@ -65,12 +66,56 @@ function application(
   };
 }
 
+type FakeTenant = {
+  id: string;
+  displayName: string | null;
+  organizationId: string | null;
+  environment: ConnectionEnvironment | null;
+};
+
+const TENANTS: FakeTenant[] = [
+  {
+    id: 'tenant-sandbox',
+    displayName: 'Gear Train Engineering',
+    organizationId: 'org-1',
+    environment: ConnectionEnvironment.SANDBOX,
+  },
+  {
+    id: 'tenant-live',
+    displayName: 'Gear Train Live',
+    organizationId: 'org-1',
+    environment: ConnectionEnvironment.PRODUCTION,
+  },
+  {
+    id: 'tenant-no-connection',
+    displayName: 'Not set up yet',
+    organizationId: 'org-1',
+    environment: null,
+  },
+  {
+    id: 'tenant-foreign',
+    displayName: 'Someone Else Ltd',
+    organizationId: 'org-2',
+    environment: ConnectionEnvironment.SANDBOX,
+  },
+];
+
+function fakeOrganizations() {
+  return {
+    getTenantByMerchantId: async (id: string) =>
+      TENANTS.find((t) => t.id === id) ?? null,
+    getTenantEnvironment: async (id: string) =>
+      TENANTS.find((t) => t.id === id)?.environment ?? null,
+  } as unknown as ComplianceOrganizationApplicationService;
+}
+
 function serviceWith(seed: ComplianceApplication[] = [application()]) {
   const repos = inMemoryRepos(seed);
   return {
     service: new DeveloperPlatformApplicationService(
       repos.applications,
       repos.apiKeys,
+      fakeOrganizations(),
     ),
     ...repos,
   };
@@ -163,6 +208,7 @@ describe('DeveloperPlatformApplicationService', () => {
         organizationId: 'org-1',
         applicationId: 'app-1',
         environment: ConnectionEnvironment.SANDBOX,
+        allBusinesses: true,
       });
 
       expect(looksLikeApiKey(created.plaintext)).toBe(true);
@@ -182,6 +228,7 @@ describe('DeveloperPlatformApplicationService', () => {
         organizationId: 'org-1',
         applicationId: 'app-1',
         environment: ConnectionEnvironment.SANDBOX,
+        allBusinesses: true,
       });
       expect(created.key.scopes).toEqual(ALL_API_KEY_SCOPES);
     });
@@ -192,6 +239,7 @@ describe('DeveloperPlatformApplicationService', () => {
         organizationId: 'org-1',
         applicationId: 'app-1',
         environment: ConnectionEnvironment.SANDBOX,
+        allBusinesses: true,
         scopes: [ApiKeyScope.SALES_WRITE, ApiKeyScope.SALES_WRITE],
       });
       expect(created.key.scopes).toEqual([ApiKeyScope.SALES_WRITE]);
@@ -204,6 +252,7 @@ describe('DeveloperPlatformApplicationService', () => {
           organizationId: 'org-1',
           applicationId: 'app-1',
           environment: ConnectionEnvironment.SANDBOX,
+        allBusinesses: true,
           scopes: ['sales:write', 'everything:always'],
         }),
       ).rejects.toThrow(BadRequestException);
@@ -216,6 +265,7 @@ describe('DeveloperPlatformApplicationService', () => {
           organizationId: 'org-1',
           applicationId: 'app-1',
           environment: ConnectionEnvironment.SANDBOX,
+        allBusinesses: true,
           scopes: [],
         }),
       ).rejects.toThrow(BadRequestException);
@@ -228,6 +278,7 @@ describe('DeveloperPlatformApplicationService', () => {
           organizationId: 'org-1',
           applicationId: 'app-1',
           environment: 'STAGING' as never,
+        allBusinesses: true,
         }),
       ).rejects.toThrow(BadRequestException);
     });
@@ -239,6 +290,7 @@ describe('DeveloperPlatformApplicationService', () => {
           organizationId: 'org-1',
           applicationId: 'app-1',
           environment: ConnectionEnvironment.SANDBOX,
+        allBusinesses: true,
           expiresAt: new Date(Date.now() - 1000),
         }),
       ).rejects.toThrow(BadRequestException);
@@ -253,6 +305,7 @@ describe('DeveloperPlatformApplicationService', () => {
           organizationId: 'org-1',
           applicationId: 'app-2',
           environment: ConnectionEnvironment.SANDBOX,
+        allBusinesses: true,
         }),
       ).rejects.toThrow(ForbiddenException);
     });
@@ -272,6 +325,7 @@ describe('DeveloperPlatformApplicationService', () => {
         organizationId: 'org-1',
         applicationId: 'app-1',
         environment: ConnectionEnvironment.SANDBOX,
+        allBusinesses: true,
       });
 
       const revoked = await service.revokeKey({
@@ -291,6 +345,7 @@ describe('DeveloperPlatformApplicationService', () => {
         organizationId: 'org-1',
         applicationId: 'app-1',
         environment: ConnectionEnvironment.SANDBOX,
+        allBusinesses: true,
       });
       const first = await service.revokeKey({
         organizationId: 'org-1',
@@ -312,6 +367,7 @@ describe('DeveloperPlatformApplicationService', () => {
         organizationId: 'org-2',
         applicationId: 'app-2',
         environment: ConnectionEnvironment.SANDBOX,
+        allBusinesses: true,
       });
 
       await expect(
@@ -327,6 +383,7 @@ describe('DeveloperPlatformApplicationService', () => {
         organizationId: 'org-1',
         applicationId: 'app-1',
         environment: ConnectionEnvironment.PRODUCTION,
+        allBusinesses: true,
         name: 'Till 1',
         scopes: [ApiKeyScope.SALES_WRITE],
       });
@@ -355,6 +412,108 @@ describe('DeveloperPlatformApplicationService', () => {
       await expect(
         service.revokeKey({ organizationId: 'org-1', apiKeyId: 'nope' }),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+  describe('business-scoped keys', () => {
+    const base = {
+      organizationId: 'org-1',
+      applicationId: 'app-1',
+      environment: ConnectionEnvironment.SANDBOX,
+    };
+
+    it('binds a key to the business it is issued for', async () => {
+      const { service, keys } = serviceWith();
+      const created = await service.createKey({
+        ...base,
+        businessId: 'tenant-sandbox',
+      });
+
+      expect(created.key.businessId).toBe('tenant-sandbox');
+      expect(keys.get(created.key.id)!.businessId).toBe('tenant-sandbox');
+    });
+
+    it('issues an organisation-wide key only when asked to', async () => {
+      const { service } = serviceWith();
+      const created = await service.createKey({ ...base, allBusinesses: true });
+      expect(created.key.businessId).toBeNull();
+    });
+
+    it('refuses to default to organisation-wide when neither is given', async () => {
+      const { service, keys } = serviceWith();
+      await expect(service.createKey({ ...base })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(keys.size).toBe(0);
+    });
+
+    it('refuses a key that names a business and also asks to be organisation-wide', async () => {
+      const { service } = serviceWith();
+      await expect(
+        service.createKey({
+          ...base,
+          businessId: 'tenant-sandbox',
+          allBusinesses: true,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it("refuses another organization's business", async () => {
+      const { service, keys } = serviceWith();
+      await expect(
+        service.createKey({ ...base, businessId: 'tenant-foreign' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(keys.size).toBe(0);
+    });
+
+    it('404s a business that does not exist', async () => {
+      const { service } = serviceWith();
+      await expect(
+        service.createKey({ ...base, businessId: 'nope' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('refuses a business with no eTIMS connection yet', async () => {
+      const { service } = serviceWith();
+      await expect(
+        service.createKey({ ...base, businessId: 'tenant-no-connection' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('refuses a key whose environment does not match the business', async () => {
+      const { service } = serviceWith();
+      await expect(
+        service.createKey({ ...base, businessId: 'tenant-live' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.createKey({
+          ...base,
+          environment: ConnectionEnvironment.PRODUCTION,
+          businessId: 'tenant-sandbox',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rotates a bound key into a key bound to the same business', async () => {
+      const { service } = serviceWith();
+      const original = await service.createKey({
+        ...base,
+        businessId: 'tenant-sandbox',
+      });
+      const rotated = await service.rotateKey({
+        organizationId: 'org-1',
+        apiKeyId: original.key.id,
+      });
+      expect(rotated.key.businessId).toBe('tenant-sandbox');
+    });
+
+    it('rotates an organisation-wide key into an organisation-wide key', async () => {
+      const { service } = serviceWith();
+      const original = await service.createKey({ ...base, allBusinesses: true });
+      const rotated = await service.rotateKey({
+        organizationId: 'org-1',
+        apiKeyId: original.key.id,
+      });
+      expect(rotated.key.businessId).toBeNull();
     });
   });
 });
