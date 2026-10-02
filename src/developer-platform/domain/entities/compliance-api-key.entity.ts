@@ -15,6 +15,13 @@ export interface ComplianceApiKey {
   id: string;
   applicationId: string;
   environment: ConnectionEnvironment;
+  /**
+   * The one business (a compliance tenant id) this key may act for, or null for
+   * an organisation-wide key that names its business on every call. A bound
+   * key never needs a `businessId` on a request and is refused for any other
+   * business, so a leaked key exposes one business rather than all of them.
+   */
+  businessId: string | null;
   /** Human-recognisable head of the key, e.g. `cmp_sk_test_8f2a`. Safe to display. */
   keyPrefix: string;
   keyHash: string;

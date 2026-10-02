@@ -40,6 +40,9 @@ function organizations(tenants: FakeTenant[]) {
     getTenantByMerchantId: jest.fn(
       async (id: string) => tenants.find((t) => t.id === id) ?? null,
     ),
+    getTenantById: jest.fn(
+      async (id: string) => tenants.find((t) => t.id === id) ?? null,
+    ),
     getTenantEnvironment: jest.fn(
       async (id: string) => tenants.find((t) => t.id === id)?.environment ?? null,
     ),
@@ -52,6 +55,7 @@ function caller(overrides: Partial<ApiCaller> = {}): ApiCaller {
     applicationId: 'app-1',
     organizationId: 'org-1',
     environment: ConnectionEnvironment.SANDBOX,
+    businessId: null,
     scopes: [ApiKeyScope.SALES_WRITE],
     rateLimitPerMin: 120,
     ...overrides,
@@ -193,6 +197,85 @@ describe('TenantScopeGuard', () => {
     const { context } = ctx({ body: { businessId: 'tenant-1' } });
 
     await expect(guard.canActivate(context)).rejects.toThrow(
+      ForbiddenException,
+    );
+  });
+});
+
+describe('TenantScopeGuard with a key bound to one business', () => {
+  const bound = (overrides: Partial<ApiCaller> = {}) =>
+    caller({ businessId: 'tenant-1', ...overrides });
+  const guardFor = (tenants: FakeTenant[]) =>
+    new TenantScopeGuard(organizations(tenants));
+
+  it('needs no businessId: the key is the business', async () => {
+    const { context, req } = ctx({ apiCaller: bound() });
+    await expect(
+      guardFor([ownSandbox, ownProduction]).canActivate(context),
+    ).resolves.toBe(true);
+    expect(req.apiTenantId).toBe('tenant-1');
+  });
+
+  it('accepts a request that names the same business', async () => {
+    const { context, req } = ctx({
+      apiCaller: bound(),
+      body: { businessId: 'tenant-1' },
+    });
+    await expect(guardFor([ownSandbox]).canActivate(context)).resolves.toBe(
+      true,
+    );
+    expect(req.apiTenantId).toBe('tenant-1');
+  });
+
+  it("refuses another of the organization's own businesses", async () => {
+    const { context, req } = ctx({
+      apiCaller: bound({ environment: ConnectionEnvironment.PRODUCTION }),
+      body: { businessId: 'tenant-2' },
+    });
+    await expect(
+      guardFor([ownSandbox, ownProduction]).canActivate(context),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(req.apiTenantId).toBeUndefined();
+  });
+
+  it('refuses a foreign business and an unknown id with the same 403, so ids cannot be probed', async () => {
+    const guard = guardFor([ownSandbox, foreign]);
+    const messages: string[] = [];
+    for (const id of ['tenant-3', 'does-not-exist']) {
+      const { context } = ctx({
+        apiCaller: bound(),
+        query: { businessId: id },
+      });
+      await guard.canActivate(context).catch((e: ForbiddenException) => {
+        expect(e).toBeInstanceOf(ForbiddenException);
+        messages.push(e.message);
+      });
+    }
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toBe(messages[1]);
+  });
+
+  it('still enforces the environment rail', async () => {
+    const { context } = ctx({
+      apiCaller: bound({ environment: ConnectionEnvironment.PRODUCTION }),
+    });
+    await expect(
+      guardFor([ownSandbox]).canActivate(context),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('refuses when the bound business has since moved to another organization', async () => {
+    const { context } = ctx({ apiCaller: bound() });
+    await expect(
+      guardFor([{ ...ownSandbox, organizationId: 'org-2' }]).canActivate(
+        context,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('refuses when the bound business no longer exists', async () => {
+    const { context } = ctx({ apiCaller: bound() });
+    await expect(guardFor([]).canActivate(context)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
   });

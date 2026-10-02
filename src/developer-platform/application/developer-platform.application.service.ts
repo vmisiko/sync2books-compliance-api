@@ -6,6 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import {
   COMPLIANCE_API_KEY_REPO,
   COMPLIANCE_APPLICATION_REPO,
@@ -56,6 +57,7 @@ export class DeveloperPlatformApplicationService {
     private readonly applications: IComplianceApplicationRepository,
     @Inject(COMPLIANCE_API_KEY_REPO)
     private readonly keys: IComplianceApiKeyRepository,
+    private readonly organizations: ComplianceOrganizationApplicationService,
   ) {}
 
   async listApplications(
@@ -140,6 +142,13 @@ export class DeveloperPlatformApplicationService {
     organizationId: string;
     applicationId: string;
     environment: ConnectionEnvironment;
+    /**
+     * The business this key is issued for. Business-scoped is the default, so a
+     * key must either name one or explicitly ask to be organisation-wide with
+     * `allBusinesses` -- never get the wider reach by leaving a field out.
+     */
+    businessId?: string | null;
+    allBusinesses?: boolean;
     name?: string | null;
     scopes?: string[];
     expiresAt?: Date | null;
@@ -151,6 +160,12 @@ export class DeveloperPlatformApplicationService {
     );
 
     const environment = parseEnvironment(input.environment);
+    const businessId = await this.resolveKeyBusiness(
+      input.organizationId,
+      environment,
+      input.businessId,
+      input.allBusinesses,
+    );
     const scopes = parseScopes(input.scopes);
     if (input.expiresAt && input.expiresAt.getTime() <= Date.now()) {
       throw new BadRequestException('expiresAt must be in the future');
@@ -162,6 +177,7 @@ export class DeveloperPlatformApplicationService {
       id: randomUUID(),
       applicationId: input.applicationId,
       environment,
+      businessId,
       keyPrefix: generated.keyPrefix,
       keyHash: generated.keyHash,
       lastFour: generated.lastFour,
@@ -201,6 +217,9 @@ export class DeveloperPlatformApplicationService {
       organizationId: input.organizationId,
       applicationId: existing.applicationId,
       environment: existing.environment,
+      // A replacement reaches exactly what the key it replaces did.
+      businessId: existing.businessId,
+      allBusinesses: existing.businessId === null,
       name: existing.name,
       scopes: existing.scopes,
       expiresAt: existing.expiresAt,
@@ -236,6 +255,67 @@ export class DeveloperPlatformApplicationService {
       updatedAt: now,
     });
     return toSummary(saved);
+  }
+
+  /**
+   * The business a new key is bound to, or null for an organisation-wide one.
+   *
+   * A bound key is refused up front when its business can never be used with
+   * it -- another organisation's, one with no eTIMS connection yet, or one in
+   * the other environment -- rather than being issued and failing on first use.
+   */
+  private async resolveKeyBusiness(
+    organizationId: string,
+    environment: ConnectionEnvironment,
+    businessId: string | null | undefined,
+    allBusinesses: boolean | undefined,
+  ): Promise<string | null> {
+    const requested = businessId?.trim() || null;
+
+    if (requested && allBusinesses) {
+      throw new BadRequestException(
+        'Choose either one business or allBusinesses, not both',
+      );
+    }
+    if (!requested) {
+      if (allBusinesses === true) return null;
+      throw new BadRequestException(
+        'Choose the business this key is for (businessId), or set allBusinesses to true for a key that works across the whole organisation.',
+      );
+    }
+
+    const tenant = await this.organizations.getTenantByMerchantId(requested);
+    if (!tenant) {
+      throw new NotFoundException(`Business ${requested} not found`);
+    }
+    if (tenant.organizationId !== organizationId) {
+      throw new ForbiddenException(
+        'This business does not belong to your organization',
+      );
+    }
+
+    const businessEnvironment = await this.organizations.getTenantEnvironment(
+      tenant.id,
+    );
+    if (businessEnvironment === null) {
+      throw new BadRequestException(
+        'This business has no eTIMS connection yet. Complete its setup before issuing a key for it.',
+      );
+    }
+    if (businessEnvironment !== environment) {
+      throw new BadRequestException(
+        `${tenant.displayName ?? 'This business'} is a ${
+          businessEnvironment === ConnectionEnvironment.PRODUCTION
+            ? 'production'
+            : 'sandbox'
+        } business, so it needs a ${
+          businessEnvironment === ConnectionEnvironment.PRODUCTION
+            ? 'live'
+            : 'test'
+        } key.`,
+      );
+    }
+    return tenant.id;
   }
 
   private async requireOwnedApplication(

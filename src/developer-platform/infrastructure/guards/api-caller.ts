@@ -13,6 +13,8 @@ export type ApiCaller = {
   applicationId: string;
   organizationId: string;
   environment: ConnectionEnvironment;
+  /** The single business this key is limited to, or null for an organisation-wide key. */
+  businessId: string | null;
   scopes: ApiKeyScope[];
   rateLimitPerMin: number;
 };

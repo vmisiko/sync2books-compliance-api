@@ -10,6 +10,18 @@ export class CreateApiKeyDto {
   })
   environment!: ConnectionEnvironment;
 
+  @ApiPropertyOptional({
+    description:
+      'The business this key is for. Calls made with the key then need no businessId, and any other business is refused. Required unless allBusinesses is true.',
+  })
+  businessId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Set true for an organisation-wide key that names its business on every call. Cannot be combined with businessId.',
+  })
+  allBusinesses?: boolean;
+
   @ApiPropertyOptional({ example: 'Till 1 — production' })
   name?: string;
 
