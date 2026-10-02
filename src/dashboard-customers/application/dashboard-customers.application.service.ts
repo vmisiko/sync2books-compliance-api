@@ -21,7 +21,9 @@ import {
   normalizeName,
   normalizePin,
   sourceSystemForIntegrationKey,
+  toContactErpUpdateResult,
   type ContactErpSyncResult,
+  type ContactErpUpdateResult,
 } from '../../shared/application/erp-contact-sync';
 import { OscuOperationsService } from '../../regulatory/oscu/presentation/oscu-operations.service';
 import { CustomerOrmEntity } from '../infrastructure/persistence/customer.orm-entity';
@@ -163,7 +165,9 @@ export class DashboardCustomersApplicationService {
    * undoes the local row — the outcome is reported in `erp`, and the
    * customer can be synced again later from the list.
    */
-  async createWithErp(input: CreateCustomerDto): Promise<
+  async createWithErp(
+    input: CreateCustomerDto,
+  ): Promise<
     CustomerOrmEntity & { erp?: Omit<ContactErpSyncResult, 'id' | 'name'> }
   > {
     const created = await this.create(input);
@@ -183,11 +187,19 @@ export class DashboardCustomersApplicationService {
     });
   }
 
+  /**
+   * Saves the edit here, then — when the customer is already in the connected
+   * ERP and the edit carries a field the ERP holds (name, PIN, phone, email) — passes
+   * it on through main API. `taxExempt` stays local: it decides the KRA tax
+   * type of a sale, not anything on the ERP's customer record. The ERP
+   * outcome rides back as `erp`; a failed ERP update never undoes the local
+   * edit.
+   */
   async update(
     merchantId: string,
     id: string,
     input: UpdateCustomerDto,
-  ): Promise<CustomerOrmEntity> {
+  ): Promise<CustomerOrmEntity & { erp?: ContactErpUpdateResult }> {
     const existing = await this.customerRepo.findOne({
       where: { id, merchantId },
     });
@@ -200,7 +212,105 @@ export class DashboardCustomersApplicationService {
       email: input.email ?? existing.email,
       taxExempt: input.taxExempt ?? existing.taxExempt,
     });
-    return this.customerRepo.save(existing);
+    const saved = await this.customerRepo.save(existing);
+
+    // Any save carrying a field the ERP holds re-sends them -- also how a
+    // failed ERP update is retried (saving again, even unchanged).
+    const touchesErp = (['name', 'tin', 'phoneNumber', 'email'] as const).some(
+      (key) => input[key] !== undefined,
+    );
+    if (!touchesErp || !saved.externalId) return saved;
+    return Object.assign(saved, {
+      erp: await this.pushUpdateToErp(merchantId, saved),
+    });
+  }
+
+  private async pushUpdateToErp(
+    merchantId: string,
+    customer: CustomerOrmEntity,
+  ): Promise<ContactErpUpdateResult> {
+    try {
+      const tenant =
+        await this.organization.getTenantBySync2booksCompanyId(merchantId);
+      if (!tenant) return { status: 'skipped', message: 'Business not found.' };
+      const connection = await this.mainApiConnections.getForTenant(tenant.id);
+      const integrationKey = SUPPORTED_INTEGRATION_KEYS.find(
+        (key) => connection.integrations[key]?.connectionId,
+      );
+      const connectionId = integrationKey
+        ? connection.integrations[integrationKey]?.connectionId
+        : null;
+      if (!integrationKey || !connectionId) {
+        return {
+          status: 'skipped',
+          message:
+            'No accounting system is connected, so only the copy here was updated.',
+        };
+      }
+      if (
+        customer.sourceSystem &&
+        customer.sourceSystem !== sourceSystemForIntegrationKey(integrationKey)
+      ) {
+        return {
+          status: 'skipped',
+          message: `This customer is linked to ${customer.sourceSystem}, not the accounting system connected now.`,
+        };
+      }
+
+      // externalId is the ERP's own id; main API's update takes its own code.
+      const mainApiCustomer = await this.findMainApiCustomerByBookId(
+        connection.mainApiApiKey,
+        connectionId,
+        customer.externalId!,
+      );
+      if (!mainApiCustomer) {
+        return {
+          status: 'failed',
+          message: `Couldn't find this customer in ${SOURCE_DISPLAY_NAME[integrationKey]} any more — pull customers, then try again.`,
+        };
+      }
+
+      const response = await this.mainApiPull.updateCustomer(
+        connection.mainApiApiKey,
+        mainApiCustomer.id,
+        {
+          name: customer.name,
+          taxId: customer.tin || undefined,
+          email: customer.email || undefined,
+          phone: customer.phoneNumber || undefined,
+        },
+      );
+      return toContactErpUpdateResult(response.erpSync);
+    } catch (error) {
+      return {
+        status: 'failed',
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  private async findMainApiCustomerByBookId(
+    apiKey: string,
+    connectionId: string,
+    bookId: string,
+  ): Promise<MainApiCustomer | null> {
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const response = await this.mainApiPull.getCustomers(
+        apiKey,
+        connectionId,
+        {
+          page,
+          limit: 100,
+        },
+      );
+      const match = response.customers.find((c) => String(c.bookId) === bookId);
+      if (match) return match;
+      totalPages = response.totalPages || 1;
+      page += 1;
+    } while (page <= totalPages && page <= 20);
+    return null;
   }
 
   async getById(merchantId: string, id: string): Promise<CustomerOrmEntity> {
@@ -514,7 +624,8 @@ export class DashboardCustomersApplicationService {
   ): Promise<CustomerErpPushResult> {
     const tenant =
       await this.organization.getTenantBySync2booksCompanyId(merchantId);
-    if (!tenant) throw new NotFoundException(`Business ${merchantId} not found`);
+    if (!tenant)
+      throw new NotFoundException(`Business ${merchantId} not found`);
     return this.ensureInErp(tenant.id, customerId);
   }
 
