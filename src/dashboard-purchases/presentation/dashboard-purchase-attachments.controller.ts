@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -7,6 +8,7 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Res,
   StreamableFile,
@@ -68,7 +70,7 @@ export class DashboardPurchaseAttachmentsController {
   @Post(':id/attachments')
   @ApiOperation({
     summary:
-      'Upload a PDF/JPG/PNG (10 MB, 10 per invoice; type checked by content). With pushToErp=true the file is also attached to the synced ERP bill; an ERP failure does not fail the upload.',
+      'Upload a PDF/JPG/PNG (10 MB, 10 per invoice; type checked by content). With attachToErp=true (alias pushToErp) the file is marked for the ERP bill: sent now if the bill is already synced, otherwise when it is synced or re-synced. An ERP failure does not fail the upload.',
   })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(
@@ -80,14 +82,43 @@ export class DashboardPurchaseAttachmentsController {
     @ActiveTenant() tenantId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @UploadedFile() file: UploadedFileLike | undefined,
-    @Body() body: { pushToErp?: string },
+    @Body() body: { attachToErp?: string; pushToErp?: string },
   ) {
     const { attachment, pushError } = await this.attachments.upload(tenantId, id, file, {
+      attachToErp: body?.attachToErp !== undefined ? body.attachToErp === 'true' : undefined,
       pushToErp: body?.pushToErp === 'true',
     });
     return {
       success: true,
       message: pushError ? 'File uploaded, but the ERP attachment failed' : 'File uploaded',
+      data: attachment,
+      pushError,
+    };
+  }
+
+  @Patch(':id/attachments/:aid')
+  @ApiOperation({
+    summary:
+      'Mark or unmark a file as "send to the ERP bill". Turning it on for an invoice whose bill is already synced sends the file now; turning it off only stops future automatic sends and does NOT remove a copy already attached to the ERP bill.',
+  })
+  async setAttachToErp(
+    @ActiveTenant() tenantId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('aid', ParseUUIDPipe) aid: string,
+    @Body() body: { attachToErp?: boolean },
+  ) {
+    if (typeof body?.attachToErp !== 'boolean') {
+      throw new BadRequestException('attachToErp must be true or false.');
+    }
+    const { attachment, pushError } = await this.attachments.setAttachToErp(
+      tenantId,
+      id,
+      aid,
+      body.attachToErp,
+    );
+    return {
+      success: true,
+      message: pushError ? 'Saved, but the ERP attachment failed' : 'Saved',
       data: attachment,
       pushError,
     };

@@ -20,7 +20,10 @@ import {
   PurchaseAttachmentErpPushStatus,
   PurchaseInvoiceAttachmentOrmEntity,
 } from '../infrastructure/persistence/purchase-invoice-attachment.orm-entity';
-import { PurchaseBillMappingService } from './purchase-bill-mapping.service';
+import {
+  PurchaseBillMappingService,
+  type ResolvedPurchaseBillMapping,
+} from './purchase-bill-mapping.service';
 import { generatePurchaseRecordPdf } from './purchase-record/purchase-record-pdf.generator';
 
 export const PURCHASE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
@@ -39,8 +42,16 @@ export interface PurchaseAttachmentDto {
   mime: string;
   size: number;
   createdAt: Date;
+  /** Marked to be sent to the ERP bill whenever the bill is synced or re-synced. */
+  attachToErp: boolean;
   erpPushStatus: PurchaseAttachmentErpPushStatus;
   erpPushError: string | null;
+}
+
+export interface AttachmentPushWarning {
+  attachmentId: string;
+  filename: string;
+  message: string;
 }
 
 /** Detects pdf/jpg/png from magic bytes only -- the client-declared type is never trusted. */
@@ -62,7 +73,10 @@ export function detectFileType(buf: Buffer): { mime: string; ext: string } | nul
 
 /** Strips any path, restricts to a safe charset, bounds the length and forces the detected extension. */
 export function sanitiseFilename(original: string | undefined, ext: string): string {
-  const base = (original || 'attachment').split(/[\\/]/).pop() || 'attachment';
+  // A Content-Disposition value pasted into the name (e.g. `x.pdf; filename*=UTF-8''x.pdf`, which
+  // some mail clients and download tools leave in saved filenames) -- keep only the real name.
+  const unwrapped = (original || 'attachment').split(/;\s*filename\*?\s*=/i)[0];
+  const base = unwrapped.split(/[\\/]/).pop() || 'attachment';
   const stem = base.replace(/\.[^.]*$/, '');
   const cleaned = stem
     .replace(/[^A-Za-z0-9._ -]/g, '_')
@@ -144,6 +158,7 @@ export class PurchaseAttachmentService {
       mime: a.mime,
       size: a.size,
       createdAt: a.createdAt,
+      attachToErp: a.attachToErp === true,
       erpPushStatus: a.erpPushStatus,
       erpPushError: a.erpPushError,
     };
@@ -162,7 +177,12 @@ export class PurchaseAttachmentService {
     tenantId: string,
     purchaseId: string,
     file: UploadedFileLike | undefined,
-    options: { pushToErp?: boolean } = {},
+    options: {
+      /** Mark the file for the ERP bill (sent now if the bill exists, otherwise when it is synced). */
+      attachToErp?: boolean;
+      /** Backward-compatible alias of `attachToErp`. */
+      pushToErp?: boolean;
+    } = {},
   ): Promise<{ attachment: PurchaseAttachmentDto; pushError: string | null }> {
     const invoice = await this.requireInvoice(tenantId, purchaseId);
     if (!file?.buffer || file.buffer.length === 0) {
@@ -186,6 +206,7 @@ export class PurchaseAttachmentService {
       );
     }
 
+    const markForErp = (options.attachToErp ?? options.pushToErp) === true;
     const saved = await this.attachments.save(
       this.attachments.create({
         merchantId: invoice.merchantId,
@@ -195,6 +216,7 @@ export class PurchaseAttachmentService {
         size: file.buffer.length,
         sha256: crypto.createHash('sha256').update(file.buffer).digest('hex'),
         content: file.buffer,
+        attachToErp: markForErp,
         erpPushStatus: 'not_pushed',
         erpPushError: null,
         erpAttachmentId: null,
@@ -203,7 +225,9 @@ export class PurchaseAttachmentService {
 
     let pushError: string | null = null;
     let current = saved;
-    if (options.pushToErp) {
+    // Only an already-synced bill can take the file now; otherwise the mark is just recorded and
+    // the push happens when the bill is synced.
+    if (markForErp && this.billExists(invoice)) {
       try {
         current = await this.pushRecord(tenantId, invoice, saved.id);
         pushError = current.erpPushStatus === 'failed' ? current.erpPushError : null;
@@ -235,6 +259,98 @@ export class PurchaseAttachmentService {
     });
   }
 
+  private billExists(invoice: PurchaseInvoiceOrmEntity): boolean {
+    return invoice.erpSyncStatus === 'synced' && !!invoice.erpBillId;
+  }
+
+  /**
+   * Flip the "send to the ERP bill" mark on an existing file. Turning it ON for an invoice whose
+   * bill is already synced pushes the file now (an ERP failure is returned as `pushError`, the
+   * mark is kept so a later sync retries). Turning it OFF only stops future automatic pushes: a
+   * copy already attached to the ERP bill is NOT removed from the ERP.
+   */
+  async setAttachToErp(
+    tenantId: string,
+    purchaseId: string,
+    attachmentId: string,
+    attachToErp: boolean,
+  ): Promise<{ attachment: PurchaseAttachmentDto; pushError: string | null }> {
+    const invoice = await this.requireInvoice(tenantId, purchaseId);
+    const att = await this.requireAttachment(invoice, attachmentId);
+    await this.attachments.update(
+      { id: att.id, merchantId: invoice.merchantId, purchaseInvoiceId: invoice.id },
+      { attachToErp },
+    );
+    att.attachToErp = attachToErp;
+
+    let current = att;
+    let pushError: string | null = null;
+    if (attachToErp && this.billExists(invoice) && att.erpPushStatus !== 'synced') {
+      try {
+        current = await this.pushRecord(tenantId, invoice, att.id);
+        pushError = current.erpPushStatus === 'failed' ? current.erpPushError : null;
+      } catch (err) {
+        pushError = err instanceof Error ? err.message : 'Could not push to the ERP.';
+      }
+    }
+    return { attachment: this.toDto(current), pushError };
+  }
+
+  /**
+   * Pushes every file of this invoice that is marked for the ERP and not yet there. Called after
+   * a bill is created or re-synced. NEVER throws: the bill sync has already succeeded and must
+   * stay so; each failure is recorded on its attachment and returned as a warning. Sequential and
+   * bounded by the per-invoice file cap; one failure does not stop the rest. Replay-safe because
+   * the idempotency key sent to the ERP is the attachment id.
+   */
+  async pushFlaggedForInvoice(
+    tenantId: string,
+    invoice: PurchaseInvoiceOrmEntity,
+    resolved?: Pick<ResolvedPurchaseBillMapping, 'mainApiApiKey' | 'connectionId'>,
+  ): Promise<AttachmentPushWarning[]> {
+    const warnings: AttachmentPushWarning[] = [];
+    try {
+      const rows = await this.attachments.find({
+        where: {
+          merchantId: invoice.merchantId,
+          purchaseInvoiceId: invoice.id,
+          attachToErp: true,
+        },
+        order: { createdAt: 'ASC' },
+        take: PURCHASE_ATTACHMENT_MAX_FILES,
+      });
+      for (const row of rows) {
+        if (row.erpPushStatus === 'synced') continue;
+        try {
+          const done = await this.pushRecord(tenantId, invoice, row.id, resolved);
+          if (done.erpPushStatus === 'failed') {
+            warnings.push({
+              attachmentId: row.id,
+              filename: row.filename,
+              message: done.erpPushError ?? 'The accounting system rejected the attachment.',
+            });
+          }
+        } catch (err) {
+          warnings.push({
+            attachmentId: row.id,
+            filename: row.filename,
+            message: err instanceof Error ? err.message : 'Could not push to the ERP.',
+          });
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Could not push flagged attachments for purchase ${invoice.id}: ${err instanceof Error ? err.name : 'error'}`,
+      );
+      warnings.push({
+        attachmentId: '',
+        filename: '',
+        message: 'Attachments could not be sent to the accounting system. Retry from the attachment list.',
+      });
+    }
+    return warnings;
+  }
+
   async pushToErp(
     tenantId: string,
     purchaseId: string,
@@ -249,6 +365,7 @@ export class PurchaseAttachmentService {
     tenantId: string,
     invoice: PurchaseInvoiceOrmEntity,
     attachmentId: string,
+    preResolved?: Pick<ResolvedPurchaseBillMapping, 'mainApiApiKey' | 'connectionId'>,
   ): Promise<PurchaseInvoiceAttachmentOrmEntity> {
     const att = await this.requireAttachment(invoice, attachmentId, true);
     if (invoice.erpSyncStatus !== 'synced' || !invoice.erpBillId) {
@@ -256,7 +373,8 @@ export class PurchaseAttachmentService {
         'Sync this purchase to your accounting system before attaching files to its bill.',
       );
     }
-    const resolved = await this.billMapping.resolveForSync(tenantId, invoice.merchantId);
+    const resolved =
+      preResolved ?? (await this.billMapping.resolveForSync(tenantId, invoice.merchantId));
     if (!resolved) {
       throw new ConflictException('No connected accounting system for this business.');
     }

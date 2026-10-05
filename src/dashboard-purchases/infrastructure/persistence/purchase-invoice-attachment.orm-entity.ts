@@ -48,6 +48,14 @@ export class PurchaseInvoiceAttachmentOrmEntity {
   @Column('varchar', { default: 'not_pushed' })
   erpPushStatus!: PurchaseAttachmentErpPushStatus;
 
+  /**
+   * The user marked this file "send to the ERP bill". It is sent whenever the invoice's bill is
+   * created or re-synced (and immediately if the bill already exists). Null on rows created
+   * before the column existed -- treat as false.
+   */
+  @Column('boolean', { default: false, nullable: true })
+  attachToErp!: boolean | null;
+
   @Column('text', { nullable: true })
   erpPushError!: string | null;
 

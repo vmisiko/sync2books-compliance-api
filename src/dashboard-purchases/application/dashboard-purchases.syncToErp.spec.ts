@@ -104,6 +104,7 @@ type Setup = {
   resolveAccountOverride: jest.Mock;
   createBill: jest.Mock;
   findLineTaxConflicts: jest.Mock;
+  pushFlaggedForInvoice: jest.Mock;
 };
 
 function linked(bookId = 'qb-vendor-1') {
@@ -154,6 +155,8 @@ function makeService(setup: Partial<Setup> & { rows: PurchaseInvoiceOrmEntity[] 
     setup.findLineTaxConflicts ?? jest.fn().mockResolvedValue([]);
   const billMapping = { resolveForSync, resolveAccountOverride, findLineTaxConflicts };
 
+  const pushFlaggedForInvoice =
+    setup.pushFlaggedForInvoice ?? jest.fn().mockResolvedValue([]);
   const service = new DashboardPurchasesApplicationService(
     repo as any,
     undefined as any,
@@ -165,9 +168,10 @@ function makeService(setup: Partial<Setup> & { rows: PurchaseInvoiceOrmEntity[] 
     mainApiConnections as unknown as MainApiConnectionApplicationService,
     mainApiPull as unknown as MainApiPullClient,
     billMapping as unknown as PurchaseBillMappingService,
+    { pushFlaggedForInvoice } as any,
   );
 
-  return { service, resolveAccountOverride, repo, save, ensureInErp, createBill, mainApiPull };
+  return { service, pushFlaggedForInvoice, resolveAccountOverride, repo, save, ensureInErp, createBill, mainApiPull };
 }
 
 describe('DashboardPurchasesApplicationService.syncToErp', () => {
@@ -520,5 +524,57 @@ describe('DashboardPurchasesApplicationService.syncToErp', () => {
         message: 'QuickBooks rejected the bill: invalid VendorRef',
       },
     ]);
+  });
+
+  describe('marked attachments', () => {
+    it('sends the marked attachments after the bill is created and synced', async () => {
+      const row = makePurchaseRow();
+      const { service, pushFlaggedForInvoice } = makeService({ rows: [row] });
+
+      const result = await service.syncToErp(TENANT_ID, [row.id]);
+
+      expect(row.erpSyncStatus).toBe('synced');
+      expect(pushFlaggedForInvoice).toHaveBeenCalledTimes(1);
+      expect(pushFlaggedForInvoice).toHaveBeenCalledWith(
+        TENANT_ID,
+        row,
+        expect.objectContaining({ mainApiApiKey: 'key-1', connectionId: 'conn-1' }),
+      );
+      expect(result.attachmentWarnings).toEqual([]);
+    });
+
+    it('does not send attachments when the ERP write did not complete', async () => {
+      const row = makePurchaseRow();
+      const createBill = jest.fn().mockResolvedValue({
+        bill: { id: 'b1', syncStatus: 'failed', syncError: 'nope' },
+        message: 'x',
+        syncBatchId: 's',
+      });
+      const { service, pushFlaggedForInvoice } = makeService({ rows: [row], createBill });
+
+      await service.syncToErp(TENANT_ID, [row.id]);
+
+      expect(row.erpSyncStatus).toBe('sync_failed');
+      expect(pushFlaggedForInvoice).not.toHaveBeenCalled();
+    });
+
+    it('keeps the bill synced and reports a failed attachment as a warning', async () => {
+      const row = makePurchaseRow();
+      const { service } = makeService({
+        rows: [row],
+        pushFlaggedForInvoice: jest
+          .fn()
+          .mockResolvedValue([{ attachmentId: 'a1', filename: 'x.pdf', message: 'ERP rejected it' }]),
+      });
+
+      const result = await service.syncToErp(TENANT_ID, [row.id]);
+
+      expect(row.erpSyncStatus).toBe('synced');
+      expect(row.erpSyncError).toBeNull();
+      expect(result.errors).toEqual([]);
+      expect(result.attachmentWarnings).toEqual([
+        expect.objectContaining({ id: row.id, attachmentId: 'a1', message: 'ERP rejected it' }),
+      ]);
+    });
   });
 });
