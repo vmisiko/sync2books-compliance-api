@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
 import {
@@ -59,8 +59,40 @@ const TAX_NAME_HINTS: Record<TaxLetter, RegExp[]> = {
   E: [/\b8(\.0+)?\s*%/i, /\b8\b/],
 };
 
+/** KRA tax types that are always 0% on the bill: Exempt, Zero-rated, Non-VAT. */
+const ZERO_RATE_LETTERS: ReadonlyArray<TaxLetter> = ['A', 'C', 'D'];
+
+type BillTaxOption = MainApiBillMappingOptions['taxes'][number];
+
+function formatRate(rate: number): string {
+  return `${Number.isInteger(rate) ? rate : rate.toFixed(2)}%`;
+}
+
+/**
+ * Why `tax` can't carry a zero-rated line, or null when it can (or when we can't tell).
+ * A line is zero-rated when its KRA type is A/C/D, or its own rate is 0. The check needs the
+ * ERP tax's numeric rate; a connector that doesn't report one (`rate` absent) is never blocked,
+ * and an Odoo tax *group* is skipped because its own amount is not its effective rate.
+ */
+export function zeroRateTaxConflict(
+  line: { taxTyCd: TaxLetter; taxRate?: number | null },
+  tax: Pick<BillTaxOption, 'name' | 'rate' | 'rateType'> | undefined,
+): string | null {
+  const zeroRated =
+    ZERO_RATE_LETTERS.includes(line.taxTyCd) || line.taxRate === 0;
+  if (!zeroRated || !tax) return null;
+  if (typeof tax.rate !== 'number' || !Number.isFinite(tax.rate)) return null;
+  if (tax.rateType === 'group') return null;
+  if (tax.rate === 0) return null;
+  return tax.rate < 0
+    ? `"${tax.name}" is a withholding tax (${formatRate(tax.rate)})`
+    : `"${tax.name}" charges ${formatRate(tax.rate)}`;
+}
+
 @Injectable()
 export class PurchaseBillMappingService {
+  private readonly logger = new Logger(PurchaseBillMappingService.name);
+
   constructor(
     @InjectRepository(PurchaseBillMappingOrmEntity)
     private readonly repo: Repository<PurchaseBillMappingOrmEntity>,
@@ -187,6 +219,15 @@ export class PurchaseBillMappingService {
           `"${tax.name}" is a sales-only tax in your accounting system and can't be applied to a purchase bill.`,
         );
       }
+      const conflict = zeroRateTaxConflict(
+        { taxTyCd: letter as TaxLetter },
+        tax,
+      );
+      if (conflict) {
+        throw new BadRequestException(
+          `KRA tax type ${letter} is zero-rated, but ${conflict}. Choose a 0% tax in your accounting system for it.`,
+        );
+      }
       await this.upsert(merchantId, connection.integrationKey, 'tax', letter, {
         erpId: tax.id,
         erpName: tax.name,
@@ -217,6 +258,52 @@ export class PurchaseBillMappingService {
       );
     }
     return { erpId: account.id, erpName: account.name };
+  }
+
+  /**
+   * Per-line rate check for a sync/re-sync: one message for every zero-rated line whose mapped
+   * ERP tax would charge (or withhold) tax. Reads the ERP's live tax list once. Fails open --
+   * returns no conflicts -- if that list can't be read, since the ERP write that follows will
+   * surface a real outage and the saved mapping was already checked when it was saved.
+   */
+  async findLineTaxConflicts(
+    mapping: Pick<ResolvedPurchaseBillMapping, 'connectionId' | 'mainApiApiKey'>,
+    lines: Array<{
+      description: string;
+      taxTyCd: TaxLetter;
+      taxRate?: number | null;
+      tax: ErpRef | undefined;
+    }>,
+  ): Promise<string[]> {
+    const candidates = lines.filter(
+      (l) =>
+        l.tax &&
+        (ZERO_RATE_LETTERS.includes(l.taxTyCd) || l.taxRate === 0),
+    );
+    if (!candidates.length) return [];
+    let options: MainApiBillMappingOptions;
+    try {
+      options = await this.mainApiPull.getBillMappingOptions(
+        mapping.mainApiApiKey,
+        mapping.connectionId,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Skipping tax-rate check: could not read ERP taxes (${error instanceof Error ? error.message : String(error)})`,
+      );
+      return [];
+    }
+    const messages: string[] = [];
+    for (const line of candidates) {
+      const tax = options.taxes.find((t) => t.id === line.tax!.erpId);
+      const conflict = zeroRateTaxConflict(line, tax ?? { name: line.tax!.erpName });
+      if (conflict) {
+        messages.push(
+          `Line "${line.description}" is zero-rated (KRA tax type ${line.taxTyCd}) but ${conflict}. Map KRA type ${line.taxTyCd} to a 0% tax in Mapping Center → Purchase Bills.`,
+        );
+      }
+    }
+    return messages;
   }
 
   /** What syncToErp() applies — null when no supported ERP is connected. */
