@@ -1,64 +1,71 @@
 ---
 name: etims-golive-testing
-description: Drives the KRA eTIMS OSCU Go-Live certification testing workflow for Sync2Books end-to-end — standing up compliance-api and nest-sync-2-books-api locally, provisioning new Go-Live credentials (Apigee App ID, Application Test Pin, device serial), and working through the 23-test-case checklist on developer.go.ke. Use this whenever the user wants to test the eTIMS/OSCU Go-Live checklist, drive the KRA sandbox tests, provision a new Application Test Pin for Sync2Books, or debug a failing OSCU endpoint (saveItem, insertStockIO, sendSalesTransaction, credit notes, etc.) — even if they just paste new credentials and say "try again" or share a screenshot of the developer.go.ke test dashboard. Also use it for the go-live RESUBMISSION after KRA's rejection on the TIS page 8/10 invoice and credit-note template — building the realistic item/customer/invoice/credit-note dataset (mirroring the QuickBooks catalogue), generating the receipt PDFs, and checking them against the template. Encodes a full session's worth of hard-won debugging (payload shapes, sequencing bugs, environment gotchas) so it doesn't get rediscovered from scratch.
+description: Drives the KRA eTIMS OSCU Go-Live certification testing workflow for Sync2Books end-to-end — standing up the compliance-api stack locally (compliance-api only — no main-API eTIMS routes; items/stock/sales go through its /v1 developer API with a dashboard-issued key), provisioning new Go-Live credentials (Apigee App ID, Application Test Pin, device serial), and working through the 23-test-case checklist on developer.go.ke. Use this whenever the user wants to test the eTIMS/OSCU Go-Live checklist, drive the KRA sandbox tests, provision a new Application Test Pin for Sync2Books, or debug a failing OSCU endpoint (saveItem, insertStockIO, sendSalesTransaction, credit notes, etc.) — even if they just paste new credentials and say "try again" or share a screenshot of the developer.go.ke test dashboard. Also use it for the go-live RESUBMISSION after KRA's rejection on the TIS page 8/10 invoice and credit-note template — building the realistic item/customer/invoice/credit-note dataset (mirroring the QuickBooks catalogue), generating the receipt PDFs, and checking them against the template. Encodes a full session's worth of hard-won debugging (payload shapes, sequencing bugs, environment gotchas) so it doesn't get rediscovered from scratch.
 ---
 
 # eTIMS Go-Live Testing (Sync2Books)
 
 This project integrates Sync2Books with Kenya's eTIMS tax system via KRA's OSCU sandbox. Getting through
 KRA's 23-test-case Go-Live checklist (tracked at `developer.go.ke/myapps/testcases/...`) requires driving
-real HTTP calls through `sync2books-compliance-api` → KRA's sandbox, and often `nest-sync-2-books-api` in
-front of it. The sandbox is flaky and its request formats diverge from its own documentation in specific,
+real HTTP calls through `sync2books-compliance-api` → KRA's sandbox (the main API is no longer involved). The sandbox is flaky and its request formats diverge from its own documentation in specific,
 previously-discovered ways — this skill exists so those aren't rediscovered by trial and error every time.
 
 **Read `references/oscu-payload-gotchas.md` before making direct OSCU calls (saveItem, insertStockIO,
 saveStockMaster, sendSalesTransaction, credit notes)** — it has the exact request shapes that work and why
 the "obvious" version of each fails.
 
-## ⚠️ Current status: application REJECTED on the receipt template — read this first
+## Current status (2026-10-05): third attempt, all 23 rows green — and the flow is compliance-api only
 
-All 23 test cases passed on 2026-08-20, but KRA rejected the go-live application: *"Kindly refer to the TIS
-Documentation on page 8 and 10 on the invoice and credit note template"*. Page 8 is the Normal Invoice (`NS`)
-sample, page 10 the Normal Credit Note (`NC`). What failed was the **evidence PDFs and the data in them**
-(one item, one rate, `GOLIVE-INV-001`), not the OSCU API.
+History: attempt 1 passed all 23 rows but KRA rejected the **receipt template** (TIS pages 8/10); attempt 2
+(2026-09-17, new THIRDPARTY app) and a Gear Train app (2026-09-18) followed; attempt 3 (2026-10-05, App ID
+`77ab8b13-…`, pin `P600004862A`) went green on all 23 rows through the **developer API**. Per-run values live in
+the memory notes; this skill holds the procedure.
 
-So the job now is not "pass the checklist again" — it's **re-run the flow with a realistic, mixed dataset
-and produce receipts that match pages 8 and 10 field by field.** Before creating any item, customer, sale or
-credit note, read **`references/golive-resubmission-dataset.md`**. It has:
+**The main API (`nest-sync-2-books-api`) is not part of the go-live flow any more.** Its public eTIMS routes
+were removed 2026-09-21. Everything below uses `sync2books-compliance-api` only: its internal routes
+(service token) for provisioning and the checklist-only OSCU calls, and the public `/v1` developer API (a
+dashboard-issued API key) for items, stock, sales and credit notes. The main API only has to be *running*,
+because the dashboard creates a companion company id on first open (see Step 3) — no eTIMS call goes through it.
 
-- the naming rule (no `Test`/`Demo`/`Seed`/`GoLive` anywhere a reviewer can see — including company name and
-  invoice numbers);
-- the 13-item hospitality + fintech catalogue, 3 customers, 4 suppliers and 8 documents, mirroring what was
-  pushed to QuickBooks on 2026-09-09 (with tax-inclusive eTIMS prices worked out, since QuickBooks prices are
-  tax-exclusive);
-- pre-flight blockers still open (SCU ID `sdcId` null, trade address/messages empty, customer PINs empty, KRA
-  logo placeholder, no COPY watermark, discounts hardcoded to 0) — check them before generating PDFs;
-- the page 8 / page 10 acceptance checklist to tick against every PDF.
+Before creating any item, customer, sale or credit note, read **`references/golive-resubmission-dataset.md`**
+(naming rule — nothing may read as fabricated; the 13-item catalogue, customers and 8 documents; the TIS
+page 8/10 acceptance checklist). Background on the original rejection: `.docs/TIS_TEMPLATE_CONFORMANCE_PLAN.md`.
+Spec copy: `.docs/TIS-for-OSCU--VSCU-Technical-Specifications-v2.0.pdf`.
 
-Background and full gap analysis: `.docs/TIS_TEMPLATE_CONFORMANCE_PLAN.md`. Spec copy:
-`.docs/TIS-for-OSCU--VSCU-Technical-Specifications-v2.0.pdf`.
+**Lessons from 2026-10-05 that cost real time — read before starting:**
+1. **Receipt text is snapshotted at issue time.** Trade name, address, header and footer are sent to KRA with
+   each sale and the PDF replays that snapshot. Settings saved afterwards never reach issued receipts, and KRA
+   records can't be edited — so set **Receipt settings in the dashboard first**, then issue the evidence set.
+   (We issued 8 documents, saved settings 6 minutes later, and had to re-issue all 8.)
+2. **Opening a business in the dashboard can overwrite its initialized connection** with the
+   `ETIMS_SANDBOX_SHARED_*` values from `.env` (old pin/device/cmcKey) — every KRA call afterwards goes out under
+   the wrong pin. Fixed in compliance-api PR #27 (`fix/preserve-initialized-etims-connection`); until that is
+   merged, point the four `ETIMS_SANDBOX_SHARED_*` vars at the NEW device *before* opening the business, and
+   re-check `compliance_etims_connections` (pin/deviceId) afterwards.
+3. **Never run `/catalog/items/resync-item-cd-sequence` to "fix" an `Expected sequence ending with N` error.**
+   That error with N far above your item count means the connection is on the wrong pin (see 2); the resync
+   then lowers the *other* pin's counter and marks your items REGISTERED with someone else's `itemCd`s.
+4. **Save the full `/initialize` response the moment you get it** (it holds the only copy of `cmcKey`).
+5. **KRA seeds imported items and supplier invoices lazily** — only after the pin has real activity. Rows 12, 13,
+   15, 16 return `001` right after init and real data ~20 minutes / a dozen sales later. Row 12 *fails* the
+   dashboard on `001` even though `001` passes rows 15/18/21/22 — re-query before debugging.
 
-## The three repos
+## The services
 
-This skill lives inside `sync2books-compliance-api/.claude/skills/`. All four project folders below
-(including that one) are siblings under one parent workspace directory — commands in this skill that `cd`
-into a project folder assume you start from that shared parent, not from inside `sync2books-compliance-api`
-itself. If unsure where that parent is, it's the directory containing `sync2books-compliance-api/.claude/`
-that this very file lives under (two levels up from `SKILL.md`) — use `pwd`/`find` to confirm before running
-the `cd` commands below rather than assuming.
+- `sync2books-compliance-api` (NestJS, :3001) — talks to KRA's sandbox
+  (`https://sbx.kra.go.ke/etims-oscu/api/v1`, integrator path style) and exposes everything this skill needs.
+  Two ways in: **internal routes** (`/compliance-organization/*`, `/oscu/*`, `/catalog/*`, `/api/*`; headers
+  `Authorization: Bearer $COMPLIANCE_SERVICE_TOKEN` + `x-sync2books-company-id: <merchantId>`) and the public
+  **`/v1/*` developer API** (`Authorization: Bearer cmp_sk_test_…`, business-scoped, see Step 4).
+- `Next-Sync-2-books-compliance-dashboard-ui` (:3002) — where you sign in, set Receipt settings and create the
+  API key (Integrations). Also the quickest way to eyeball items/sales.
+- `nest-sync-2-books-api` (:3000) — **not used for eTIMS.** Must be running only so the dashboard can create the
+  companion company id.
+- Start/stop the stack with `s2b up | status | restart compliance | logs compliance` (installed at
+  `~/.local/bin/s2b`; logs in `<workspace>/.s2b/logs/`).
 
-- `sync2books-compliance-api` (NestJS) — talks directly to KRA's sandbox
-  (`https://sbx.kra.go.ke/etims-oscu/api/v1`, integrator path style). Needs its own MySQL.
-- `nest-sync-2-books-api` (NestJS, "main API") — sits in front of compliance-api. Has a **direct REST API**
-  for items/sales/credit-notes at `/companies/:companyId/integrations/etims/*` (x-api-key auth) — no
-  QuickBooks connection required. Needs its own MySQL + Redis.
-- `sync2books-react` — dashboard UI. Not useful for driving tests; it has no manual item/invoice creation
-  screen, only sync monitoring.
-
-Prefer testing through `nest-sync-2-books-api`'s direct API when you need the full item→sale→credit-note
-flow (it exercises the same code paths a real integration would). Fall back to calling
-`sync2books-compliance-api` directly, or raw `curl` against KRA's sandbox, when isolating whether a bug is
-in our code or in KRA's backend.
+Drive the flow through `/v1` where it has a route; fall back to the internal routes for the checklist-only
+OSCU calls, or raw `curl` against KRA's sandbox when isolating whether a bug is ours or KRA's.
 
 **⚠️ NOT RESOLVED — `JM9QLXNJ75` "Query did not return a unique result" is a real, ongoing, escalating
 KRA-side corruption tied to the device serial itself. Every theory below claiming this was "fixed" (new
@@ -129,44 +136,29 @@ card at the top of the test-case dashboard:
 - Integrator Pin
 - Device Serial Number
 - Branch Id (almost always `00`)
-- Apigee OAuth consumer key + secret (these usually stay constant across Application Test Pin rotations —
-  ask the user to confirm before requesting them again)
+- Apigee OAuth consumer key + secret — **new for every new Apigee app** (a new app = new App ID + new key/secret);
+  they only stay constant across Application Test Pin rotations *within* one app, so ask if unsure
 
 **If the user says they've generated a new Application Test Pin without saying anything else changed**,
 assume device serial / Apigee App ID / consumer key+secret are unchanged and only ask for what's different.
 
 ## Step 2 — Stand up the environment
 
-Check what's already running before redoing setup — state may survive between sessions:
-
 ```bash
-docker ps -a --format "{{.Names}}: {{.Status}}"
-curl -s -o /dev/null -w "compliance-api: %{http_code}\n" http://localhost:3001/docs
-curl -s -o /dev/null -w "nest-api: %{http_code}\n" http://localhost:3000/health
+s2b up            # infra containers + api, compliance, dashboard, console
+s2b status        # ports/PIDs/HTTP status; compliance :3001, dashboard :3002
 ```
 
-If containers exist but are stopped, `docker start <name>` brings them back with data intact (as long as
-they were never `docker rm`'d — no `-v` volume was used, so data lives in the container's writable layer).
-If Docker itself is down, `open -a Docker` and wait for `docker info` to succeed before proceeding.
-
-**If nothing exists yet**, create isolated containers (don't touch any pre-existing local MySQL install —
-it may belong to a different user/project on a shared machine):
-
-```bash
-docker run -d --name sync2books-compliance-mysql -e MYSQL_ROOT_PASSWORD=password \
-  -e MYSQL_DATABASE=compliance -p 3307:3306 mysql:8.4
-docker run -d --name sync2books-api-mysql -e MYSQL_ROOT_PASSWORD=password \
-  -e MYSQL_DATABASE=sync_to_books -p 3308:3306 mysql:8.4
-docker run -d --name sync2books-api-redis -p 6380:6379 redis:7-alpine
-```
-
-If the image pull or MySQL init fails, add `--platform linux/arm64` or `linux/amd64` to match `uname -m` —
-this project has hit `mysqld` init errors from a platform mismatch before.
+If a container is stopped, `docker start <name>` brings it back with data intact; if Docker is down,
+`open -a Docker` and wait for `docker info`. `s2b` runs services in watch mode (`start:dev`) — which is exactly
+the stale-process trap described near the top of this skill, so after any `.env` change use
+`s2b restart compliance` (never `pkill`) and don't start a second copy by hand (it dies with `EADDRINUSE`
+while the old one keeps answering `/docs`).
 
 ### compliance-api `.env`
 
-NestJS here does **not** auto-load `.env` (no dotenv/ConfigModule) — you must export the vars into the
-shell before `pnpm start`. Write `sync2books-compliance-api/.env`:
+`ConfigModule` loads `sync2books-compliance-api/.env` (gitignored). For a new app, comment out the previous
+app's trio and add the new one — keep the old lines commented as history:
 
 ```
 ETIMS_ADAPTER_MODE=http
@@ -177,168 +169,132 @@ ETIMS_OSCU_APIGEE_CLIENT_SECRET=<consumer secret>
 ETIMS_OSCU_APIGEE_APP_ID=<Apigee App ID>
 ETIMS_STOCK_SYNC=true
 ETIMS_STOCK_MASTER_SYNC=true
-DB_HOST=127.0.0.1
-DB_PORT=3307
-DB_USERNAME=root
-DB_PASSWORD=password
-DB_DATABASE=compliance
-PORT=3001
-NODE_ENV=development
+COMPLIANCE_SERVICE_TOKEN=<any non-empty string locally>
 ```
 
-Start it in its **own, isolated Bash call**:
+Back up `.env` first (outside the repo), then `s2b restart compliance`. Confirm the key/secret are what the
+process uses: a token call with them against `https://sbx.kra.go.ke/v1/token/generate?grant_type=client_credentials`
+(HTTP Basic) returns an `access_token`. If KRA's host does not resolve from this Mac (`Could not resolve host`
+while google.com works) flush the DNS cache — `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder` —
+before concluding anything; `/initialize` failing with `retryable: fetch failed` was exactly this.
+
+**compliance-api's stock inventory lives in MySQL now** (`inventory_stock`, `stock_movements`) — it survives
+restarts. (Older notes saying it is in-memory are out of date.)
+
+## Step 3 — Provision the business (no main API)
+
+Internal routes need `Authorization: Bearer $COMPLIANCE_SERVICE_TOKEN` and an `x-sync2books-company-id` header;
+for tenant creation any UUID works for the header (it is only an assertion check).
 
 ```bash
-cd sync2books-compliance-api
-set -a; source <(grep -v '^#' .env | grep -v '^$'); set +a
-nohup pnpm start > /tmp/compliance-api.log 2>&1 &
-disown
+H=(-H "Authorization: Bearer $TOKEN" -H "x-sync2books-company-id: $(uuidgen | tr A-Z a-z)" -H "Content-Type: application/json")
+# 1. tenant + default branch (kraBhfId 00) + eTIMS shell
+curl -s -X POST localhost:3001/compliance-organization/tenants "${H[@]}" -d '{"kraPin":"<Application Test Pin>","environment":"SANDBOX"}'
+#    -> note tenant.id and defaultBranchId
+# 2. attach the device serial
+curl -s -X PUT localhost:3001/compliance-organization/branches/$BRANCH/etims-connection "${H[@]}" \
+  -d '{"kraPin":"<Application Test Pin>","dvcSrlNo":"<device serial>","environment":"SANDBOX"}'
+# 3. initialize — ONCE per device+pin. Save the whole response to a private file: it holds the only copy of cmcKey.
+curl -s -m 120 -X POST localhost:3001/compliance-organization/branches/$BRANCH/etims-connection/initialize "${H[@]}" > init.json
 ```
 
-⚠️ **Do not start nest-api in the same shell chain.** `set +a` stops *future* assignments from
-auto-exporting, but variables already exported (from sourcing compliance-api's `.env`) stay exported for
-the rest of that shell process. If you `cd` into `nest-sync-2-books-api` and `pnpm start` in the same Bash
-call, it inherits compliance-api's `PORT`/`DB_*` and fails with `EADDRINUSE` or connects to the wrong
-database. Always start nest-api in a fresh Bash tool call.
+`/initialize` persists `deviceId`, `sdcId` (printed as "CU ID" on every receipt), `mrcNo` and `cmcKey`. Do **not**
+use the dashboard's "Add Business" for the go-live pin: it copies `ETIMS_SANDBOX_SHARED_*` from `.env` instead of
+initializing, which silently attaches whatever device those vars name. If `/initialize` answers
+`902 This device is installed`, it already ran for this pin — recover the values rather than re-calling it
+(see the device-corruption section). If the response is empty or the process died mid-call, check
+`compliance_etims_connections` before retrying.
 
-### nest-sync-2-books-api `.env`
+4. **Make the shared-sandbox vars point at the new device** (until PR #27 is merged): set
+   `ETIMS_SANDBOX_SHARED_KRA_PIN / _DVC_SRL_NO / _DEVICE_ID / _CMC_KEY` to the new pin, serial, `deviceId` and
+   `cmcKey` from `init.json`, then `s2b restart compliance`.
+5. **Attach the tenant to a dashboard organisation** (no API for this — a DB write):
+   `UPDATE compliance_tenants SET organizationId='<org id>', displayName='<name>' WHERE id='<tenant id>'`.
+   Use the name **KRA holds for the pin** as `displayName` — it prints as the business name on every receipt
+   (`selectTaxpayerInfo` returns it as `taxprNm`; for sandbox test pins it is `SYNC TO BOOKS RECONCILER LIMITED`,
+   whatever "Trader Invoicing System Name" the developer.go.ke card shows). Find the org via the dashboard user:
+   `select organizationId from dashboard_users where email='…'`.
+6. **Sign in to the dashboard (localhost:3002), open the business, and set Receipt settings** (address, header,
+   footer, optional trade name — 20 chars max, printed and sent exactly as typed — and logo) **before issuing
+   anything** (lesson 1). Opening the business triggers `ensureCompany`, which creates a main-API company and
+   stamps its id on the tenant as `sync2booksCompanyId` — this id is your **merchantId** for the internal routes
+   (`select sync2booksCompanyId from compliance_tenants where id=…`). Then re-check the connection row still has
+   the new pin/deviceId (lesson 2).
+7. **Create the API key:** business → *Integrations* → *Create API key* → Test, all permissions. The key is
+   shown once in the dialog; keep it in a private file, never in the repo or chat. Check it:
+   `curl localhost:3001/v1/me -H "Authorization: Bearer $KEY"` should return `scope: business` and your tenant id.
 
-This one *does* auto-load `.env` via `@nestjs/config`. Write it (new Bash call):
+**Internal routes use `merchantId=<sync2booksCompanyId>` and `branchId=<branch UUID>`, not `00`**: a branch created
+this way has `sync2booksBranchId = NULL`, and `00` answers `No active eTIMS connection`. `/v1` needs neither
+(the key binds the business; the branch defaults to its only one).
 
-```
-NODE_ENV=development
-PORT=3000
-DB_HOST=127.0.0.1
-DB_PORT=3308
-DB_USERNAME=root
-DB_PASSWORD=password
-DB_DATABASE=sync_to_books
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6380
-JWT_SECRET=local-dev-jwt-secret-change-me
-JWT_EXPIRES_IN=7d
-COMPLIANCE_API_BASE_URL=http://localhost:3001
-COMPLIANCE_SERVICE_TOKEN=local-dev-service-token
-```
+## Step 4 — Reference data, items, stock, sales, credit notes
 
-`COMPLIANCE_SERVICE_TOKEN` can be any non-empty string — compliance-api's own auth guard
-(`ComplianceServiceAuthGuard`) only enforces a matching token if *its own* `COMPLIANCE_SERVICE_TOKEN` env
-var is set, which it isn't in local dev, so it accepts anything nest-api sends.
+Order matters; each step unlocks the next.
 
+**4a. Reference data first, under the right pin** (checklist rows 2 and 3 — and KRA refuses `saveItem` and
+`insertStockIO` until the device has fetched the classification list: *"Make 'Get Item Classification List'
+request before performing StockIo"*):
 ```bash
-cd nest-sync-2-books-api
-nohup pnpm start > /tmp/nest-api.log 2>&1 &
-disown
+curl -s -X POST localhost:3001/catalog/codes/sync "${H[@]}" -d '{"merchantId":"<merchantId>","branchId":"<branch uuid>","full":true}'
+curl -s -X POST localhost:3001/catalog/item-classifications/sync "${H[@]}" -d '{"merchantId":"<merchantId>","branchId":"<branch uuid>","full":true}'
 ```
+(with `x-sync2books-company-id` set to the merchantId). Expect 755 codes / 26 classifications in the sandbox.
 
-Verify both: `curl localhost:3001/docs` and `curl localhost:3000/health` should return 200. If not, check
-`/tmp/compliance-api.log` / `/tmp/nest-api.log` — `grep -iE "error" | grep -v "^query:"` cuts through the
-TypeORM query noise.
-
-**⚠️ compliance-api's stock inventory is in-memory** (`StockRepositoryStub`), not persisted to MySQL — it
-resets to zero every time you restart the server. If you restart compliance-api mid-session, re-run the
-stock steps in Step 4 before testing sales again, or you'll chase a phantom "insufficient stock" bug that
-isn't really a bug.
-
-## Step 3 — Provision the connection
-
-Via nest-api's direct API (create an org/application/company once, reuse across sessions if they already
-exist — check first):
-
+**4b. Items** — take every name, unit and price from `references/golive-resubmission-dataset.md` §3.
 ```bash
-# One-time: sign up, create an application, get an x-api-key
-curl -s -X POST http://localhost:3000/auth/signup -H "Content-Type: application/json" -d '{...}'
-curl -s -X POST http://localhost:3000/organizations/$ORG_ID/applications -H "Authorization: Bearer $JWT" -d '{"name":"Go-Live Test App","type":"SERVER"}'
-curl -s -X POST http://localhost:3000/organizations/$ORG_ID/applications/$APP_ID/regenerate-credentials -H "Authorization: Bearer $JWT"
-# -> take the "development" environment's apiKey
-
-# Per Go-Live session: create a company, provision eTIMS
-# Company name is printed as the trade name on every receipt KRA reviews -- use the business's real
-# trading name, never "Go-Live Test Company" (see references/golive-resubmission-dataset.md §2)
-curl -s -X POST http://localhost:3000/companies -H "x-api-key: $API_KEY" -d '{"name":"<real trading name>"}'
-curl -s -X POST http://localhost:3000/companies/$COMPANY_ID/integrations/etims/provision \
-  -H "x-api-key: $API_KEY" -H "Content-Type: application/json" \
-  -d '{"kraPin":"<Application Test Pin>","environment":"SANDBOX","dvcSrlNo":"<device serial>","kraBhfId":"00"}'
+curl -s -X POST localhost:3001/v1/items -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"externalId":"53","name":"Grilled Goat Ribs (per kg)","taxCategory":"VAT_STANDARD","productTypeCode":"2",
+       "classificationCode":"1010150800","unitCode":"KG","packagingUnitCode":"NT","unitPrice":1392}'
+curl -s -X POST localhost:3001/v1/items/<id>/register -H "Authorization: Bearer $KEY" -d '{}'
 ```
+`productTypeCode`: `2` goods, `3` service. The item id is `item-<merchantId>-API-<externalId>`. Registration
+failures come back as HTTP 422 `registration_failed` with KRA's message. Item codes should come out sequential
+from `…0000001` — if KRA says `Expected sequence ending with ********N` with a big N, stop and check the
+connection row's pin (lesson 3).
 
-`provision` creates the branch and chains through compliance-api's tenant → branch → etims-connection →
-`/initialize`. **This is the only `/initialize` call you should make per device+PIN combination** — see the
-device-corruption warning below before considering a second one.
-
-If it fails with `"OSCU 902 This device is installed"`, the device was already initialized for this exact
-PIN in a prior attempt (e.g. a retried script). Don't re-initialize — find the earlier `cmcKey`/`deviceId`
-(check `oscu_operation_logs` or your own shell history) and patch the DB row directly instead:
-
+**4c. Opening stock for goods only** (services are exempt, TIS §6.29), always with `unitPrice` (tax-inclusive):
 ```bash
-docker exec sync2books-compliance-mysql mysql -uroot -ppassword compliance -e "
-UPDATE compliance_etims_connections SET cmcKey='<known cmcKey>', deviceId='<known deviceId>'
-WHERE kraPin='<pin>';"
+curl -s -X POST localhost:3001/v1/stock/adjustments -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"itemId":"<id>","action":"ADD","quantity":60,"unitPrice":1392,"referenceId":"OPENING-STOCK"}'
 ```
+Read `data.etims.stockIo.status` / `stockMaster.status` — both must be `ok`. The local quantity is saved even
+when the KRA push fails, so on a failed push fix the cause, then `DELETE` that item's rows from `stock_movements`
+and `inventory_stock` before re-adding, or the local quantity doubles.
 
-## Step 4 — Register an item and stock, then run the flow
-
-Once provisioned, drive the full flow through nest-api's direct API. The payloads below show the **shape**
-only — for anything that becomes go-live evidence, take every name, unit, price, customer and document from
-`references/golive-resubmission-dataset.md` §3 instead (13 items, opening stock for the 4 goods, 7 sales +
-1 partial credit note). Note `unitPrice` on a sale is **tax-inclusive** (`splyAmt = qty × unitPrice`, tax is
-split out of it), and a *partial* credit note goes through `POST .../sales` with `receiptTypeCode: "R"` +
-`originalTraderInvoiceNumber`, not the express endpoint (which credits the whole sale).
-
+**4d. Sales** — `unitPrice` is tax-inclusive; the tax band comes from the item, never the caller. Always send an
+`Idempotency-Key` (use the invoice number) and a `customer.name`:
 ```bash
-# Item
-curl -s -X POST http://localhost:3000/companies/$COMPANY_ID/integrations/etims/catalog/items \
-  -H "x-api-key: $API_KEY" -d '{"externalId":"...","name":"...","itemType":"GOODS","taxCategory":"VAT_STANDARD","classificationCode":"<a real code>","unitCode":"EA"}'
-curl -s -X POST http://localhost:3000/companies/$COMPANY_ID/integrations/etims/catalog/items/sync \
-  -H "x-api-key: $API_KEY" -d '{"branchId":"00"}'
+curl -s -X POST localhost:3001/v1/sales -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: INV-261005-10" -d '{"traderInvoiceNumber":"INV-261005-10","saleDate":"2026-10-05",
+  "paymentTypeCode":"04","customer":{"name":"Amani Business Park Ltd","pin":"P052581715V","phone":"+254733221100",
+  "email":"accounts@amanibusinesspark.co.ke"},"lines":[{"itemId":"<id>","quantity":8,"unitPrice":1392}]}'
 ```
+Issue them in dataset order. `status: completed` means KRA answered — confirm `ACCEPTED` in the DB (below).
 
-Pull real classification codes first if you don't have one handy —
-`POST http://localhost:3001/catalog/item-classifications/sync` with `{"merchantId","branchId":"00","full":true}`
-against compliance-api, then `GET /catalog/item-classifications?limit=5`.
-
-**Before any sale**, stock must exist in *two* places — locally (gates our own validation) and in KRA's own
-Stock Information Management (gates their `sendSalesTransaction` check):
-
+**4e. Credit notes.** `POST /v1/credit-notes` reverses a sale **in full, once**. The evidence needs a *partial*
+credit note against the mixed invoice, which only the internal route does (service-token headers, `merchantId`
+and the branch UUID in the body):
 ```bash
-# Local (compliance-api) -- pass unitPrice or the eTIMS sync below is skipped, not sent with zeros
-curl -s -X PUT http://localhost:3001/api/stock/adjust -H "Content-Type: application/json" \
-  -d '{"itemId":"<item id>","branchId":"00","quantity":100,"action":"ADD","unitPrice":100}'
+curl -s -X POST localhost:3001/api/sales "${H[@]}" -d '{"merchantId":"<merchantId>","branchId":"<branch uuid>",
+ "saleDate":"2026-10-05","traderInvoiceNumber":"CN-261005-02","originalTraderInvoiceNumber":"INV-261005-10",
+ "creditNoteDate":"2026-10-05","creditNoteReasonCode":"06","customerTin":"P052581715V",
+ "customerName":"Amani Business Park Ltd","receiptTypeCode":"R","paymentTypeCode":"04","invoiceStatusCode":"02",
+ "items":[{"id":"<item id>","quantity":2,"unitPrice":1392,"taxCategory":"VAT_STANDARD","taxAmount":384},
+          {"id":"<item id>","quantity":1,"unitPrice":500,"taxCategory":"OTHER","taxAmount":0}]}'
 ```
+Positive quantities (the renderer negates); `taxAmount` = line total − total/1.16 for band B, else 0. The
+original must be `ACCEPTED` first. Stored `totalAmount` for a credit note is tax-on-top (3,668 for a 3,284
+receipt) — the PDF and KRA carry the correct figure; don't read receipt totals from the DB.
 
-This also pushes `insertStockIO`/`saveStockMaster` to KRA automatically
-(`ETIMS_STOCK_SYNC`/`ETIMS_STOCK_MASTER_SYNC`). It used to be unconditionally broken because generic stock
-adjustments carry no unit price and KRA rejects a zero `totAmt` -- fixed 2026-08-11 by adding an optional
-`unitPrice` to `PUT /api/stock/adjust` / `POST /api/stock/transfer` (and to `recordMovement()` internally).
-With a `unitPrice`, `InventoryService.syncStockMovementToEtims()` computes real tax-inclusive `splyAmt`/
-`taxblAmt`/`taxAmt` (same `splitTaxInclusiveAmount()` rule as sales, see below) and sends a valid request.
-Without one, it now logs a clear `WARN` and skips the call entirely instead of sending a doomed zero-amount
-request. If you still see a `WARN` with `unitPrice` supplied, it's a real KRA-side rejection -- check
-`compliance-api.log` (see note on reading `HTTP 400 calling OSCU` below) and cross-reference
-`references/oscu-payload-gotchas.md`.
+**4f. Receipt PDFs:** `GET /api/sales/<url-encoded document id>/receipt` with the service-token headers (or
+`/v1/sales/:id/receipt` with the key). Check each against the §5 acceptance checklist in the dataset reference
+*and* that the business name, address, header and footer actually appear (lesson 1). Evidence goes in
+`.docs/go-live-evidence/<run>/`; move superseded PDFs into a clearly named subfolder.
 
-**✅ RESOLVED 2026-08-12: `insertStockIO`/`saveStockMaster` confirmed working live end-to-end**, including a
-real downstream `sendSalesTransaction` success (`receiptNumber`, `receiptSignature`, `etimsUrl` all
-populated). This had been misdiagnosed for nearly 24 hours as an unfixable KRA sandbox-side issue -- it was
-actually three real client-side bugs, found by dropping to raw `curl` direct against KRA's sandbox
-(bypassing this codebase) when the error kept looking too vague to be a genuine payload problem. **The
-primary cause: `InventoryService`'s stock sync methods were sending the wrong `bhfId` HTTP header** (the
-sync2books-side branch id instead of KRA's real `kraBhfId`) -- see `references/oscu-payload-gotchas.md`'s
-`insertStockIO` section for the full writeup (also two smaller payload bugs, and a related `postOscu()` fix
-for Apigee wrapping business rejections in an outer HTTP 200). **If you hit a persistent, vague OSCU error
-that doesn't budge across retries, try raw `curl` against KRA's sandbox directly before concluding it's
-KRA-side** -- that's what actually cracked this.
+**Verifying outcomes and reading failures.**
 
-Then the sale, and — once `complianceStatus` is `ACCEPTED` — a credit note referencing it:
-
-```bash
-curl -s -X POST "http://localhost:3000/companies/$COMPANY_ID/integrations/etims/sales?submit=true" \
-  -H "x-api-key: $API_KEY" -d '{"branchId":"00","saleDate":"YYYY-MM-DD","traderInvoiceNumber":"...","receiptTypeCode":"S","paymentTypeCode":"01","invoiceStatusCode":"02","items":[{"id":"<item id>","quantity":1,"unitPrice":100,"taxCategory":"VAT_STANDARD","taxAmount":16}]}'
-
-curl -s -X POST "http://localhost:3000/companies/$COMPANY_ID/integrations/etims/sales/credit-notes/express" \
-  -H "x-api-key: $API_KEY" -d '{"branchId":"00","saleId":"<the sale doc id>","traderInvoiceNumber":"...","returnDate":"YYYY-MM-DD"}'
-```
-
-Check outcomes in the compliance-api DB, not just the HTTP response (nest-api's sync is async):
+Check outcomes in the compliance-api DB, not just the HTTP response (the pipeline can finish after the HTTP response):
 
 ```bash
 docker exec sync2books-compliance-mysql mysql -uroot -ppassword compliance -e "
@@ -381,9 +337,10 @@ background for it.
 Most of the remaining 23 test cases map onto `sync2books-compliance-api`'s existing OSCU pass-through
 routes (`GET/POST /oscu/*`, see `src/regulatory/oscu/presentation/oscu-operations.controller.ts`) — call
 these directly with `merchantId` (the sync2books company id) and `branchId` (the sync2books branch id, e.g.
-`00`). A `resultCd: "001"` ("no search result") on a lookup is a **valid pass**, not a failure — KRA's own
-prior correspondence on this integration confirmed that; don't waste time trying to make lookups return
-non-empty data. The compliance-api HTTP wrapper surfaces both as an error though, so check
+`00`). A `resultCd: "001"` ("no search result") on a lookup is *usually* a valid pass (it passed rows 15, 18, 21, 22) —
+but **not always**: row 12 (imported item list) showed Failed on `001`, and rows 12/15/16 only return data after the
+pin has had real activity (KRA seeds them lazily — see lesson 5). If a dependent write (row 13, row 16) needs data
+that is not there yet, do the sales first and re-query. The compliance-api HTTP wrapper surfaces both as an error though, so check
 `oscu_operation_logs` for the real `resultCd` rather than trusting the HTTP status code.
 
 `selectCustomerList` (`GET /oscu/customers?merchantId=...&branchId=...`) was missing entirely until
