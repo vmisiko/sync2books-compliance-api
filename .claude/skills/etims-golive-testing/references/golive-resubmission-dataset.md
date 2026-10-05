@@ -242,3 +242,14 @@ all-five-rows tax table rule was settled).
 
 Update `go-live-evidence/README.md` with the new document ids/receipt numbers, and write the covering note
 citing page 8 / page 10 field-by-field (§5 above is that list).
+
+## 3.6 Live run log — 2026-10-05 (third app, compliance-api only)
+
+Apigee app `77ab8b13-c33a-49fe-a827-50fc2b65ecc4`, pin `P600004862A`, device `SYNCP052581715V` → deviceId `451710`,
+sdcId `KRACU0400001214`. Business name = KRA's taxpayer record `SYNC TO BOOKS RECONCILER LIMITED`; receipt settings
+(trade name "Sync2books", address, WELCOME / THANK YOU, logo) set in the dashboard **before** the evidence set.
+All 13 items registered as `KE…0000001–13` (sequential from 1 on the fresh pin); opening stock for the 4 goods
+accepted; first set INV-261005-01..07 + CN-01 (receipts 1–8) **superseded** because the settings were saved after
+issuing; evidence set **INV-261005-08..14 (receipts 9–15) + partial CN-261005-02 against -10 (receipt 16)**, all
+ACCEPTED, totals as §3.4. Order and exact calls: `SKILL.md` Steps 3–4. Still open: real KRA logo asset (placeholder
+box), COPY watermark, discounts.
