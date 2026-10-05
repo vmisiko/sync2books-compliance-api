@@ -299,6 +299,8 @@ export async function submitDocument(
     submittedAt,
     // What is on the wire is what the paper receipt prints from now on.
     receiptTextSnapshot: payload.receiptText ?? null,
+    // The time stamped into this attempt's request; a retry re-stamps and overwrites it.
+    transmittedAt: result.transmittedAt ?? document.transmittedAt ?? null,
   };
   await documentRepo.save(submittedDoc);
   await eventRepo.append({

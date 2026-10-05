@@ -132,6 +132,10 @@ export class ComplianceDocumentOrmEntity {
   @Column('varchar', { nullable: true })
   sdcDateTime!: string | null;
 
+  /** `yyyyMMddHHmmss` we transmitted to KRA (cfmDt/rcptPbctDt/stockRlsDt) on the latest attempt; printed on the receipt. */
+  @Column('varchar', { length: 14, nullable: true })
+  transmittedAt!: string | null;
+
   /**
    * Receipt label per TIS spec §4.3 (NS/NC/CS/CC/TS/TC/PS) -- appended to the CU
    * Invoice No. on the receipt (page 10 sample: ".../259 NC") and usable standalone.

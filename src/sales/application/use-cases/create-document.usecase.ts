@@ -182,6 +182,7 @@ export async function createDocument(
     etimsReceiptNumber: null,
     totRcptNo: null,
     sdcDateTime: null,
+    transmittedAt: null,
     receiptLabel: null,
     oscuInvcNo: null,
     idempotencyKey,

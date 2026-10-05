@@ -75,3 +75,14 @@ export function resolveKraSaleMoment(
     yyyyMMddhhmmss: `${requested}${BACKDATED_SALE_TIME}`,
   };
 }
+
+/** `yyyyMMddHHmmss` -> `dd/mm/yyyy` and `HH:mm:ss`; null when malformed. */
+export function splitKraDateTime(
+  v: string | null | undefined,
+): { date: string; time: string } | null {
+  if (!v || !/^\d{14}$/.test(v)) return null;
+  return {
+    date: `${v.slice(6, 8)}/${v.slice(4, 6)}/${v.slice(0, 4)}`,
+    time: `${v.slice(8, 10)}:${v.slice(10, 12)}:${v.slice(12, 14)}`,
+  };
+}
