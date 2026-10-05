@@ -62,6 +62,7 @@ import {
   EVENT_REPO,
   ITEM_REPO,
 } from '../../shared/tokens';
+import { kraClockParts } from '../../shared/utils/kra-time';
 
 export type SaleOutcomeListener = (
   document: ComplianceDocument,
@@ -921,11 +922,11 @@ function formatDdMmYyyy(yyyyMmDd: string): string {
 }
 
 function formatTimeAmPm(date: Date): string {
-  const hours = date.getHours();
+  const p = kraClockParts(date);
+  const hours = Number(p.hh);
   const h12 = hours % 12 === 0 ? 12 : hours % 12;
   const ampm = hours >= 12 ? 'pm' : 'am';
-  const pad2 = (n: number) => String(n).padStart(2, '0');
-  return `${pad2(h12)}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())} ${ampm}`;
+  return `${String(h12).padStart(2, '0')}:${p.mi}:${p.ss} ${ampm}`;
 }
 
 function round2(n: number): number {
