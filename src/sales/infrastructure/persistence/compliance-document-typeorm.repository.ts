@@ -74,6 +74,7 @@ function docOrmToDomain(
     etimsReceiptNumber: row.etimsReceiptNumber,
     totRcptNo: row.totRcptNo,
     sdcDateTime: row.sdcDateTime,
+    transmittedAt: row.transmittedAt ?? null,
     receiptLabel: row.receiptLabel,
     oscuInvcNo: row.oscuInvcNo,
     idempotencyKey: row.idempotencyKey,
@@ -123,6 +124,7 @@ function docDomainToOrm(
   e.etimsReceiptNumber = document.etimsReceiptNumber;
   e.totRcptNo = document.totRcptNo;
   e.sdcDateTime = document.sdcDateTime;
+  e.transmittedAt = document.transmittedAt ?? null;
   e.receiptLabel = document.receiptLabel;
   e.oscuInvcNo = document.oscuInvcNo;
   e.idempotencyKey = document.idempotencyKey;

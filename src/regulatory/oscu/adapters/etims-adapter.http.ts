@@ -396,7 +396,10 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
       tin: connectionContext.kraPin,
       bhfId: connectionContext.branchId,
       cmcKey: connectionContext.cmcKey,
+      // Stamped here, immediately before the KRA call, so the time we transmit is the time we persist.
+      now: new Date(),
     });
+    const transmittedAt = request.cfmDt;
 
     const path = resolveOscuPath(this.pathStyle, 'submitSales');
     const body = asJsonBody(this.pathStyle, request);
@@ -430,6 +433,7 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
           error: retryable
             ? `retryable: ${describeHttpRejection(status, raw)}`
             : describeHttpRejection(status, raw),
+          transmittedAt,
           rawResponse: responseSnapshot,
         };
       }
@@ -438,6 +442,7 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
         return {
           success: true,
           receiptNumber: curRcptNo || undefined,
+          transmittedAt,
           rawResponse: responseSnapshot,
         };
       }
@@ -459,6 +464,7 @@ export class EtimsAdapterHttp implements IEtimsAdapter {
       return {
         success: false,
         error: retryable ? `retryable: ${msg}` : msg,
+        transmittedAt,
         rawResponse: { request },
       };
     }

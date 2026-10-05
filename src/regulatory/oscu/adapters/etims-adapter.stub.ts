@@ -82,6 +82,7 @@ export class EtimsAdapterStub implements IEtimsAdapter {
     return Promise.resolve({
       success: true,
       receiptNumber: `ETR-${nowMs}-${payload.documentNumber}`,
+      transmittedAt: request.cfmDt,
       rawResponse: {
         ...rawResponse,
         request,

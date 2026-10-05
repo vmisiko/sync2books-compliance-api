@@ -62,7 +62,7 @@ import {
   EVENT_REPO,
   ITEM_REPO,
 } from '../../shared/tokens';
-import { kraClockParts } from '../../shared/utils/kra-time';
+import { kraClockParts, splitKraDateTime } from '../../shared/utils/kra-time';
 
 export type SaleOutcomeListener = (
   document: ComplianceDocument,
@@ -484,9 +484,7 @@ export class SalesService {
         document.merchantId,
       );
 
-    const saleDate = document.saleDate ?? null;
-    const date = saleDate ? formatDdMmYyyy(saleDate) : null;
-    const time = formatTimeAmPm(document.createdAt);
+    const { date, time } = receiptDateAndTime(document);
 
     const kraData = (kraRaw?.data as Record<string, unknown> | null) ?? null;
     const curRcptNoRaw =
@@ -921,6 +919,31 @@ function formatDdMmYyyy(yyyyMmDd: string): string {
   return `${d}/${m}/${y}`;
 }
 
+/**
+ * The receipt's date and time: the one timestamp we transmitted to KRA (`transmittedAt`), so the
+ * physical invoice equals what KRA's receipt link/QR shows. Documents without it (submitted before
+ * this field existed) keep the old saleDate + createdAt behaviour.
+ */
+export function receiptDateAndTime(document: ComplianceDocument): {
+  date: string | null;
+  time: string;
+} {
+  const t = splitKraDateTime(document.transmittedAt);
+  if (t) {
+    const hours = Number(t.time.slice(0, 2));
+    const h12 = hours % 12 === 0 ? 12 : hours % 12;
+    return {
+      date: t.date,
+      time: `${String(h12).padStart(2, '0')}${t.time.slice(2)} ${hours >= 12 ? 'pm' : 'am'}`,
+    };
+  }
+  const saleDate = document.saleDate ?? null;
+  return {
+    date: saleDate ? formatDdMmYyyy(saleDate) : null,
+    time: formatTimeAmPm(document.createdAt),
+  };
+}
+
 function formatTimeAmPm(date: Date): string {
   const p = kraClockParts(date);
   const hours = Number(p.hh);
@@ -975,8 +998,13 @@ function buildScuFields(input: {
     input.receiptNumber != null
       ? formatCuInvoiceNo(scuId ?? '-', input.receiptNumber)
       : null;
+  // Print the time we transmitted (matches KRA's receipt link); KRA's own sdcDateTime is the fallback
+  // for documents that predate `transmittedAt` and stays available under its own `sdcDateTime` field.
   const sdcDateTime =
-    safeString(kraData?.sdcDateTime) || document.sdcDateTime || null;
+    document.transmittedAt ||
+    safeString(kraData?.sdcDateTime) ||
+    document.sdcDateTime ||
+    null;
   const { date: scuDate, time: scuTime } = formatScuDateTime(sdcDateTime);
   const tradeAddress = [connection?.tradeAddressLine1, connection?.tradeCity]
     .filter(Boolean)
@@ -1165,9 +1193,7 @@ function buildNormalizedSaleReport(input: {
     kraData?.curRcptNo ?? (kraData as Record<string, unknown>)?.['curRcptNo '];
   const receiptNumber = safeNumber(curRcptNoRaw);
 
-  const saleDate = document.saleDate ?? null;
-  const date = saleDate ? formatDdMmYyyy(saleDate) : null;
-  const time = formatTimeAmPm(document.createdAt);
+  const { date, time } = receiptDateAndTime(document);
 
   const rcptSign = safeString(kraData?.rcptSign);
   const intrlData = safeString(kraData?.intrlData);
