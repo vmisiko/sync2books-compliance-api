@@ -31,6 +31,7 @@ import type { CatalogItem } from '../../catalog/domain/entities/catalog-item.ent
 import {
   PurchaseInvoiceOrmEntity,
   type PurchaseConfirmationStatus,
+  type PurchaseErpPostingJson,
   type PurchaseLineItemJson,
 } from '../infrastructure/persistence/purchase-invoice.orm-entity';
 import {
@@ -103,6 +104,14 @@ export type PurchaseInvoiceDto = {
   erpSyncStatus: PurchaseInvoiceOrmEntity['erpSyncStatus'];
   /** Error message from the last failed `syncToErp` attempt, if any. */
   erpSyncError: string | null;
+  /** main API's Bill id; null until synced. */
+  erpBillId: string | null;
+  /** The ERP's own id for the Bill. */
+  erpBillBookId: string | null;
+  /** ERP-visible Bill number. */
+  erpBillNumber: string | null;
+  /** Account and per-line tax the Bill was posted with; null when synced before tracking existed. */
+  erpPosting: PurchaseErpPostingJson | null;
   /** dashboard_suppliers.id, once matched (auto on pull, or via link-supplier/create-supplier). Null means unmatched. */
   supplierId: string | null;
   lineItems: PurchaseLineItemJson[];
@@ -821,6 +830,19 @@ export class DashboardPurchasesApplicationService {
         );
 
         row.erpBillId = billResult.bill.id;
+        row.erpBillBookId = billResult.bill.bookId ?? null;
+        row.erpBillNumber = billResult.bill.billCode ?? null;
+        row.erpPosting = {
+          accountId: expenseAccount.erpId,
+          accountName: expenseAccount.erpName,
+          lines: lines.map(({ item, taxTyCd, tax }) => ({
+            lineId: item.id,
+            description: item.description,
+            taxId: tax!.erpId,
+            taxName: tax!.erpName,
+            taxTyCd,
+          })),
+        };
         row.erpSyncBatchId = billResult.syncBatchId;
 
         if (billResult.bill.syncStatus === 'synced') {
@@ -1165,6 +1187,10 @@ export class DashboardPurchasesApplicationService {
       confirmationStatus: row.confirmationStatus,
       erpSyncStatus: row.erpSyncStatus,
       erpSyncError: row.erpSyncError,
+      erpBillId: row.erpBillId ?? null,
+      erpBillBookId: row.erpBillBookId ?? null,
+      erpBillNumber: row.erpBillNumber ?? null,
+      erpPosting: row.erpPosting ?? null,
       supplierId: row.supplierId,
       lineItems: row.lineItems,
       kraConfirmError: row.kraConfirmError,

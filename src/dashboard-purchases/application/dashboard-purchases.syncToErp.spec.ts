@@ -51,6 +51,9 @@ function makePurchaseRow(
     kraConfirmedAt: null,
     paymentTypeCode: null,
     erpBillId: null,
+    erpBillBookId: null,
+    erpBillNumber: null,
+    erpPosting: null,
     erpSyncBatchId: null,
     erpSyncError: null,
     erpSyncedAt: null,
@@ -131,7 +134,12 @@ function makeService(setup: Partial<Setup> & { rows: PurchaseInvoiceOrmEntity[] 
   const createBill =
     setup.createBill ??
     jest.fn().mockResolvedValue({
-      bill: { id: 'main-api-bill-1', syncStatus: 'synced' },
+      bill: {
+        id: 'main-api-bill-1',
+        billCode: 'BILL/2026/0001',
+        bookId: 'erp-bill-9',
+        syncStatus: 'synced',
+      },
       message: 'ok',
       syncBatchId: 'sync-batch-1',
       syncedToBookkeeping: true,
@@ -193,6 +201,22 @@ describe('DashboardPurchasesApplicationService.syncToErp', () => {
     expect(row.erpSyncError).toBeNull();
     expect(row.erpSyncedAt).toBeInstanceOf(Date);
     expect(result.errors).toHaveLength(0);
+    expect(row.erpBillBookId).toBe('erp-bill-9');
+    expect(row.erpBillNumber).toBe('BILL/2026/0001');
+    expect(row.erpPosting).toEqual({
+      accountId: '80',
+      accountName: 'Cost of Goods Sold',
+      lines: [
+        {
+          lineId: row.lineItems[0].id,
+          description: row.lineItems[0].description,
+          taxId: '2',
+          taxName: '16.0% S',
+          taxTyCd: expect.any(String),
+        },
+      ],
+    });
+    expect(result.data).toBeDefined();
   });
 
   it('fails every row with a clear message when no accounting system is connected', async () => {
