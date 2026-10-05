@@ -15,6 +15,19 @@ export type PurchaseConfirmationStatus =
 
 export type PurchaseErpSyncStatus = 'not_synced' | 'synced' | 'sync_failed';
 
+/** What a purchase Bill was actually posted with in the ERP, captured at sync time. */
+export type PurchaseErpPostingJson = {
+  accountId: string;
+  accountName: string;
+  lines: Array<{
+    lineId: string;
+    description: string;
+    taxId: string;
+    taxName: string;
+    taxTyCd: string;
+  }>;
+};
+
 export type PurchaseLineItemJson = {
   id: string;
   description: string;
@@ -144,6 +157,18 @@ export class PurchaseInvoiceOrmEntity {
   /** The Bill's local id in main API, once `syncToErp` succeeds — main API's own id, not the ERP's own bookId. */
   @Column('varchar', { nullable: true })
   erpBillId!: string | null;
+
+  /** The ERP's own id for the Bill (`bookId`), once synced. */
+  @Column('varchar', { nullable: true })
+  erpBillBookId!: string | null;
+
+  /** The ERP-visible Bill number (main API's `billCode`). */
+  @Column('varchar', { nullable: true })
+  erpBillNumber!: string | null;
+
+  /** Account + per-line tax the Bill was posted with. Null for rows synced before this was tracked. */
+  @Column('json', { nullable: true })
+  erpPosting!: PurchaseErpPostingJson | null;
 
   /** main API's `syncBatchId` for the Bill push, for a future retry/status-check flow. */
   @Column('varchar', { nullable: true })
