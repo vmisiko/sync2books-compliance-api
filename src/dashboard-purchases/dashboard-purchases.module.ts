@@ -11,6 +11,9 @@ import { PurchaseInvoiceOrmEntity } from './infrastructure/persistence/purchase-
 import { PurchaseBillMappingOrmEntity } from './infrastructure/persistence/purchase-bill-mapping.orm-entity';
 import { PurchaseBillMappingService } from './application/purchase-bill-mapping.service';
 import { DashboardPurchasesApplicationService } from './application/dashboard-purchases.application.service';
+import { PurchaseInvoiceAttachmentOrmEntity } from './infrastructure/persistence/purchase-invoice-attachment.orm-entity';
+import { PurchaseAttachmentService } from './application/purchase-attachment.service';
+import { DashboardPurchaseAttachmentsController } from './presentation/dashboard-purchase-attachments.controller';
 import { DashboardPurchasesController } from './presentation/dashboard-purchases.controller';
 
 @Module({
@@ -24,11 +27,16 @@ import { DashboardPurchasesController } from './presentation/dashboard-purchases
     TypeOrmModule.forFeature([
       PurchaseInvoiceOrmEntity,
       PurchaseBillMappingOrmEntity,
+      PurchaseInvoiceAttachmentOrmEntity,
       OscuSyncStateOrmEntity,
     ]),
   ],
-  controllers: [DashboardPurchasesController],
-  providers: [DashboardPurchasesApplicationService, PurchaseBillMappingService],
+  controllers: [DashboardPurchasesController, DashboardPurchaseAttachmentsController],
+  providers: [
+    DashboardPurchasesApplicationService,
+    PurchaseBillMappingService,
+    PurchaseAttachmentService,
+  ],
   exports: [DashboardPurchasesApplicationService],
 })
 export class DashboardPurchasesModule {}

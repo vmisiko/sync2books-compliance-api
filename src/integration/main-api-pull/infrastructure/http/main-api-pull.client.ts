@@ -355,6 +355,28 @@ export interface MainApiCreateBillResponse {
   syncedToBookkeeping: boolean;
 }
 
+export interface MainApiBillAttachmentResponse {
+  attachmentId: string;
+  billId: string;
+  filename: string;
+  fileType: string;
+  fileSize: number;
+  syncStatus: 'pending' | 'syncing' | 'synced' | 'failed';
+  syncError?: string;
+  bookId?: string;
+  idempotentReplay?: boolean;
+}
+
+/** Raised by `attachToBill` so callers can map the main API's status to a message without parsing text. */
+export class MainApiHttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export interface MainApiCreateCustomerRequest {
   name: string;
   taxId?: string;
@@ -652,6 +674,49 @@ export class MainApiPullClient {
       `/bills/${connectionId}?awaitSync=${awaitSync}`,
       body,
     );
+  }
+
+  /**
+   * POST /bills/:connectionId/:id/attachments — attaches a file to an already-synced Bill.
+   * `id` is main API's own bill id (`erpBillId`). `idempotencyKey` makes a retry safe. Throws
+   * `MainApiHttpError` carrying the main API's status (404/409/413/415 are meaningful).
+   */
+  async attachToBill(
+    apiKey: string,
+    connectionId: string,
+    billId: string,
+    file: { buffer: Buffer; filename: string; mime: string },
+    options: { idempotencyKey?: string; note?: string } = {},
+  ): Promise<MainApiBillAttachmentResponse> {
+    const form = new FormData();
+    form.append(
+      'file',
+      new Blob([new Uint8Array(file.buffer)], { type: file.mime }),
+      file.filename,
+    );
+    if (options.note) form.append('note', options.note);
+    const headers: Record<string, string> = { 'x-api-key': apiKey };
+    if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
+    const path = `/bills/${encodeURIComponent(connectionId)}/${encodeURIComponent(billId)}/attachments`;
+    const res = await fetch(`${this.baseUrl()}${path}`, {
+      method: 'POST',
+      headers,
+      body: form,
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      this.logger.warn(`Main API bill attachment failed: ${res.status}`);
+      let message = text.slice(0, 200);
+      try {
+        const parsed = JSON.parse(text) as { message?: string | string[] };
+        if (parsed.message) message = [parsed.message].flat().join('; ');
+      } catch {
+        /* keep raw text */
+      }
+      throw new MainApiHttpError(res.status, message);
+    }
+    return res.json() as Promise<MainApiBillAttachmentResponse>;
   }
 
   /**
