@@ -1,4 +1,9 @@
-import { Injectable, Logger, BadGatewayException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { SourceSystem } from '../../../../shared/domain/enums/source-system.enum';
 
 /**
@@ -333,7 +338,14 @@ export interface MainApiCreateBillRequest {
   totalAmount: number;
   lineItems: MainApiCreateBillLineItem[];
   note?: string;
-  status: 'Open';
+  status: 'Open' | 'Draft';
+}
+
+/** POST /bills/:connectionId/:id/resync result. */
+export interface MainApiResyncBillResponse {
+  bill: MainApiCreateBillResponse['bill'];
+  message: string;
+  syncedToBookkeeping: boolean;
 }
 
 export interface MainApiCreateBillResponse {
@@ -439,6 +451,13 @@ export interface MainApiBillMappingOptions {
     name: string;
     description?: string;
     usableForPurchases: boolean;
+    /**
+     * Signed percentage (a withholding tax is negative). Only Odoo carries it today; absent
+     * means "unknown" and must never be read as 0 -- callers skip rate checks without it.
+     */
+    rate?: number;
+    /** Odoo `amount_type`: percent | fixed | division | group. */
+    rateType?: string;
   }>;
   warnings: string[];
 }
@@ -717,6 +736,55 @@ export class MainApiPullClient {
       throw new MainApiHttpError(res.status, message);
     }
     return res.json() as Promise<MainApiBillAttachmentResponse>;
+  }
+
+  /**
+   * POST /bills/:connectionId/:billId/resync -- rewrites an already-pushed bill in the ERP from
+   * a full CreateBillDto body (Odoo only, draft bills only). `billId` is main API's own local
+   * bill id. Unlike the other writes, a 400 here is a refusal the user can act on (bill already
+   * posted, provider unsupported), so main API's own message is surfaced as a 400 rather than
+   * wrapped in a generic 502.
+   */
+  async resyncBill(
+    apiKey: string,
+    connectionId: string,
+    billId: string,
+    body: MainApiCreateBillRequest,
+  ): Promise<MainApiResyncBillResponse> {
+    const path = `/bills/${encodeURIComponent(connectionId)}/${encodeURIComponent(billId)}/resync`;
+    const res = await fetch(`${this.baseUrl()}${path}`, {
+      method: 'POST',
+      headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      this.logger.warn(
+        `Main API ${path} failed: ${res.status} ${text.slice(0, 300)}`,
+      );
+      if (res.status === 400 || res.status === 404) {
+        let message = '';
+        try {
+          const parsed = JSON.parse(text) as { message?: string | string[] };
+          message = Array.isArray(parsed.message)
+            ? parsed.message.join('; ')
+            : (parsed.message ?? '');
+        } catch {
+          /* non-JSON body */
+        }
+        throw new BadRequestException(
+          message ||
+            (res.status === 404
+              ? 'The bill was not found in your accounting integration.'
+              : 'The accounting integration refused the re-sync.'),
+        );
+      }
+      throw new BadGatewayException(
+        `Main API request failed (${res.status}): ${text.slice(0, 200)}`,
+      );
+    }
+    return res.json() as Promise<MainApiResyncBillResponse>;
   }
 
   /**

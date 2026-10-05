@@ -232,4 +232,21 @@ export class DashboardPurchasesController {
       expenseAccountId: body.expenseAccountId,
     });
   }
+
+  @Post('resync-to-erp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Rewrite the accounting-system bill of already-synced purchases from the current mappings',
+    description:
+      'Only draft bills in a supported accounting system can be rewritten; a bill already posted there is refused per row and left unchanged.',
+  })
+  @ApiResponse({ status: 200, description: 'Per-row outcome in `results`; failures also in `errors`' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  async resyncToErp(
+    @ActiveTenant() tenantId: string,
+    @Body() body: PurchaseIdsDto,
+  ) {
+    return this.purchases.resyncToErp(tenantId, body.ids);
+  }
 }
