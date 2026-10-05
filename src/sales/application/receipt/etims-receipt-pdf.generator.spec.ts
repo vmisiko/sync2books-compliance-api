@@ -4,6 +4,7 @@ import {
   copyReceiptLabel,
   formatCuInvoiceNo,
   formatScuDateTime,
+  formatLineTaxRate,
   totalsFromTaxBuckets,
   type EtimsReceiptData,
   type TaxBuckets,
@@ -235,6 +236,16 @@ async function isValidPdf(buffer: Buffer): Promise<void> {
   expect(buffer.subarray(0, 5).toString('latin1')).toBe('%PDF-');
   expect(buffer.length).toBeGreaterThan(500);
 }
+
+describe('formatLineTaxRate', () => {
+  it('prints the OSCU rate for each tax category (B = 16%, A/C/D/E = 0%), case-insensitive, 0% when unknown', () => {
+    expect(formatLineTaxRate('B')).toBe('16%');
+    expect(formatLineTaxRate('b')).toBe('16%');
+    for (const c of ['A', 'C', 'D', 'E']) expect(formatLineTaxRate(c)).toBe('0%');
+    expect(formatLineTaxRate(null)).toBe('0%');
+    expect(formatLineTaxRate('')).toBe('0%');
+  });
+});
 
 describe('generateEtimsReceiptPdf', () => {
   it('renders a sale receipt with only category A used -- must not crash; all five tax rows (A-E) always print, zero by default, per the page 8 sample', async () => {
