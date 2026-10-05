@@ -4,6 +4,7 @@ import type { ComplianceDocument } from '../../domain/entities/compliance-docume
 import type { ComplianceConnection } from '../../../shared/domain/entities/compliance-connection.entity';
 import type { ComplianceItem } from '../../../shared/domain/entities/compliance-item.entity';
 import { DocumentType } from '../../../shared/domain/enums/document-type.enum';
+import { oscuTaxRateForCode } from '../../../regulatory/oscu/mapping/oscu-tax-rates';
 import { kraClockParts } from '../../../shared/utils/kra-time';
 
 export interface TaxBuckets {
@@ -22,6 +23,11 @@ export interface TaxBuckets {
   taxRateC: number;
   taxRateD: number;
   taxRateE: number;
+}
+
+/** Per-line tax rate label for the receipt items table (e.g. B -> "16%"); rate comes from the single OSCU table. */
+export function formatLineTaxRate(taxTyCd: string | null | undefined): string {
+  return `${oscuTaxRateForCode(taxTyCd)}%`;
 }
 
 export interface EtimsReceiptData {
@@ -285,7 +291,7 @@ export async function generateEtimsReceiptPdf(
     {
       const headerY = doc.y;
       doc.text('Item Description', leftX, headerY, { width: 210 });
-      doc.text('Type', 255, headerY, { width: 40 });
+      doc.text('Tax Rate', 250, headerY, { width: 48 });
       doc.text('Unit Price', 300, headerY, { width: 65 });
       doc.text('Qty', 368, headerY, { width: 40 });
       doc.text('Total', 445, headerY, { width: 105, align: 'right' });
@@ -299,14 +305,13 @@ export async function generateEtimsReceiptPdf(
       const total = line.quantity * line.unitPrice;
       const y = doc.y;
       const name = item?.name || line.itemId;
-      const isService = item?.productTypeCode === '3';
       doc.fontSize(9).text(name, leftX, y, { width: 210 });
       if (line.description && line.description !== name) {
         doc.fontSize(8).fillColor('#666').text(line.description, leftX, doc.y, { width: 210 });
         doc.fillColor('#000');
       }
       const taxTyCd = line.taxTyCdSnapshot ?? '';
-      doc.fontSize(9).text(isService ? 'Svc' : 'Goods', 255, y, { width: 40 });
+      doc.fontSize(9).text(formatLineTaxRate(taxTyCd), 250, y, { width: 48 });
       doc.text(line.unitPrice.toFixed(2), 300, y, { width: 65 });
       doc.text(`x${line.quantity}`, 368, y, { width: 40 });
       doc.text(`${money(total)}${taxTyCd}`, 445, y, { width: 105, align: 'right' });
