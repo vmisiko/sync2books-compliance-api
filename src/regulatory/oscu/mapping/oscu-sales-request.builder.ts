@@ -6,6 +6,7 @@ import {
   splitTaxInclusiveAmount,
 } from './oscu-tax-rates';
 import { pkgUnitCdSlice, qtyUnitCdSlice } from './oscu-item-cd-slices';
+import { formatKraDateTime, resolveKraSaleMoment } from '../../../shared/utils/kra-time';
 
 export class OscuSalesRequestBuilder {
   static build(params: {
@@ -15,12 +16,11 @@ export class OscuSalesRequestBuilder {
     cmcKey: string;
     now?: Date;
   }): OscuTrnsSalesSaveWrReq {
-    const now =
-      params.payload.saleDate != null
-        ? new Date(`${params.payload.saleDate}T00:00:00Z`)
-        : (params.now ?? new Date());
-    const yyyyMMdd = formatYyyyMMdd(now);
-    const yyyyMMddhhmmss = formatYyyyMMddhhmmss(now);
+    // Kenyan wall-clock time; see shared/utils/kra-time.ts for why this isn't Date's local getters.
+    const { yyyyMMdd, yyyyMMddhhmmss } = resolveKraSaleMoment(
+      params.payload.saleDate,
+      params.now ?? new Date(),
+    );
 
     const itemList = params.payload.lines.map((l, idx) => {
       // KRA treats splyAmt (qty * unitPrice) as the tax-INCLUSIVE line total and
@@ -221,21 +221,6 @@ function bucketTax(
   };
 }
 
-function formatYyyyMMdd(d: Date): string {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}${mm}${dd}`;
-}
-
-function formatYyyyMMddhhmmss(d: Date): string {
-  const yyyyMMdd = formatYyyyMMdd(d);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ss = String(d.getSeconds()).padStart(2, '0');
-  return `${yyyyMMdd}${hh}${mm}${ss}`;
-}
-
 function normalizeYyyyMMddhhmmss(value?: string): string | null {
   if (!value) return null;
   const trimmed = value.trim();
@@ -248,7 +233,7 @@ function normalizeYyyyMMddhhmmss(value?: string): string | null {
   }
   const parsed = new Date(trimmed);
   if (Number.isNaN(parsed.getTime())) return null;
-  return formatYyyyMMddhhmmss(parsed);
+  return formatKraDateTime(parsed);
 }
 
 function normalizeReasonCode(value?: string): string | null {

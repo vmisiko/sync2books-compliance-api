@@ -5,6 +5,7 @@ import type { ComplianceConnection } from '../../../shared/domain/entities/compl
 import type { ComplianceItem } from '../../../shared/domain/entities/compliance-item.entity';
 import { DocumentType } from '../../../shared/domain/enums/document-type.enum';
 import { oscuTaxRateForCode } from '../../../regulatory/oscu/mapping/oscu-tax-rates';
+import { kraClockParts } from '../../../shared/utils/kra-time';
 
 export interface TaxBuckets {
   taxableAmountA: number;
@@ -129,11 +130,8 @@ export function formatScuDateTime(sdcDateTime: string | null): { date: string; t
 }
 
 function formatTisDateTime(d: Date): { date: string; time: string } {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return {
-    date: `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`,
-    time: `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`,
-  };
+  const p = kraClockParts(d);
+  return { date: `${p.dd}/${p.mm}/${p.yyyy}`, time: `${p.hh}:${p.mi}:${p.ss}` };
 }
 
 /**

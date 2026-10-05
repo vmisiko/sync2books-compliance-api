@@ -254,4 +254,63 @@ describe('OscuSalesRequestBuilder', () => {
       expect(item.qtyUnitCd).toBe(item.itemCd.slice(5, 7));
     }
   });
+
+  describe('sale timestamps (Kenyan wall-clock time)', () => {
+    const build = (saleDate: string | undefined, now: Date) =>
+      OscuSalesRequestBuilder.build({
+        tin: 'A123456789Z',
+        bhfId: '00',
+        cmcKey: 'cmc',
+        now,
+        payload: {
+          documentNumber: 'INV-T',
+          documentType: 'SALE_INVOICE',
+          invoiceSequence: 1,
+          branchId: '00',
+          deviceId: 'dev',
+          currency: 'KES',
+          exchangeRate: 1,
+          subtotalAmount: 100,
+          taxAmount: 16,
+          totalAmount: 116,
+          saleDate,
+          lines: [
+            {
+              itemCode: 'ITEM-1',
+              description: 'Line 1',
+              quantity: 1,
+              unitPrice: 100,
+              taxAmount: 16,
+              classificationCode: '14111400',
+              unitCode: 'U',
+              packagingUnitCode: 'NT',
+              taxTyCd: 'B',
+              productTypeCode: '2',
+            },
+          ],
+        },
+      } as any);
+
+    it('sends the real Kenyan time on all three timestamp fields for a sale dated today', () => {
+      // 07:44:28 UTC is 10:44:28 in Nairobi -- the invoice that used to be sent as 03:00:00.
+      const req = build('2026-10-01', new Date('2026-10-01T07:44:28Z'));
+      expect(req.salesDt).toBe('20261001');
+      expect(req.cfmDt).toBe('20261001104428');
+      expect(req.stockRlsDt).toBe('20261001104428');
+      expect(req.receipt.rcptPbctDt).toBe('20261001104428');
+    });
+
+    it('stamps a backdated sale at mid-day on its own date', () => {
+      const req = build('2026-09-28', new Date('2026-10-01T07:44:28Z'));
+      expect(req.salesDt).toBe('20260928');
+      expect(req.cfmDt).toBe('20260928120000');
+      expect(req.stockRlsDt).toBe('20260928120000');
+      expect(req.receipt.rcptPbctDt).toBe('20260928120000');
+    });
+
+    it('uses the real Kenyan time when the sale has no date', () => {
+      const req = build(undefined, new Date('2026-10-01T07:44:28Z'));
+      expect(req.cfmDt).toBe('20261001104428');
+    });
+  });
 });

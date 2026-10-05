@@ -1,4 +1,5 @@
 import type { CatalogItem } from '../../catalog/domain/entities/catalog-item.entity';
+import { formatKraDateTime } from '../../shared/utils/kra-time';
 import {
   OSCU_TAX_RATE_BY_TAX_TY_CD,
   round2,
@@ -66,18 +67,6 @@ export function resolveTaxLetter(raw: RawKraPurchaseItem): TaxLetter {
     if (match) return match;
   }
   return 'B';
-}
-
-function formatKraDateTime(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return (
-    String(d.getFullYear()) +
-    pad(d.getMonth() + 1) +
-    pad(d.getDate()) +
-    pad(d.getHours()) +
-    pad(d.getMinutes()) +
-    pad(d.getSeconds())
-  );
 }
 
 /**
