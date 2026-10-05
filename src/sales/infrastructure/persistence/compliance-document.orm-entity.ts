@@ -159,6 +159,21 @@ export class ComplianceDocumentOrmEntity {
   @Column('datetime', { nullable: true })
   submittedAt!: Date | null;
 
+  /**
+   * The receipt text (trdeNm/adrs/topMsg/btmMsg/custMblNo) exactly as transmitted in
+   * sendSalesTransaction. The paper receipt of an already-submitted document prints
+   * THIS, so later edits to the business's receipt settings can never make an
+   * issued receipt differ from what KRA holds. Null before first submission.
+   */
+  @Column({ type: 'simple-json', nullable: true })
+  receiptTextSnapshot!: {
+    trdeNm: string | null;
+    adrs: string | null;
+    topMsg: string | null;
+    btmMsg: string | null;
+    custMblNo: string | null;
+  } | null;
+
   /** Pattern 2 headers from Main API (for `POST .../oscu-outcome` retries). */
   @Column({ type: 'json', nullable: true })
   sync2booksCorrelation!: Record<string, unknown> | null;

@@ -104,6 +104,23 @@ export class SaleItemReportDto {
   itemDescription!: string | null;
 }
 
+export class ReceiptViewDto {
+  @ApiProperty({ nullable: true, description: 'Trade name as printed AND transmitted (OSCU trdeNm, max 20).' })
+  tradeName!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'Buyer phone as printed AND transmitted (OSCU custMblNo); null when hidden or absent.' })
+  customerMobile!: string | null;
+
+  @ApiProperty({ description: 'Print the business logo (set and uploaded).' })
+  showLogo!: boolean;
+
+  @ApiProperty({ description: 'Print the item code next to each item name.' })
+  showItemCodes!: boolean;
+
+  @ApiProperty({ description: 'Print the buyer phone number.' })
+  showCustomerPhone!: boolean;
+}
+
 export class SaleReportDto {
   @ApiProperty()
   id!: string;
@@ -197,6 +214,13 @@ export class SaleReportDto {
 
   @ApiProperty({ nullable: true, description: "Commercial message in the footer (TIS page 8 sample). Null falls back to a generic default client-side." })
   receiptFooterMessage!: string | null;
+
+  @ApiProperty({
+    description:
+      "Resolved per-business receipt settings. tradeName/customerMobile are exactly what is transmitted in the OSCU receipt block (trdeNm/custMblNo); tradeAddress/receiptHeaderMessage/receiptFooterMessage above are likewise adrs/topMsg/btmMsg.",
+    type: () => ReceiptViewDto,
+  })
+  receiptView!: ReceiptViewDto;
 
   @ApiProperty({ nullable: true })
   originalSaleId!: string | null;

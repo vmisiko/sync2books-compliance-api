@@ -7,6 +7,8 @@ import { assertValidTransition } from '../../domain/state-machine/compliance-sta
 import { EtimsPayloadBuilder } from '../../../regulatory/oscu/mapping/etims-payload.builder';
 import { ComplianceStatus } from '../../../shared/domain/enums/compliance-status.enum';
 import { ConnectionStatus } from '../../../shared/domain/enums/connection-status.enum';
+import type { EtimsInvoicePayload } from '../../../regulatory/oscu/mapping/etims-payload.types';
+import type { ComplianceConnection } from '../../../shared/domain/entities/compliance-connection.entity';
 import type { IEtimsAdapter } from '../../../regulatory/oscu/ports/etims-adapter.port';
 import type {
   IComplianceConnectionRepository,
@@ -123,6 +125,14 @@ export async function submitDocument(
   eventRepo: IComplianceEventRepository,
   etimsAdapter: IEtimsAdapter,
   syncStateRepo: Repository<OscuSyncStateOrmEntity>,
+  /**
+   * Resolves the `receipt` block text for this document from the business's receipt
+   * settings -- the same resolver the paper receipt uses. Omitted -> nulls (legacy).
+   */
+  resolveReceiptText?: (
+    document: ComplianceDocument,
+    connection: ComplianceConnection,
+  ) => Promise<EtimsInvoicePayload['receiptText']>,
 ): Promise<SubmitDocumentResult> {
   let document = await documentRepo.findById(documentId);
   if (!document) throw new Error(`Document ${documentId} not found`);
@@ -198,6 +208,7 @@ export async function submitDocument(
   const buildPayload = async (doc: ComplianceDocument) => {
     const p = EtimsPayloadBuilder.buildFromDocument(doc);
     p.deviceId = connection.deviceId;
+    if (resolveReceiptText) p.receiptText = await resolveReceiptText(doc, connection);
 
     // For CREDIT_NOTE: orgInvcNo must be the original sale's real allocated invcNo,
     // not anything parsed out of its human-readable documentNumber -- KRA rejects a
@@ -286,6 +297,8 @@ export async function submitDocument(
     complianceStatus: ComplianceStatus.SUBMITTED,
     submissionAttempts: prevAttempts + 1,
     submittedAt,
+    // What is on the wire is what the paper receipt prints from now on.
+    receiptTextSnapshot: payload.receiptText ?? null,
   };
   await documentRepo.save(submittedDoc);
   await eventRepo.append({

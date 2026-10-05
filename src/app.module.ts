@@ -15,6 +15,8 @@ import { DashboardInventoryModule } from './dashboard-inventory/dashboard-invent
 import { DashboardInvoicesModule } from './dashboard-invoices/dashboard-invoices.module';
 import { DashboardMappingModule } from './dashboard-mapping/dashboard-mapping.module';
 import { DashboardOrganizationModule } from './dashboard-organization/dashboard-organization.module';
+import { ReceiptSettingsModule } from './receipt-settings/receipt-settings.module';
+import { ReceiptSettingsOrmEntity } from './receipt-settings/infrastructure/receipt-settings.orm-entity';
 import { DashboardPurchasesModule } from './dashboard-purchases/dashboard-purchases.module';
 import { DashboardSuppliersModule } from './dashboard-suppliers/dashboard-suppliers.module';
 import { DeveloperPlatformModule } from './developer-platform/developer-platform.module';
@@ -95,6 +97,7 @@ import { SupplierOrmEntity } from './dashboard-suppliers/infrastructure/persiste
         PurchaseInvoiceOrmEntity,
         PurchaseBillMappingOrmEntity,
         PurchaseInvoiceAttachmentOrmEntity,
+        ReceiptSettingsOrmEntity,
         StockMovementOrmEntity,
         SupplierOrmEntity,
         TaxMappingOrmEntity,
@@ -121,6 +124,7 @@ import { SupplierOrmEntity } from './dashboard-suppliers/infrastructure/persiste
     DashboardMappingModule,
     DashboardOrganizationModule,
     DashboardPurchasesModule,
+    ReceiptSettingsModule,
     DashboardSuppliersModule,
     DeveloperPlatformModule,
     InventoryModule,

@@ -6,6 +6,10 @@ import type { ComplianceItem } from '../../../shared/domain/entities/compliance-
 import { DocumentType } from '../../../shared/domain/enums/document-type.enum';
 import { oscuTaxRateForCode } from '../../../regulatory/oscu/mapping/oscu-tax-rates';
 import { kraClockParts } from '../../../shared/utils/kra-time';
+import {
+  resolveReceiptView,
+  type ResolvedReceiptView,
+} from '../../../receipt-settings/domain/receipt-settings.model';
 
 export interface TaxBuckets {
   taxableAmountA: number;
@@ -62,6 +66,14 @@ export interface EtimsReceiptData {
    * deliberately omitted (product decision, 2026-09-17).
    */
   copy?: boolean;
+  /**
+   * Resolved per-business receipt settings (receipt-settings.model.ts) -- the same
+   * values the OSCU `receipt` block carries. Absent -> resolved from the connection
+   * alone, i.e. the receipt as it was before settings existed.
+   */
+  receiptView?: ResolvedReceiptView;
+  /** The business logo (PNG/JPG, validated at upload) when `receiptView.show.logo`. */
+  logo?: { content: Buffer; mime: string } | null;
 }
 
 /** Receipt SUB TOTAL / VAT / TOTAL, summed from the per-rate buckets so they always agree with the tax table. */
@@ -89,9 +101,6 @@ const DOCUMENT_TITLE: Record<DocumentType, string> = {
   [DocumentType.EXPORT]: 'EXPORT INVOICE',
   [DocumentType.REVERSE_INVOICE]: 'REVERSED INVOICE',
 };
-
-const DEFAULT_HEADER_MESSAGE = 'Thank you for shopping with us';
-const DEFAULT_FOOTER_MESSAGE = 'THANK YOU\nWE LOOK FORWARD TO EARNING YOUR BUSINESS';
 
 /** TIS §6.23.6/§6.23.7: internal data and receipt signature print dashed after every 4th character. */
 /**
@@ -160,6 +169,14 @@ export async function generateEtimsReceiptPdf(
    */
   const signed = (n: number): number => (isCreditNote ? -Math.abs(n) : n);
   const money = (n: number): string => signed(n).toFixed(2);
+  const view: ResolvedReceiptView =
+    data.receiptView ??
+    resolveReceiptView({
+      settings: null,
+      supplierName: data.supplierName,
+      connection,
+      customerPhone: document.customerPhoneNumber,
+    });
 
   const qrPngBuffer = data.etimsUrl
     ? await QRCode.toBuffer(data.etimsUrl, { width: 160, margin: 1 })
@@ -197,13 +214,22 @@ export async function generateEtimsReceiptPdf(
     doc.fillColor('#000');
 
     const nameX = leftX + 44;
-    doc.fontSize(13).font('Helvetica-Bold').text(data.supplierName || '—', nameX, 38, { width: 300 });
+    doc.fontSize(13).font('Helvetica-Bold').text(view.text.tradeName || '—', nameX, 38, { width: 300 });
     doc.font('Helvetica').fontSize(9);
-    const addressParts = [connection?.tradeAddressLine1, connection?.tradeCity].filter(Boolean);
-    if (addressParts.length > 0) {
-      doc.text(addressParts.join(', '), nameX, doc.y, { width: 300 });
+    if (view.text.address) {
+      doc.text(view.text.address, nameX, doc.y, { width: 300 });
     }
     doc.text(`PIN: ${connection?.kraPin ?? '-'}`, nameX, doc.y, { width: 300 });
+
+    // Business logo (receipt settings): left of the QR, clear of the name column. A logo
+    // that fails to decode is skipped rather than failing the whole receipt.
+    if (view.show.logo && data.logo?.content) {
+      try {
+        doc.image(data.logo.content, pageRight - 80 - 80, 38, { fit: [70, 50], align: 'right' });
+      } catch {
+        /* skip an undecodable logo */
+      }
+    }
 
     doc.fontSize(16).font('Helvetica-Bold');
     doc.text(DOCUMENT_TITLE[document.documentType] ?? 'TAX INVOICE', nameX, doc.y + 4, { width: 300 });
@@ -220,13 +246,12 @@ export async function generateEtimsReceiptPdf(
     doc.moveDown(0.4);
 
     // Commercial message above the item section (page 8 sample: "Welcome to our shop").
-    doc.fontSize(9).fillColor('#333').text(
-      connection?.receiptHeaderMessage || DEFAULT_HEADER_MESSAGE,
-      leftX,
-      doc.y,
-      { width: pageRight - leftX },
-    );
-    doc.fillColor('#000');
+    if (view.text.headerMessage) {
+      doc.fontSize(9).fillColor('#333').text(view.text.headerMessage, leftX, doc.y, {
+        width: pageRight - leftX,
+      });
+      doc.fillColor('#000');
+    }
     doc.moveDown(0.5);
     doc.moveTo(leftX, doc.y).lineTo(pageRight, doc.y).strokeColor('#ccc').stroke();
     doc.moveDown(0.6);
@@ -271,8 +296,8 @@ export async function generateEtimsReceiptPdf(
     // Buyer PIN is optional per TIS §5.1.3/page 8 sample -- print it when present,
     // never invent one; a blank buyer PIN is a legitimate walk-in sale.
     if (document.customerPin) doc.text(`Buyer PIN: ${document.customerPin}`, midX, doc.y, { width: 160 });
-    if (document.customerPhoneNumber) {
-      doc.text(`Tel: ${document.customerPhoneNumber}`, midX, doc.y, { width: 160 });
+    if (view.text.customerMobile) {
+      doc.text(`Tel: ${view.text.customerMobile}`, midX, doc.y, { width: 160 });
     }
 
     doc.font('Helvetica-Bold').text('Supplier Details', rightX, detailsY, { width: 155 });
@@ -305,7 +330,10 @@ export async function generateEtimsReceiptPdf(
       const total = line.quantity * line.unitPrice;
       const y = doc.y;
       const name = item?.name || line.itemId;
-      doc.fontSize(9).text(name, leftX, y, { width: 210 });
+      // Receipt setting "item codes": KRA's own receipt page prints the item code beside the name.
+      const itemLabel =
+        view.show.itemCodes && line.etimsItemCodeSnapshot ? `${line.etimsItemCodeSnapshot}  ${name}` : name;
+      doc.fontSize(9).text(itemLabel, leftX, y, { width: 210 });
       if (line.description && line.description !== name) {
         doc.fontSize(8).fillColor('#666').text(line.description, leftX, doc.y, { width: 210 });
         doc.fillColor('#000');
@@ -424,13 +452,13 @@ export async function generateEtimsReceiptPdf(
     doc.moveDown(0.8);
 
     // Commercial message in the footer (page 8 sample: "THANK YOU ...").
-    doc.fontSize(9).fillColor('#333').text(
-      connection?.receiptFooterMessage || DEFAULT_FOOTER_MESSAGE,
-      leftX,
-      doc.y,
-      { width: pageRight - leftX, align: 'center' },
-    );
-    doc.fillColor('#000');
+    if (view.text.footerMessage) {
+      doc.fontSize(9).fillColor('#333').text(view.text.footerMessage, leftX, doc.y, {
+        width: pageRight - leftX,
+        align: 'center',
+      });
+      doc.fillColor('#000');
+    }
 
     doc.end();
   });
