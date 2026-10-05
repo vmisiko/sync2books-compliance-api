@@ -245,8 +245,10 @@ export class DashboardPurchasesController {
   @ApiResponse({ status: 400, description: 'Bad request' })
   async resyncToErp(
     @ActiveTenant() tenantId: string,
-    @Body() body: PurchaseIdsDto,
+    @Body() body: SyncPurchasesToErpDto,
   ) {
-    return this.purchases.resyncToErp(tenantId, body.ids);
+    return this.purchases.resyncToErp(tenantId, body.ids, {
+      expenseAccountId: body.expenseAccountId,
+    });
   }
 }
