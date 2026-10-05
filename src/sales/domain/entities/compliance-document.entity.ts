@@ -100,6 +100,12 @@ export interface ComplianceDocument {
   totRcptNo: string | null;
   /** OSCU `sdcDateTime` from the submission response -- the SCU's own clock, `yyyyMMddhhmmss`. */
   sdcDateTime: string | null;
+  /**
+   * The one `yyyyMMddHHmmss` (Kenya time) we transmitted to KRA in cfmDt/rcptPbctDt/stockRlsDt on the
+   * latest submission attempt. Printed on the receipt so it matches KRA's receipt link. Null before
+   * submission and on documents that predate this field (receipts fall back to sdcDateTime/createdAt).
+   */
+  transmittedAt?: string | null;
   /** Receipt label (NS/NC/CS/CC/TS/TC/PS) per TIS spec §4.3 -- derived at acceptance time. */
   receiptLabel: string | null;
   /**

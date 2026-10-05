@@ -286,6 +286,8 @@ export async function submitDocument(
     complianceStatus: ComplianceStatus.SUBMITTED,
     submissionAttempts: prevAttempts + 1,
     submittedAt,
+    // The time stamped into this attempt's request; a retry re-stamps and overwrites it.
+    transmittedAt: result.transmittedAt ?? document.transmittedAt ?? null,
   };
   await documentRepo.save(submittedDoc);
   await eventRepo.append({

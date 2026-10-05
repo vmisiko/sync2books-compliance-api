@@ -34,6 +34,8 @@ export type EtimsConnectionContext = {
 export interface EtimsSubmissionResult {
   success: boolean;
   receiptNumber?: string;
+  /** The single `yyyyMMddHHmmss` stamped into cfmDt/rcptPbctDt/stockRlsDt of THIS attempt's request. */
+  transmittedAt?: string;
   rawResponse?: Record<string, unknown>;
   error?: string;
 }

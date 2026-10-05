@@ -5,7 +5,7 @@ import type { ComplianceConnection } from '../../../shared/domain/entities/compl
 import type { ComplianceItem } from '../../../shared/domain/entities/compliance-item.entity';
 import { DocumentType } from '../../../shared/domain/enums/document-type.enum';
 import { oscuTaxRateForCode } from '../../../regulatory/oscu/mapping/oscu-tax-rates';
-import { kraClockParts } from '../../../shared/utils/kra-time';
+import { kraClockParts, splitKraDateTime } from '../../../shared/utils/kra-time';
 
 export interface TaxBuckets {
   taxableAmountA: number;
@@ -263,7 +263,7 @@ export async function generateEtimsReceiptPdf(
     doc.font('Helvetica-Bold').text('Invoice Details', leftX, detailsY, { width: 170 });
     doc.font('Helvetica');
     doc.text(`Invoice no: ${document.documentNumber}`, leftX, doc.y, { width: 170 });
-    doc.text(`Date: ${document.saleDate ?? '-'}`, leftX, doc.y, { width: 170 });
+    doc.text(`Date: ${splitKraDateTime(document.transmittedAt)?.date ?? document.saleDate ?? '-'}`, leftX, doc.y, { width: 170 });
 
     doc.font('Helvetica-Bold').text('Buyer Details', midX, detailsY, { width: 160 });
     doc.font('Helvetica');
@@ -392,7 +392,8 @@ export async function generateEtimsReceiptPdf(
     doc.moveDown(0.6);
 
     // --- SCU INFORMATION block (TIS §6.23) ---
-    const scuDateTime = formatScuDateTime(data.sdcDateTime);
+    // One consistent time: what we transmitted (and KRA's link shows); old documents fall back to the SCU clock.
+    const scuDateTime = formatScuDateTime(document.transmittedAt || data.sdcDateTime);
     const cuId = connection?.sdcId ?? connection?.deviceId ?? '-';
     const issuedLabel = data.receiptLabel ?? (isCreditNote ? 'NC' : 'NS');
     const receiptLabel = isCopy ? copyReceiptLabel(issuedLabel) : issuedLabel;
@@ -416,7 +417,9 @@ export async function generateEtimsReceiptPdf(
     // Sync2Books has no separate TIS-internal receipt sequence today -- documentNumber
     // (our own trader invoice number) and the document's creation time stand in for it,
     // both real and traceable, until a dedicated TIS-sequence counter exists.
-    const tisDateTime = formatTisDateTime(document.createdAt);
+    const tisDateTime = document.transmittedAt
+      ? formatScuDateTime(document.transmittedAt)
+      : formatTisDateTime(document.createdAt);
     doc.font('Helvetica-Bold').fontSize(10).text('TIS INFORMATION', leftX, doc.y);
     doc.font('Helvetica').fontSize(9);
     doc.text(`Receipt Number: ${document.documentNumber}`, leftX, doc.y);
