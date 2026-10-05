@@ -53,6 +53,7 @@ function makeService(opts: {
     { resolveMerchantId: async () => MERCHANT_ID } as any,
     undefined as any,
     undefined as any,
+    undefined as any,
   );
   const upsert = jest
     .spyOn(service as any, 'upsertFromKraRecord')

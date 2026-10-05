@@ -50,7 +50,12 @@ function build(opts: { synced?: boolean } = {}) {
     count: jest.fn(async ({ where }: any) =>
       store.filter((a) => a.merchantId === where.merchantId && a.purchaseInvoiceId === where.purchaseInvoiceId).length),
     find: jest.fn(async ({ where }: any) =>
-      store.filter((a) => a.merchantId === where.merchantId && a.purchaseInvoiceId === where.purchaseInvoiceId)),
+      store.filter(
+        (a) =>
+          a.merchantId === where.merchantId &&
+          a.purchaseInvoiceId === where.purchaseInvoiceId &&
+          (where.attachToErp === undefined || a.attachToErp === where.attachToErp),
+      )),
     update: jest.fn(async (crit: any, patch: any) => {
       Object.assign(store.find((a) => a.id === crit.id)!, patch);
     }),
@@ -97,6 +102,12 @@ describe('PurchaseAttachmentService', () => {
     expect(detectFileType(JPG)?.ext).toBe('jpg');
     expect(detectFileType(Buffer.from('<html>'))).toBeNull();
     expect(sanitiseFilename('../../etc/pa"ss<wd>.exe', 'pdf')).toBe('pa_ss_wd_.pdf');
+  });
+
+  it("drops a pasted Content-Disposition tail from the name", () => {
+    expect(sanitiseFilename("Receipt_76572946.pdf; filename*=UTF-8''Receipt_76572946.pdf", 'pdf')).toBe('Receipt_76572946.pdf');
+    expect(sanitiseFilename('a b.pdf;filename=a b.pdf', 'pdf')).toBe('a b.pdf');
+    expect(sanitiseFilename('plain.pdf', 'pdf')).toBe('plain.pdf');
   });
 
   it('uploads, lists, downloads and deletes', async () => {
@@ -195,11 +206,122 @@ describe('PurchaseAttachmentService', () => {
       expect(res.pushError).toBeTruthy();
     });
 
-    it('upload with pushToErp on an unsynced invoice succeeds and reports why not', async () => {
-      const { svc } = build({ synced: false });
+    it('upload with the pushToErp alias on an unsynced invoice records the mark and pushes nothing', async () => {
+      const { svc, attachToBill } = build({ synced: false });
       const res = await svc.upload('tenant-a', 'inv-a', file(PDF), { pushToErp: true });
-      expect(res.attachment.erpPushStatus).toBe('not_pushed');
-      expect(res.pushError).toMatch(/Sync this purchase/);
+      expect(res.attachment).toMatchObject({ attachToErp: true, erpPushStatus: 'not_pushed' });
+      expect(res.pushError).toBeNull();
+      expect(attachToBill).not.toHaveBeenCalled();
+    });
+
+    it('upload with attachToErp on a synced invoice pushes now; attachToErp wins over the alias', async () => {
+      const { svc, attachToBill } = build({ synced: true });
+      attachToBill.mockResolvedValue({ attachmentId: 'e', billId: 'bill-1', syncStatus: 'synced' });
+      const on = await svc.upload('tenant-a', 'inv-a', file(PDF), { attachToErp: true });
+      expect(on.attachment).toMatchObject({ attachToErp: true, erpPushStatus: 'synced' });
+      const off = await svc.upload('tenant-a', 'inv-a', file(PDF), { attachToErp: false, pushToErp: true });
+      expect(off.attachment).toMatchObject({ attachToErp: false, erpPushStatus: 'not_pushed' });
+      expect(attachToBill).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('attachToErp mark', () => {
+    it('PATCH on an unsynced invoice only records the mark', async () => {
+      const { svc, attachToBill } = build({ synced: false });
+      const { attachment } = await svc.upload('tenant-a', 'inv-a', file(PDF));
+      const out = await svc.setAttachToErp('tenant-a', 'inv-a', attachment.id, true);
+      expect(out.attachment.attachToErp).toBe(true);
+      expect(out.pushError).toBeNull();
+      expect(attachToBill).not.toHaveBeenCalled();
+    });
+
+    it('PATCH on a synced invoice pushes immediately', async () => {
+      const { svc, attachToBill } = build({ synced: true });
+      attachToBill.mockResolvedValue({ attachmentId: 'e', billId: 'bill-1', syncStatus: 'synced' });
+      const { attachment } = await svc.upload('tenant-a', 'inv-a', file(PDF));
+      const out = await svc.setAttachToErp('tenant-a', 'inv-a', attachment.id, true);
+      expect(out.attachment).toMatchObject({ attachToErp: true, erpPushStatus: 'synced' });
+      expect(attachToBill).toHaveBeenCalledTimes(1);
+    });
+
+    it('PATCH on a synced invoice keeps the mark and reports pushError when the ERP fails', async () => {
+      const { svc, attachToBill } = build({ synced: true });
+      attachToBill.mockRejectedValue(new MainApiHttpError(500, 'boom'));
+      const { attachment } = await svc.upload('tenant-a', 'inv-a', file(PDF));
+      const out = await svc.setAttachToErp('tenant-a', 'inv-a', attachment.id, true);
+      expect(out.attachment).toMatchObject({ attachToErp: true, erpPushStatus: 'failed' });
+      expect(out.pushError).toBeTruthy();
+    });
+
+    it('turning it off never calls the ERP', async () => {
+      const { svc, attachToBill } = build({ synced: true });
+      attachToBill.mockResolvedValue({ attachmentId: 'e', billId: 'bill-1', syncStatus: 'synced' });
+      const { attachment } = await svc.upload('tenant-a', 'inv-a', file(PDF), { attachToErp: true });
+      attachToBill.mockClear();
+      const out = await svc.setAttachToErp('tenant-a', 'inv-a', attachment.id, false);
+      expect(out.attachment.attachToErp).toBe(false);
+      expect(attachToBill).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 for another merchant's ids and never changes the row", async () => {
+      const { svc, store } = build({ synced: true });
+      const { attachment } = await svc.upload('tenant-a', 'inv-a', file(PDF));
+      await expect(svc.setAttachToErp('tenant-b', 'inv-a', attachment.id, true)).rejects.toBeInstanceOf(NotFoundException);
+      await expect(svc.setAttachToErp('tenant-a', 'inv-a2', attachment.id, true)).rejects.toBeInstanceOf(NotFoundException);
+      expect(store[0].attachToErp).toBe(false);
+    });
+  });
+
+  describe('pushFlaggedForInvoice (after sync / re-sync)', () => {
+    const invoice = (synced = true) =>
+      ({ id: 'inv-a', merchantId: MERCHANT_A, erpSyncStatus: synced ? 'synced' : 'not_synced', erpBillId: synced ? 'bill-1' : null }) as PurchaseInvoiceOrmEntity;
+
+    it('pushes only flagged attachments, with the attachment id as idempotency key', async () => {
+      const { svc, attachToBill } = build({ synced: false });
+      attachToBill.mockResolvedValue({ attachmentId: 'e', billId: 'bill-1', syncStatus: 'synced' });
+      const flagged = (await svc.upload('tenant-a', 'inv-a', file(PDF), { attachToErp: true })).attachment;
+      await svc.upload('tenant-a', 'inv-a', file(PDF));
+      const warnings = await svc.pushFlaggedForInvoice('tenant-a', invoice());
+      expect(warnings).toEqual([]);
+      expect(attachToBill).toHaveBeenCalledTimes(1);
+      expect(attachToBill).toHaveBeenCalledWith('k', 'conn-1', 'bill-1', expect.anything(), { idempotencyKey: flagged.id });
+    });
+
+    it('skips already-synced attachments and pushes the rest on a later run', async () => {
+      const { svc, attachToBill, store } = build({ synced: false });
+      attachToBill.mockResolvedValue({ attachmentId: 'e', billId: 'bill-1', syncStatus: 'synced' });
+      await svc.upload('tenant-a', 'inv-a', file(PDF), { attachToErp: true });
+      await svc.pushFlaggedForInvoice('tenant-a', invoice());
+      expect(attachToBill).toHaveBeenCalledTimes(1);
+      await svc.upload('tenant-a', 'inv-a', file(PDF), { attachToErp: true });
+      await svc.pushFlaggedForInvoice('tenant-a', invoice());
+      expect(attachToBill).toHaveBeenCalledTimes(2);
+      expect(store.map((a) => a.erpPushStatus)).toEqual(['synced', 'synced']);
+    });
+
+    it('a failed push is recorded and reported, does not throw, and does not stop the rest', async () => {
+      const { svc, attachToBill, store } = build({ synced: false });
+      attachToBill
+        .mockRejectedValueOnce(new MainApiHttpError(500, 'boom'))
+        .mockResolvedValueOnce({ attachmentId: 'e', billId: 'bill-1', syncStatus: 'synced' });
+      await svc.upload('tenant-a', 'inv-a', file(PDF, 'one.pdf'), { attachToErp: true });
+      await svc.upload('tenant-a', 'inv-a', file(PDF, 'two.pdf'), { attachToErp: true });
+      const warnings = await svc.pushFlaggedForInvoice('tenant-a', invoice());
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatchObject({ filename: 'one.pdf' });
+      expect(store.map((a) => a.erpPushStatus)).toEqual(['failed', 'synced']);
+      // a retry sends only the failed one
+      attachToBill.mockResolvedValueOnce({ attachmentId: 'e2', billId: 'bill-1', syncStatus: 'synced' });
+      expect(await svc.pushFlaggedForInvoice('tenant-a', invoice())).toEqual([]);
+      expect(attachToBill).toHaveBeenCalledTimes(3);
+    });
+
+    it('never throws even when the lookup itself fails', async () => {
+      const { svc } = build({ synced: false });
+      const broken = (svc as any).attachments;
+      broken.find.mockRejectedValueOnce(new Error('db down'));
+      const warnings = await svc.pushFlaggedForInvoice('tenant-a', invoice());
+      expect(warnings).toHaveLength(1);
     });
   });
 });

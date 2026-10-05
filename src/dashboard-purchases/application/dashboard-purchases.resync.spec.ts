@@ -55,6 +55,7 @@ function makeService(opts: {
   conflicts?: string[];
   noDefaultAccount?: boolean;
   resolveAccountOverride?: jest.Mock;
+  pushFlagged?: jest.Mock;
 }) {
   const find = jest.fn().mockImplementation(async ({ where }) =>
     opts.rows.filter((r) => r.merchantId === where.merchantId),
@@ -65,6 +66,7 @@ function makeService(opts: {
     status: 'linked',
     supplier: { id: 'supplier-1', bookId: 'odoo-vendor-1', name: 'ABC Supplies' },
   });
+  const pushFlaggedForInvoice = opts.pushFlagged ?? jest.fn().mockResolvedValue([]);
   const service = new DashboardPurchasesApplicationService(
     { find, save } as any,
     undefined as any,
@@ -84,8 +86,9 @@ function makeService(opts: {
         opts.resolveAccountOverride ??
         jest.fn().mockImplementation(async (_m, id: string) => ({ erpId: id, erpName: `Account ${id}` })),
     } as any,
+    { pushFlaggedForInvoice } as any,
   );
-  return { service, find, save, resyncBill };
+  return { service, find, save, resyncBill, pushFlaggedForInvoice };
 }
 
 describe('DashboardPurchasesApplicationService.resyncToErp', () => {
@@ -259,5 +262,53 @@ describe('DashboardPurchasesApplicationService.resyncToErp', () => {
   it('rejects an empty selection', async () => {
     const { service } = makeService({ rows: [] });
     await expect(service.resyncToErp(TENANT_ID, [])).rejects.toThrow(BadRequestException);
+  });
+
+  describe('marked attachments', () => {
+    it('pushes the flagged attachments after a successful re-sync, with the resolved connection', async () => {
+      const row = makeRow();
+      const { service, pushFlaggedForInvoice } = makeService({ rows: [row] });
+
+      const result = await service.resyncToErp(TENANT_ID, [row.id]);
+
+      expect(pushFlaggedForInvoice).toHaveBeenCalledTimes(1);
+      expect(pushFlaggedForInvoice).toHaveBeenCalledWith(
+        TENANT_ID,
+        row,
+        expect.objectContaining({ mainApiApiKey: 'key-1', connectionId: 'conn-1' }),
+      );
+      expect(result.results[0].status).toBe('resynced');
+      expect(result.attachmentWarnings).toEqual([]);
+    });
+
+    it('does not push attachments when the re-sync itself fails', async () => {
+      const row = makeRow();
+      const { service, pushFlaggedForInvoice } = makeService({
+        rows: [row],
+        resyncBill: jest.fn().mockRejectedValue(new Error('posted bill')),
+      });
+
+      await service.resyncToErp(TENANT_ID, [row.id]);
+
+      expect(pushFlaggedForInvoice).not.toHaveBeenCalled();
+    });
+
+    it('reports an attachment failure as a warning and leaves the re-sync successful', async () => {
+      const row = makeRow();
+      const { service } = makeService({
+        rows: [row],
+        pushFlagged: jest
+          .fn()
+          .mockResolvedValue([{ attachmentId: 'a1', filename: 'x.pdf', message: 'ERP down' }]),
+      });
+
+      const result = await service.resyncToErp(TENANT_ID, [row.id]);
+
+      expect(result.results[0].status).toBe('resynced');
+      expect(result.errors).toEqual([]);
+      expect(result.attachmentWarnings).toEqual([
+        { id: row.id, receiptNo: 'RCPT-1', attachmentId: 'a1', filename: 'x.pdf', message: 'ERP down' },
+      ]);
+    });
   });
 });

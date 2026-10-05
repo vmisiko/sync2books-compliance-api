@@ -52,6 +52,10 @@ import {
   type ErpRef,
   type ResolvedPurchaseBillMapping,
 } from './purchase-bill-mapping.service';
+import {
+  PurchaseAttachmentService,
+  type AttachmentPushWarning,
+} from './purchase-attachment.service';
 import type { SupplierErpPushResult } from '../../dashboard-suppliers/application/dashboard-suppliers.application.service';
 
 const PRODUCT_TYPE_CODES = ['1', '2', '3'] as const;
@@ -83,6 +87,13 @@ export type ConfirmError = {
   id: string;
   receiptNo: string;
   message: string;
+};
+
+/** A file marked for the ERP bill that could not be sent; the bill sync itself still succeeded. */
+export type PurchaseAttachmentWarning = AttachmentPushWarning & {
+  /** The purchase invoice the file belongs to. */
+  id: string;
+  receiptNo: string;
 };
 
 export type PurchasePullBranchResult = {
@@ -179,6 +190,7 @@ export class DashboardPurchasesApplicationService {
     private readonly mainApiConnections: MainApiConnectionApplicationService,
     private readonly mainApiPull: MainApiPullClient,
     private readonly billMapping: PurchaseBillMappingService,
+    private readonly attachmentService: PurchaseAttachmentService,
   ) {}
 
   async pull(
@@ -653,6 +665,7 @@ export class DashboardPurchasesApplicationService {
     data: PurchaseInvoiceDto[];
     total: number;
     errors: ConfirmError[];
+    attachmentWarnings: PurchaseAttachmentWarning[];
   }> {
     if (!ids?.length) {
       throw new BadRequestException('No purchase invoices selected');
@@ -661,6 +674,7 @@ export class DashboardPurchasesApplicationService {
     const merchantId = await this.resolveMerchantId(complianceTenantId);
     const rows = await this.repo.find({ where: { merchantId, id: In(ids) } });
     const errors: ConfirmError[] = [];
+    const attachmentWarnings: PurchaseAttachmentWarning[] = [];
 
     const fail = async (row: PurchaseInvoiceOrmEntity, message: string) => {
       errors.push(this.confirmError(row, message));
@@ -697,7 +711,7 @@ export class DashboardPurchasesApplicationService {
         );
       }
       const result = await this.list(complianceTenantId);
-      return { ...result, errors };
+      return { ...result, errors, attachmentWarnings };
     }
 
     // Several selected purchases usually share a supplier — push each
@@ -812,6 +826,12 @@ export class DashboardPurchasesApplicationService {
           row.erpSyncError = null;
           row.erpSyncedAt = new Date();
           await this.repo.save(row);
+          await this.sendMarkedAttachments(
+            complianceTenantId,
+            row,
+            mapping,
+            attachmentWarnings,
+          );
         } else {
           await fail(
             row,
@@ -828,7 +848,27 @@ export class DashboardPurchasesApplicationService {
     }
 
     const result = await this.list(complianceTenantId);
-    return { ...result, errors };
+    return { ...result, errors, attachmentWarnings };
+  }
+
+  /**
+   * Sends the files the user marked "send to the ERP bill" once the bill exists. Never throws and
+   * never changes the invoice's sync outcome: failures come back as `attachmentWarnings`.
+   */
+  private async sendMarkedAttachments(
+    tenantId: string,
+    row: PurchaseInvoiceOrmEntity,
+    mapping: Pick<ResolvedPurchaseBillMapping, 'mainApiApiKey' | 'connectionId'>,
+    into: PurchaseAttachmentWarning[],
+  ): Promise<void> {
+    const warnings = await this.attachmentService.pushFlaggedForInvoice(
+      tenantId,
+      row,
+      mapping,
+    );
+    for (const w of warnings) {
+      into.push({ id: row.id, receiptNo: row.receiptNo, ...w });
+    }
   }
 
   /** One bill line per stored purchase line, with its KRA tax letter and the mapped ERP tax. */
@@ -933,6 +973,7 @@ export class DashboardPurchasesApplicationService {
       status: 'resynced' | 'failed';
       message: string;
     }>;
+    attachmentWarnings: PurchaseAttachmentWarning[];
   }> {
     if (!ids?.length) {
       throw new BadRequestException('No purchase invoices selected');
@@ -947,6 +988,8 @@ export class DashboardPurchasesApplicationService {
       status: 'resynced' | 'failed';
       message: string;
     }> = [];
+
+    const attachmentWarnings: PurchaseAttachmentWarning[] = [];
 
     const fail = (row: PurchaseInvoiceOrmEntity, message: string) => {
       errors.push(this.confirmError(row, message));
@@ -1074,13 +1117,19 @@ export class DashboardPurchasesApplicationService {
           status: 'resynced',
           message: 'Bill rewritten in your accounting system from the current mappings.',
         });
+        await this.sendMarkedAttachments(
+          complianceTenantId,
+          row,
+          mapping,
+          attachmentWarnings,
+        );
       } catch (error) {
         fail(row, error instanceof Error ? error.message : String(error));
       }
     }
 
     const result = await this.list(complianceTenantId);
-    return { ...result, errors, results };
+    return { ...result, errors, results, attachmentWarnings };
   }
 
   /** KRA tax type of a stored line, read from the raw KRA record it came from. */
