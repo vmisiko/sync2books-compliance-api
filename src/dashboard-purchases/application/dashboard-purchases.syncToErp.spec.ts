@@ -103,6 +103,7 @@ type Setup = {
   resolveForSync: jest.Mock;
   resolveAccountOverride: jest.Mock;
   createBill: jest.Mock;
+  findLineTaxConflicts: jest.Mock;
 };
 
 function linked(bookId = 'qb-vendor-1') {
@@ -149,7 +150,9 @@ function makeService(setup: Partial<Setup> & { rows: PurchaseInvoiceOrmEntity[] 
   const resolveAccountOverride =
     setup.resolveAccountOverride ??
     jest.fn().mockResolvedValue({ erpId: '99', erpName: 'Office Supplies' });
-  const billMapping = { resolveForSync, resolveAccountOverride };
+  const findLineTaxConflicts =
+    setup.findLineTaxConflicts ?? jest.fn().mockResolvedValue([]);
+  const billMapping = { resolveForSync, resolveAccountOverride, findLineTaxConflicts };
 
   const service = new DashboardPurchasesApplicationService(
     repo as any,
@@ -164,10 +167,29 @@ function makeService(setup: Partial<Setup> & { rows: PurchaseInvoiceOrmEntity[] 
     billMapping as unknown as PurchaseBillMappingService,
   );
 
-  return { service, resolveAccountOverride, repo, save, ensureInErp, createBill };
+  return { service, resolveAccountOverride, repo, save, ensureInErp, createBill, mainApiPull };
 }
 
 describe('DashboardPurchasesApplicationService.syncToErp', () => {
+  it('refuses a zero-rated line mapped to a taxing ERP tax, naming the line and tax, and posts nothing', async () => {
+    const row = makePurchaseRow();
+    const findLineTaxConflicts = jest.fn().mockResolvedValue([
+      'Line "Widget" is zero-rated (KRA tax type C) but "2% WH" is a withholding tax (-2%).',
+    ]);
+    const { service, createBill } = makeService({ rows: [row], findLineTaxConflicts });
+
+    const result = await service.syncToErp(TENANT_ID, [row.id]);
+
+    expect(createBill).not.toHaveBeenCalled();
+    expect(row.erpSyncStatus).toBe('sync_failed');
+    expect(row.erpSyncError).toMatch(/"Widget".*"2% WH"/);
+    expect(result.errors).toHaveLength(1);
+    expect(findLineTaxConflicts).toHaveBeenCalledWith(
+      MAPPED,
+      [expect.objectContaining({ description: 'Widget', taxTyCd: 'B', taxRate: 16 })],
+    );
+  });
+
   it('pushes a confirmed, supplier-linked purchase as a Bill and marks it synced', async () => {
     const row = makePurchaseRow();
     const { service, createBill } = makeService({ rows: [row] });

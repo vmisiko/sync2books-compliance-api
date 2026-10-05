@@ -18,6 +18,7 @@ import {
 import {
   MainApiPullClient,
   type MainApiCreateBillLineItem,
+  type MainApiCreateBillRequest,
 } from '../../integration/main-api-pull/infrastructure/http/main-api-pull.client';
 import { OscuSyncStateOrmEntity } from '../../regulatory/oscu/infrastructure/persistence/oscu-sync-state.orm-entity';
 import {
@@ -46,7 +47,11 @@ import {
   type TaxLetter,
 } from './purchase-kra-confirmation.builder';
 import { parseExpectedInvcNo } from '../../regulatory/oscu/mapping/oscu-sequence-drift';
-import { PurchaseBillMappingService } from './purchase-bill-mapping.service';
+import {
+  PurchaseBillMappingService,
+  type ErpRef,
+  type ResolvedPurchaseBillMapping,
+} from './purchase-bill-mapping.service';
 import type { SupplierErpPushResult } from '../../dashboard-suppliers/application/dashboard-suppliers.application.service';
 
 const PRODUCT_TYPE_CODES = ['1', '2', '3'] as const;
@@ -727,10 +732,7 @@ export class DashboardPurchasesApplicationService {
         continue;
       }
 
-      const lines = row.lineItems.map((item) => {
-        const taxTyCd = this.lineTaxLetter(row, item);
-        return { item, taxTyCd, tax: mapping.taxes[taxTyCd] };
-      });
+      const lines = this.mapBillLines(row, mapping);
       const unmapped = [
         ...new Set(lines.filter((l) => !l.tax).map((l) => l.taxTyCd)),
       ].sort();
@@ -739,6 +741,20 @@ export class DashboardPurchasesApplicationService {
           row,
           `Map KRA tax type${unmapped.length > 1 ? 's' : ''} ${unmapped.join(', ')} to a tax in your accounting system (Mapping Center → Purchase Bills) before syncing.`,
         );
+        continue;
+      }
+
+      const taxConflicts = await this.billMapping.findLineTaxConflicts(
+        mapping,
+        lines.map(({ item, taxTyCd, tax }) => ({
+          description: item.description,
+          taxTyCd,
+          taxRate: item.taxRate,
+          tax,
+        })),
+      );
+      if (taxConflicts.length) {
+        await fail(row, taxConflicts.join(' '));
         continue;
       }
 
@@ -770,37 +786,6 @@ export class DashboardPurchasesApplicationService {
         continue;
       }
 
-      const lineItems: MainApiCreateBillLineItem[] = lines.map(
-        ({ item, tax }) => {
-          // KRA amounts are VAT-inclusive; every ERP here adds the mapped
-          // tax on top of the line's net amount, so send net figures.
-          const net = round2(item.total - item.taxAmount);
-          const qty = item.qty || 1;
-          const unit = round2(net / qty);
-          // A net that doesn't split evenly per unit would drift by a cent
-          // once the ERP recomputes unit × qty — post it as one line instead.
-          const exact = Math.abs(unit * qty - net) < 0.005;
-          return {
-            description: exact
-              ? item.description
-              : `${item.description} (qty ${item.qty})`,
-            unitAmount: exact ? unit : net,
-            quantity: exact ? qty : 1,
-            subTotal: net,
-            taxAmount: item.taxAmount,
-            totalAmount: item.total,
-            isDirectCost: true,
-            accountRef: {
-              id: expenseAccount.erpId,
-              name: expenseAccount.erpName,
-            },
-            taxRateRef: { id: tax!.erpId, name: tax!.erpName },
-          };
-        },
-      );
-      const sum = (pick: (l: MainApiCreateBillLineItem) => number | undefined) =>
-        round2(lineItems.reduce((acc, l) => acc + (pick(l) ?? 0), 0));
-
       try {
         // awaitSync defaults to true here: main API blocks until the ERP write actually
         // completes, so `billResult.bill.syncStatus` below reflects the real outcome, not just
@@ -808,41 +793,18 @@ export class DashboardPurchasesApplicationService {
         const billResult = await this.mainApiPull.createBill(
           mapping.mainApiApiKey,
           mapping.connectionId,
-          {
-            reference: row.receiptNo,
-            supplierRef: {
-              id: push.supplier.bookId,
-              supplierName: row.supplierName,
-            },
-            issueDate: new Date(row.invoiceDate).toISOString(),
-            // Every amount pulled from KRA is implicitly KES already — see
-            // [[project-etims-currency-gap]], same assumption inherited here.
-            currency: 'KES',
-            // Header totals come from the lines, not row.subtotal: KRA's
-            // totTaxblAmt is VAT-inclusive, so it isn't a net subtotal.
-            subTotal: sum((l) => l.subTotal),
-            taxAmount: sum((l) => l.taxAmount),
-            totalAmount: sum((l) => l.totalAmount),
-            lineItems,
-            note: `Synced from KRA eTIMS purchase confirmation (${row.receiptNo})`,
-            status: 'Open',
-          },
+          this.buildBillRequest(
+            row,
+            lines,
+            expenseAccount,
+            push.supplier.bookId,
+          ),
         );
 
         row.erpBillId = billResult.bill.id;
         row.erpBillBookId = billResult.bill.bookId ?? null;
         row.erpBillNumber = billResult.bill.billCode ?? null;
-        row.erpPosting = {
-          accountId: expenseAccount.erpId,
-          accountName: expenseAccount.erpName,
-          lines: lines.map(({ item, taxTyCd, tax }) => ({
-            lineId: item.id,
-            description: item.description,
-            taxId: tax!.erpId,
-            taxName: tax!.erpName,
-            taxTyCd,
-          })),
-        };
+        row.erpPosting = this.toErpPosting(expenseAccount, lines);
         row.erpSyncBatchId = billResult.syncBatchId;
 
         if (billResult.bill.syncStatus === 'synced') {
@@ -867,6 +829,236 @@ export class DashboardPurchasesApplicationService {
 
     const result = await this.list(complianceTenantId);
     return { ...result, errors };
+  }
+
+  /** One bill line per stored purchase line, with its KRA tax letter and the mapped ERP tax. */
+  private mapBillLines(
+    row: PurchaseInvoiceOrmEntity,
+    mapping: Pick<ResolvedPurchaseBillMapping, 'taxes'>,
+  ) {
+    return row.lineItems.map((item) => {
+      const taxTyCd = this.lineTaxLetter(row, item);
+      return { item, taxTyCd, tax: mapping.taxes[taxTyCd] };
+    });
+  }
+
+  /**
+   * The CreateBillDto body for a purchase. Shared by syncToErp (create) and resyncToErp
+   * (rewrite) so a re-sync can never post different figures than a first sync would.
+   */
+  private buildBillRequest(
+    row: PurchaseInvoiceOrmEntity,
+    lines: ReturnType<DashboardPurchasesApplicationService['mapBillLines']>,
+    expenseAccount: ErpRef,
+    supplierBookId: string,
+  ): MainApiCreateBillRequest {
+    const lineItems: MainApiCreateBillLineItem[] = lines.map(({ item, tax }) => {
+      // KRA amounts are VAT-inclusive; every ERP here adds the mapped
+      // tax on top of the line's net amount, so send net figures.
+      const net = round2(item.total - item.taxAmount);
+      const qty = item.qty || 1;
+      const unit = round2(net / qty);
+      // A net that doesn't split evenly per unit would drift by a cent
+      // once the ERP recomputes unit × qty — post it as one line instead.
+      const exact = Math.abs(unit * qty - net) < 0.005;
+      return {
+        description: exact
+          ? item.description
+          : `${item.description} (qty ${item.qty})`,
+        unitAmount: exact ? unit : net,
+        quantity: exact ? qty : 1,
+        subTotal: net,
+        taxAmount: item.taxAmount,
+        totalAmount: item.total,
+        isDirectCost: true,
+        accountRef: { id: expenseAccount.erpId, name: expenseAccount.erpName },
+        taxRateRef: { id: tax!.erpId, name: tax!.erpName },
+      };
+    });
+    const sum = (pick: (l: MainApiCreateBillLineItem) => number | undefined) =>
+      round2(lineItems.reduce((acc, l) => acc + (pick(l) ?? 0), 0));
+
+    return {
+      reference: row.receiptNo,
+      supplierRef: { id: supplierBookId, supplierName: row.supplierName },
+      issueDate: new Date(row.invoiceDate).toISOString(),
+      // Every amount pulled from KRA is implicitly KES already — see
+      // [[project-etims-currency-gap]], same assumption inherited here.
+      currency: 'KES',
+      // Header totals come from the lines, not row.subtotal: KRA's
+      // totTaxblAmt is VAT-inclusive, so it isn't a net subtotal.
+      subTotal: sum((l) => l.subTotal),
+      taxAmount: sum((l) => l.taxAmount),
+      totalAmount: sum((l) => l.totalAmount),
+      lineItems,
+      note: `Synced from KRA eTIMS purchase confirmation (${row.receiptNo})`,
+      status: 'Open',
+    };
+  }
+
+  private toErpPosting(
+    expenseAccount: ErpRef,
+    lines: ReturnType<DashboardPurchasesApplicationService['mapBillLines']>,
+  ): PurchaseErpPostingJson {
+    return {
+      accountId: expenseAccount.erpId,
+      accountName: expenseAccount.erpName,
+      lines: lines.map(({ item, taxTyCd, tax }) => ({
+        lineId: item.id,
+        description: item.description,
+        taxId: tax!.erpId,
+        taxName: tax!.erpName,
+        taxTyCd,
+      })),
+    };
+  }
+
+  /**
+   * Rewrites the ERP bill of an already-synced purchase from the CURRENT Mapping Center
+   * settings (e.g. after fixing a wrong tax mapping). Only Odoo draft bills can be rewritten;
+   * main API refuses a posted one. A refusal or failure is reported per row and leaves the row
+   * exactly as it was -- the bill in the ERP is still what it was, so `synced` stays true.
+   */
+  async resyncToErp(
+    complianceTenantId: string,
+    ids: string[],
+  ): Promise<{
+    data: PurchaseInvoiceDto[];
+    total: number;
+    errors: ConfirmError[];
+    results: Array<{
+      id: string;
+      receiptNo: string;
+      status: 'resynced' | 'failed';
+      message: string;
+    }>;
+  }> {
+    if (!ids?.length) {
+      throw new BadRequestException('No purchase invoices selected');
+    }
+
+    const merchantId = await this.resolveMerchantId(complianceTenantId);
+    const rows = await this.repo.find({ where: { merchantId, id: In(ids) } });
+    const errors: ConfirmError[] = [];
+    const results: Array<{
+      id: string;
+      receiptNo: string;
+      status: 'resynced' | 'failed';
+      message: string;
+    }> = [];
+
+    const fail = (row: PurchaseInvoiceOrmEntity, message: string) => {
+      errors.push(this.confirmError(row, message));
+      results.push({
+        id: row.id,
+        receiptNo: row.receiptNo,
+        status: 'failed',
+        message,
+      });
+    };
+
+    const mapping = await this.billMapping.resolveForSync(
+      complianceTenantId,
+      merchantId,
+    );
+
+    for (const row of rows) {
+      if (row.erpSyncStatus !== 'synced' || !row.erpBillId) {
+        fail(
+          row,
+          'Only purchases already synced to your accounting system can be re-synced — use Sync to ERP first.',
+        );
+        continue;
+      }
+      if (!mapping) {
+        fail(
+          row,
+          'No connected accounting system for this tenant yet — connect it before re-syncing purchases.',
+        );
+        continue;
+      }
+      const expenseAccount = mapping.expenseAccount;
+      if (!expenseAccount) {
+        fail(
+          row,
+          'Choose the account purchase bills post to in Mapping Center → Purchase Bills before re-syncing.',
+        );
+        continue;
+      }
+      if (!row.supplierId) {
+        fail(
+          row,
+          'Link this purchase to a supplier before re-syncing to your accounting system.',
+        );
+        continue;
+      }
+
+      const lines = this.mapBillLines(row, mapping);
+      const unmapped = [
+        ...new Set(lines.filter((l) => !l.tax).map((l) => l.taxTyCd)),
+      ].sort();
+      if (unmapped.length) {
+        fail(
+          row,
+          `Map KRA tax type${unmapped.length > 1 ? 's' : ''} ${unmapped.join(', ')} to a tax in your accounting system (Mapping Center → Purchase Bills) before re-syncing.`,
+        );
+        continue;
+      }
+      const taxConflicts = await this.billMapping.findLineTaxConflicts(
+        mapping,
+        lines.map(({ item, taxTyCd, tax }) => ({
+          description: item.description,
+          taxTyCd,
+          taxRate: item.taxRate,
+          tax,
+        })),
+      );
+      if (taxConflicts.length) {
+        fail(row, taxConflicts.join(' '));
+        continue;
+      }
+
+      try {
+        const push = await this.suppliers.ensureInErp(
+          complianceTenantId,
+          row.supplierId,
+        );
+        if (push.status !== 'linked' || !push.supplier.bookId) {
+          fail(
+            row,
+            push.status === 'failed'
+              ? `Could not reach supplier "${push.supplier.name}" in your accounting system: ${push.error}`
+              : push.status === 'skipped'
+                ? push.reason
+                : `Supplier "${push.supplier.name}" has no id in your accounting system yet.`,
+          );
+          continue;
+        }
+
+        await this.mainApiPull.resyncBill(
+          mapping.mainApiApiKey,
+          mapping.connectionId,
+          row.erpBillId,
+          this.buildBillRequest(row, lines, expenseAccount, push.supplier.bookId),
+        );
+
+        row.erpPosting = this.toErpPosting(expenseAccount, lines);
+        row.erpSyncError = null;
+        row.erpSyncedAt = new Date();
+        await this.repo.save(row);
+        results.push({
+          id: row.id,
+          receiptNo: row.receiptNo,
+          status: 'resynced',
+          message: 'Bill rewritten in your accounting system from the current mappings.',
+        });
+      } catch (error) {
+        fail(row, error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    const result = await this.list(complianceTenantId);
+    return { ...result, errors, results };
   }
 
   /** KRA tax type of a stored line, read from the raw KRA record it came from. */

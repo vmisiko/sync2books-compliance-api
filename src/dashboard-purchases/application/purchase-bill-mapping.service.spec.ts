@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { PurchaseBillMappingService } from './purchase-bill-mapping.service';
+import { PurchaseBillMappingService, zeroRateTaxConflict } from './purchase-bill-mapping.service';
 import type { PurchaseBillMappingOrmEntity } from '../infrastructure/persistence/purchase-bill-mapping.orm-entity';
 
 const TENANT_ID = 'tenant-1';
@@ -151,5 +151,57 @@ describe('PurchaseBillMappingService', () => {
       await service.resolveAccountOverride(connection, '80');
       expect(rows).toHaveLength(0);
     });
+  });
+});
+
+describe('zero-rate tax guard', () => {
+  const WH = { id: '7', name: '2% WH', usableForPurchases: true, rate: -2, rateType: 'percent' };
+  const ZERO = { id: '8', name: '0% Zero', usableForPurchases: true, rate: 0, rateType: 'percent' };
+  const SIXTEEN = { id: '9', name: '16% VAT', usableForPurchases: true, rate: 16, rateType: 'percent' };
+
+  it('flags a zero-rated line mapped to a withholding or positive tax, but not to 0%', () => {
+    expect(zeroRateTaxConflict({ taxTyCd: 'C' }, WH)).toMatch(/"2% WH" is a withholding tax \(-2%\)/);
+    expect(zeroRateTaxConflict({ taxTyCd: 'A' }, SIXTEEN)).toMatch(/charges 16%/);
+    expect(zeroRateTaxConflict({ taxTyCd: 'B', taxRate: 0 }, WH)).not.toBeNull();
+    expect(zeroRateTaxConflict({ taxTyCd: 'C' }, ZERO)).toBeNull();
+  });
+
+  it('allows a 16% line mapped to 16% and never blocks when the rate is unknown or a group', () => {
+    expect(zeroRateTaxConflict({ taxTyCd: 'B', taxRate: 16 }, SIXTEEN)).toBeNull();
+    expect(zeroRateTaxConflict({ taxTyCd: 'C' }, { name: 'QB 16%', rate: undefined })).toBeNull();
+    expect(zeroRateTaxConflict({ taxTyCd: 'C' }, { name: 'Grp', rate: 5, rateType: 'group' })).toBeNull();
+  });
+
+  it('rejects saving a zero-rated KRA type onto a withholding tax, and saves 0% and 16%->16%', async () => {
+    const { service, rows, mainApiPull } = makeService();
+    mainApiPull.getBillMappingOptions.mockResolvedValue({ ...OPTIONS, taxes: [WH, ZERO, SIXTEEN] });
+
+    await expect(service.save(TENANT_ID, { taxes: { C: '7' } }, null)).rejects.toThrow(
+      /KRA tax type C is zero-rated, but "2% WH" is a withholding tax/,
+    );
+    expect(rows).toHaveLength(0);
+
+    await service.save(TENANT_ID, { taxes: { C: '8', B: '9' } }, null);
+    expect(rows.map((r) => `${r.taxTyCd}:${r.erpId}`).sort()).toEqual(['B:9', 'C:8']);
+  });
+
+  it('findLineTaxConflicts names the offending line and skips lines it cannot judge', async () => {
+    const { service, mainApiPull } = makeService();
+    mainApiPull.getBillMappingOptions.mockResolvedValue({ ...OPTIONS, taxes: [WH, SIXTEEN] });
+    const mapping = { connectionId: 'conn-1', mainApiApiKey: 'key-1' };
+
+    const messages = await service.findLineTaxConflicts(mapping, [
+      { description: 'Bread', taxTyCd: 'C', taxRate: 0, tax: { erpId: '7', erpName: '2% WH' } },
+      { description: 'Fuel', taxTyCd: 'B', taxRate: 16, tax: { erpId: '9', erpName: '16% VAT' } },
+    ]);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatch(/Line "Bread" is zero-rated \(KRA tax type C\) but "2% WH" is a withholding tax/);
+
+    mainApiPull.getBillMappingOptions.mockRejectedValue(new Error('down'));
+    await expect(
+      service.findLineTaxConflicts(mapping, [
+        { description: 'Bread', taxTyCd: 'C', taxRate: 0, tax: { erpId: '7', erpName: '2% WH' } },
+      ]),
+    ).resolves.toEqual([]);
   });
 });
