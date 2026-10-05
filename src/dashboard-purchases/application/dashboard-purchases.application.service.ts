@@ -977,7 +977,15 @@ export class DashboardPurchasesApplicationService {
         );
         continue;
       }
-      const expenseAccount = mapping.expenseAccount;
+      // The account the bill was posted to stays: it may have been picked for that sync alone
+      // (Sync to ERP's account step), and a re-sync is about fixing taxes, not moving the bill.
+      // The saved default only fills in for rows synced before the posting was recorded.
+      const expenseAccount: ErpRef | null = row.erpPosting?.accountId
+        ? {
+            erpId: row.erpPosting.accountId,
+            erpName: row.erpPosting.accountName,
+          }
+        : mapping.expenseAccount;
       if (!expenseAccount) {
         fail(
           row,

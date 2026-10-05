@@ -53,6 +53,7 @@ function makeService(opts: {
   rows: PurchaseInvoiceOrmEntity[];
   resyncBill?: jest.Mock;
   conflicts?: string[];
+  noDefaultAccount?: boolean;
 }) {
   const find = jest.fn().mockImplementation(async ({ where }) =>
     opts.rows.filter((r) => r.merchantId === where.merchantId),
@@ -74,7 +75,9 @@ function makeService(opts: {
     { resolveMerchantId: jest.fn().mockResolvedValue(MERCHANT_ID) } as any,
     { resyncBill } as any,
     {
-      resolveForSync: jest.fn().mockResolvedValue(MAPPED),
+      resolveForSync: jest
+        .fn()
+        .mockResolvedValue(opts.noDefaultAccount ? { ...MAPPED, expenseAccount: null } : MAPPED),
       findLineTaxConflicts: jest.fn().mockResolvedValue(opts.conflicts ?? []),
     } as any,
   );
@@ -112,6 +115,25 @@ describe('DashboardPurchasesApplicationService.resyncToErp', () => {
     expect(save).toHaveBeenCalledWith(row);
     expect(result.results).toEqual([expect.objectContaining({ id: row.id, status: 'resynced' })]);
     expect(result.errors).toHaveLength(0);
+  });
+
+  it('keeps the account the bill was posted to even when no default account is saved', async () => {
+    const row = makeRow({
+      erpPosting: { accountId: '55', accountName: 'Per-sync account', lines: [] },
+    });
+    const { service, resyncBill } = makeService({ rows: [row], noDefaultAccount: true });
+
+    await service.resyncToErp(TENANT_ID, [row.id]);
+
+    expect(resyncBill).toHaveBeenCalledWith(
+      'key-1',
+      'conn-1',
+      'main-bill-1',
+      expect.objectContaining({
+        lineItems: [expect.objectContaining({ accountRef: { id: '55', name: 'Per-sync account' } })],
+      }),
+    );
+    expect(row.erpPosting?.accountId).toBe('55');
   });
 
   it('reports the posted-bill refusal per row and leaves the row unchanged', async () => {
