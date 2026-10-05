@@ -54,6 +54,7 @@ function makeService(opts: {
   resyncBill?: jest.Mock;
   conflicts?: string[];
   noDefaultAccount?: boolean;
+  resolveAccountOverride?: jest.Mock;
 }) {
   const find = jest.fn().mockImplementation(async ({ where }) =>
     opts.rows.filter((r) => r.merchantId === where.merchantId),
@@ -79,6 +80,9 @@ function makeService(opts: {
         .fn()
         .mockResolvedValue(opts.noDefaultAccount ? { ...MAPPED, expenseAccount: null } : MAPPED),
       findLineTaxConflicts: jest.fn().mockResolvedValue(opts.conflicts ?? []),
+      resolveAccountOverride:
+        opts.resolveAccountOverride ??
+        jest.fn().mockImplementation(async (_m, id: string) => ({ erpId: id, erpName: `Account ${id}` })),
     } as any,
   );
   return { service, find, save, resyncBill };
@@ -134,6 +138,65 @@ describe('DashboardPurchasesApplicationService.resyncToErp', () => {
       }),
     );
     expect(row.erpPosting?.accountId).toBe('55');
+  });
+
+  it('re-syncs a bill with no recorded account and no saved default when an account is chosen', async () => {
+    // The state of a purchase synced before posting details were recorded, on a business that
+    // only ever picked an account in the sync dialog.
+    const row = makeRow({ erpPosting: null });
+    const { service, resyncBill } = makeService({ rows: [row], noDefaultAccount: true });
+
+    const result = await service.resyncToErp(TENANT_ID, [row.id], { expenseAccountId: '91' });
+
+    expect(resyncBill).toHaveBeenCalledWith(
+      'key-1',
+      'conn-1',
+      'main-bill-1',
+      expect.objectContaining({
+        lineItems: [expect.objectContaining({ accountRef: { id: '91', name: 'Account 91' } })],
+      }),
+    );
+    expect(row.erpPosting?.accountId).toBe('91');
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('lets a chosen account win over the account the bill was posted to', async () => {
+    const row = makeRow({ erpPosting: { accountId: '55', accountName: 'Old', lines: [] } });
+    const { service, resyncBill } = makeService({ rows: [row] });
+
+    await service.resyncToErp(TENANT_ID, [row.id], { expenseAccountId: '91' });
+
+    expect(resyncBill).toHaveBeenCalledWith(
+      'key-1',
+      'conn-1',
+      'main-bill-1',
+      expect.objectContaining({
+        lineItems: [expect.objectContaining({ accountRef: { id: '91', name: 'Account 91' } })],
+      }),
+    );
+  });
+
+  it('asks for an account when none is recorded, saved or chosen', async () => {
+    const row = makeRow({ erpPosting: null });
+    const { service, resyncBill } = makeService({ rows: [row], noDefaultAccount: true });
+
+    const result = await service.resyncToErp(TENANT_ID, [row.id]);
+
+    expect(resyncBill).not.toHaveBeenCalled();
+    expect(result.errors[0].message).toMatch(/Choose the account for this bill/);
+  });
+
+  it('rejects the whole request when the chosen account is not in the ERP, before any bill is touched', async () => {
+    const row = makeRow();
+    const resolveAccountOverride = jest
+      .fn()
+      .mockRejectedValue(new BadRequestException('Account 404 was not found in your accounting system.'));
+    const { service, resyncBill } = makeService({ rows: [row], resolveAccountOverride });
+
+    await expect(service.resyncToErp(TENANT_ID, [row.id], { expenseAccountId: '404' })).rejects.toThrow(
+      /was not found/,
+    );
+    expect(resyncBill).not.toHaveBeenCalled();
   });
 
   it('reports the posted-bill refusal per row and leaves the row unchanged', async () => {

@@ -922,6 +922,7 @@ export class DashboardPurchasesApplicationService {
   async resyncToErp(
     complianceTenantId: string,
     ids: string[],
+    options: { expenseAccountId?: string } = {},
   ): Promise<{
     data: PurchaseInvoiceDto[];
     total: number;
@@ -962,6 +963,17 @@ export class DashboardPurchasesApplicationService {
       merchantId,
     );
 
+    // An account chosen for this re-sync wins over the one the bill was posted to and over the
+    // saved default. It is checked against the ERP's live accounts before any bill is touched, so
+    // a bad id fails the whole request rather than half-resyncing a batch.
+    const accountOverride: ErpRef | null =
+      mapping && options.expenseAccountId
+        ? await this.billMapping.resolveAccountOverride(
+            mapping,
+            options.expenseAccountId,
+          )
+        : null;
+
     for (const row of rows) {
       if (row.erpSyncStatus !== 'synced' || !row.erpBillId) {
         fail(
@@ -980,16 +992,18 @@ export class DashboardPurchasesApplicationService {
       // The account the bill was posted to stays: it may have been picked for that sync alone
       // (Sync to ERP's account step), and a re-sync is about fixing taxes, not moving the bill.
       // The saved default only fills in for rows synced before the posting was recorded.
-      const expenseAccount: ErpRef | null = row.erpPosting?.accountId
-        ? {
-            erpId: row.erpPosting.accountId,
-            erpName: row.erpPosting.accountName,
-          }
-        : mapping.expenseAccount;
+      const expenseAccount: ErpRef | null =
+        accountOverride ??
+        (row.erpPosting?.accountId
+          ? {
+              erpId: row.erpPosting.accountId,
+              erpName: row.erpPosting.accountName,
+            }
+          : mapping.expenseAccount);
       if (!expenseAccount) {
         fail(
           row,
-          'Choose the account purchase bills post to in Mapping Center → Purchase Bills before re-syncing.',
+          'Choose the account for this bill in the Re-sync dialog, or set a default under Mapping Center → Purchase Bills.',
         );
         continue;
       }
