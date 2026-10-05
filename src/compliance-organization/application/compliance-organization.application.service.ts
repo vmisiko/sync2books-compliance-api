@@ -210,7 +210,13 @@ export class ComplianceOrganizationApplicationService {
       });
     } else if (env === ConnectionEnvironment.SANDBOX) {
       const shared = getSharedSandboxEtimsCredentials();
-      if (shared) {
+      // Shared credentials only seed a branch that has no connection yet. A
+      // re-upsert of an existing tenant (e.g. ensureCompany() stamping
+      // sync2booksCompanyId when a dashboard user opens the business) carries no
+      // kraPin and must never replace a connection's own PIN/device/cmcKey.
+      const existingConnection =
+        await this.orgConnectionRepo.findBranchTenantEtimsByBranchId(branch.id);
+      if (shared && !existingConnection?.etims) {
         etimsConnection = await this.upsertEtimsConnection({
           complianceBranchId: branch.id,
           kraPin: shared.kraPin,
