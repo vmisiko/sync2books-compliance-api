@@ -1,6 +1,7 @@
 import {
   Injectable,
   NotFoundException,
+  Optional,
   PayloadTooLargeException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
@@ -13,8 +14,10 @@ import {
   RECEIPT_SECTIONS,
   type ReceiptSettingsData,
   validateReceiptSettingsInput,
+  legacyMessageNotices,
   ReceiptSettingsValidationError,
 } from '../domain/receipt-settings.model';
+import { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
 import { ReceiptSettingsOrmEntity } from '../infrastructure/receipt-settings.orm-entity';
 import { BadRequestException } from '@nestjs/common';
 
@@ -31,6 +34,8 @@ export interface ReceiptSettingsDto {
   settings: ReceiptSettingsData;
   sections: typeof RECEIPT_SECTIONS;
   limits: typeof RECEIPT_FIELD_LIMITS;
+  /** Things the business should fix, e.g. a previous header/footer that is longer than KRA allows. */
+  notices: string[];
   logo: { present: boolean; mime: string | null; size: number | null; updatedAt: Date | null };
 }
 
@@ -80,6 +85,8 @@ export class ReceiptSettingsService {
   constructor(
     @InjectRepository(ReceiptSettingsOrmEntity)
     private readonly repo: Repository<ReceiptSettingsOrmEntity>,
+    @Optional()
+    private readonly organizations?: ComplianceOrganizationApplicationService,
   ) {}
 
   /** `tenantId` is always the caller's own, verified by ActiveTenantGuard (or the document's own business). */
@@ -89,7 +96,7 @@ export class ReceiptSettingsService {
 
   async get(tenantId: string): Promise<ReceiptSettingsDto> {
     const row = await this.findRow(tenantId);
-    return this.toDto(row);
+    return this.toDto(tenantId, row);
   }
 
   /** Settings + whether a logo exists, for the receipt resolver. Never loads the logo bytes. */
@@ -112,7 +119,7 @@ export class ReceiptSettingsService {
     } else {
       await this.repo.save(this.repo.create({ tenantId, settings, logoMime: null, logoSize: null, logoSha256: null, logoContent: null }));
     }
-    return this.toDto(await this.findRow(tenantId));
+    return this.toDto(tenantId, await this.findRow(tenantId));
   }
 
   async uploadLogo(tenantId: string, file: UploadedLogoLike | undefined): Promise<ReceiptSettingsDto> {
@@ -145,7 +152,7 @@ export class ReceiptSettingsService {
     } else {
       await this.repo.save(this.repo.create({ tenantId, settings: EMPTY_RECEIPT_SETTINGS, ...logo }));
     }
-    return this.toDto(await this.findRow(tenantId));
+    return this.toDto(tenantId, await this.findRow(tenantId));
   }
 
   /** Bytes for an authenticated GET and for the PDF. 404 when this business has no logo. */
@@ -170,11 +177,18 @@ export class ReceiptSettingsService {
     const existing = await this.findRow(tenantId);
     if (!existing || existing.logoSize == null) throw new NotFoundException('No logo uploaded.');
     await this.repo.update({ tenantId }, { logoMime: null, logoSize: null, logoSha256: null, logoContent: null });
-    return this.toDto(await this.findRow(tenantId));
+    return this.toDto(tenantId, await this.findRow(tenantId));
   }
 
-  private toDto(row: ReceiptSettingsOrmEntity | null): ReceiptSettingsDto {
+  private async toDto(tenantId: string, row: ReceiptSettingsOrmEntity | null): Promise<ReceiptSettingsDto> {
+    // The legacy header/footer lives on the tenant (the connection copies it).
+    const tenant = (await this.organizations?.getTenantById(tenantId)) ?? null;
     return {
+      // Only until the business picks a message of its own.
+      notices: legacyMessageNotices({
+        receiptHeaderMessage: row?.settings?.texts?.headerMessage ? null : tenant?.receiptHeaderMessage,
+        receiptFooterMessage: row?.settings?.texts?.footerMessage ? null : tenant?.receiptFooterMessage,
+      }),
       settings: row?.settings ?? EMPTY_RECEIPT_SETTINGS,
       sections: RECEIPT_SECTIONS,
       limits: RECEIPT_FIELD_LIMITS,

@@ -14,6 +14,7 @@ import type { ComplianceConnection } from '../shared/domain/entities/compliance-
 import type { ComplianceDocument } from '../sales/domain/entities/compliance-document.entity';
 import {
   applyTransmittedSnapshot,
+  legacyReceiptView,
   receiptBlockTextFromView,
   resolveReceiptView,
   type ReceiptSettingsData,
@@ -105,6 +106,17 @@ const SETTINGS: ReceiptSettingsData = {
 };
 
 describe('paper == transmission', () => {
+  /** Every transmitted text must be on the paper as the same string (trdeNm as the "Trading as" line). */
+  function expectParity(paper: string[], sent: ReturnType<typeof transmittedReceipt>) {
+    if (sent.trdeNm) expect(paper).toContain(`Trading as: ${sent.trdeNm}`);
+    else expect(paper.some((t) => t.startsWith('Trading as'))).toBe(false);
+    for (const v of [sent.adrs, sent.topMsg, sent.btmMsg]) {
+      if (v) expect(paper).toContain(v);
+    }
+    if (sent.custMblNo) expect(paper).toContain(`Tel: ${sent.custMblNo}`);
+    else expect(paper.some((t) => t.startsWith('Tel:'))).toBe(false);
+  }
+
   it('a settings override reaches BOTH the paper text and the transmitted receipt block, identically', async () => {
     const view = resolveReceiptView({ settings: SETTINGS, supplierName: 'Legal Name Ltd', connection, customerPhone: '0712 345 678' });
     const paper = await paperText(receiptData(view));
@@ -114,54 +126,64 @@ describe('paper == transmission', () => {
       trdeNm: 'Sync To Books', adrs: 'Jamhuri, Langata, Nairobi', topMsg: 'Welcome, karibu',
       btmMsg: 'THANK YOU, COME BACK', custMblNo: '0712 345 678',
     });
-    // Each transmitted value is printed on the paper verbatim.
-    expect(paper).toContain(sent.trdeNm);
-    expect(paper).toContain(sent.adrs);
-    expect(paper).toContain(sent.topMsg);
-    expect(paper).toContain(sent.btmMsg);
-    expect(paper).toContain(`Tel: ${sent.custMblNo}`);
-    // Item code prints next to the name when enabled.
-    expect(paper).toContain('KE2NTNO0000001  Flour');
+    expectParity(paper, sent);
+    expect(paper).toContain('Legal Name Ltd'); // legal name still prints, separately
+    expect(paper).toContain('KE2NTNO0000001  Flour'); // item codes on
   });
 
-  it('over-long text is truncated the same way on paper and in the transmission', async () => {
-    const view = resolveReceiptView({
-      settings: null,
-      supplierName: 'SYNC TO BOOKS RECONCILER LIMITED',
-      connection: { ...connection, receiptHeaderMessage: 'Welcome to SYNC TO BOOKS RECONCILER LIMITED', receiptFooterMessage: 'THANK YOU - WE LOOK FORWARD TO EARNING YOUR BUSINESS' },
-      customerPhone: null,
-    });
+  it('the full registered name is NEVER truncated on paper (and is not transmitted as trdeNm)', async () => {
+    const view = resolveReceiptView({ settings: null, supplierName: 'SYNC TO BOOKS RECONCILER LIMITED', connection, customerPhone: null });
     const paper = await paperText(receiptData(view));
     const sent = transmittedReceipt(payloadFor(view));
-    for (const v of [sent.trdeNm, sent.topMsg, sent.btmMsg]) {
-      expect(v!.length).toBeLessThanOrEqual(20);
-      expect(paper).toContain(v!);
-    }
-    expect(sent.trdeNm).toBe('SYNC TO BOOKS');
-    expect(sent.adrs).toBe('Jamhuri, Langata District, Nairobi');
+    expect(paper).toContain('SYNC TO BOOKS RECONCILER LIMITED');
+    expect(sent.trdeNm).toBeNull();
+    expectParity(paper, sent);
   });
 
-  it('a section switched off prints nothing AND transmits null', async () => {
+  it('legacy long header/footer are ignored: nothing printed, null transmitted', async () => {
     const view = resolveReceiptView({
-      settings: { sections: { headerMessage: { enabled: false }, footerMessage: { enabled: false }, customerPhone: { enabled: false } }, texts: {} },
-      supplierName: 'Legal Name Ltd', connection, customerPhone: '0712345678',
+      settings: null, supplierName: 'SYNC TO BOOKS RECONCILER LIMITED', customerPhone: null,
+      connection: { ...connection, receiptHeaderMessage: 'Welcome to SYNC TO BOOKS RECONCILER LIMITED', receiptFooterMessage: 'THANK YOU - WE LOOK FORWARD TO EARNING YOUR BUSINESS' },
     });
     const paper = await paperText(receiptData(view));
     const sent = transmittedReceipt(payloadFor(view));
     expect(sent.topMsg).toBeNull();
     expect(sent.btmMsg).toBeNull();
-    expect(sent.custMblNo).toBeNull();
-    expect(paper.some((t) => t.startsWith('Tel:'))).toBe(false);
-    expect(paper).not.toContain('Thank you for shopping with us');
+    expect(paper.some((t) => /Welcome to|THANK YOU/.test(t))).toBe(false);
+    expectParity(paper, sent);
   });
 
-  it('defaults: item codes stay off and the mandatory blocks always print', async () => {
+  it('a section switched off prints nothing AND transmits null', async () => {
+    const view = resolveReceiptView({
+      settings: { sections: { headerMessage: { enabled: false }, footerMessage: { enabled: false }, customerPhone: { enabled: false }, tradeName: { enabled: false } }, texts: { tradeName: 'Brand', headerMessage: 'Hi', footerMessage: 'Bye' } },
+      supplierName: 'Legal Name Ltd', connection, customerPhone: '0712345678',
+    });
+    const paper = await paperText(receiptData(view));
+    const sent = transmittedReceipt(payloadFor(view));
+    expect(sent).toMatchObject({ trdeNm: null, topMsg: null, btmMsg: null, custMblNo: null });
+    expectParity(paper, sent);
+    expect(paper).not.toContain('Hi');
+  });
+
+  it('default view for an unconfigured business: no header/footer/trade name on paper or wire; mandatory blocks print', async () => {
     const view = resolveReceiptView({ settings: null, supplierName: 'Legal Name Ltd', connection, customerPhone: null });
     const paper = await paperText(receiptData(view));
+    const sent = transmittedReceipt(payloadFor(view));
+    expect(sent).toMatchObject({ trdeNm: null, topMsg: null, btmMsg: null });
     expect(paper).not.toContain('KE2NTNO0000001  Flour');
     expect(paper).toEqual(expect.arrayContaining(['SCU INFORMATION', 'TIS INFORMATION', 'Tax Category', 'Supplier Details']));
     expect(paper.some((t) => t.startsWith('PIN: '))).toBe(true);
     expect(paper.some((t) => t.startsWith('CU Invoice No.: '))).toBe(true);
+    expectParity(paper, sent);
+  });
+
+  it('a document transmitted before settings existed (no snapshot) still prints as before: full name, old messages', async () => {
+    const input = { settings: null, supplierName: 'SYNC TO BOOKS RECONCILER LIMITED', customerPhone: null, connection: { ...connection, receiptHeaderMessage: 'Welcome to SYNC TO BOOKS RECONCILER LIMITED', receiptFooterMessage: null } };
+    const paper = await paperText(receiptData(legacyReceiptView(resolveReceiptView(input), input)));
+    expect(paper).toContain('SYNC TO BOOKS RECONCILER LIMITED');
+    expect(paper).toContain('Welcome to SYNC TO BOOKS RECONCILER LIMITED');
+    expect(paper).toContain('THANK YOU\nWE LOOK FORWARD TO EARNING YOUR BUSINESS');
+    expect(paper.some((t) => t.startsWith('Trading as'))).toBe(false);
   });
 
   it('with no resolver wired (legacy callers) the transmission keeps the old null block', () => {
@@ -209,8 +231,9 @@ describe('paper == transmission', () => {
     // ...but the issued document's paper still prints what KRA was sent.
     const view = applyTransmittedSnapshot(changed, document.receiptTextSnapshot);
     const paper = await paperText(receiptData(view, document));
-    expect(paper).toContain(wire.trdeNm);
+    expect(paper).toContain(`Trading as: ${wire.trdeNm}`);
     expect(paper).toContain(wire.topMsg);
     expect(paper).not.toContain('Totally New');
+    expect(paper).not.toContain('Trading as: Totally New');
   });
 });

@@ -67,6 +67,7 @@ import { ReceiptSettingsService } from '../../receipt-settings/application/recei
 import {
   EMPTY_RECEIPT_SETTINGS,
   applyTransmittedSnapshot,
+  legacyReceiptView,
   receiptBlockTextFromView,
   resolveReceiptView,
   type ReceiptSettingsData,
@@ -132,14 +133,20 @@ export class SalesService {
       (tenantId && this.receiptSettings
         ? await this.receiptSettings.getForRender(tenantId)
         : { settings: EMPTY_RECEIPT_SETTINGS, hasLogo: false });
-    const view = resolveReceiptView({
+    const input = {
       settings: ctx.settings,
       supplierName,
       connection,
       customerPhone: document.customerPhoneNumber,
       hasLogo: ctx.hasLogo,
-    });
-    return { view: applyTransmittedSnapshot(view, document.receiptTextSnapshot), tenantId };
+    };
+    const view = resolveReceiptView(input);
+    if (document.receiptTextSnapshot) {
+      return { view: applyTransmittedSnapshot(view, document.receiptTextSnapshot), tenantId };
+    }
+    // Transmitted before settings existed (no snapshot): render exactly as it printed then; never retro-fit.
+    if (document.submittedAt) return { view: legacyReceiptView(view, input), tenantId };
+    return { view, tenantId };
   }
 
   async createDocument(

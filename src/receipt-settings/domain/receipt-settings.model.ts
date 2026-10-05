@@ -29,8 +29,12 @@ export interface ReceiptSectionDef {
   textKey?: ReceiptTextKey;
 }
 
-export const DEFAULT_HEADER_MESSAGE = 'Thank you for shopping with us';
-export const DEFAULT_FOOTER_MESSAGE = 'THANK YOU\nWE LOOK FORWARD TO EARNING YOUR BUSINESS';
+/**
+ * What receipts printed before settings existed. Used ONLY to render documents that were
+ * transmitted before this feature (see `legacyReceiptView`), never for new transmissions.
+ */
+export const LEGACY_HEADER_MESSAGE = 'Thank you for shopping with us';
+export const LEGACY_FOOTER_MESSAGE = 'THANK YOU\nWE LOOK FORWARD TO EARNING YOUR BUSINESS';
 
 /**
  * Locked = required by the TIS template (TIS for OSCU/VSCU v2.0 pages 8/10, section
@@ -42,7 +46,8 @@ export const DEFAULT_FOOTER_MESSAGE = 'THANK YOU\nWE LOOK FORWARD TO EARNING YOU
 export const RECEIPT_SECTIONS: readonly ReceiptSectionDef[] = [
   { key: 'logo', label: 'Business logo', locked: false },
   { key: 'kraLogo', label: 'KRA logo mark', locked: true, lockedReason: 'TIS 6.28: the KRA logo prints on every receipt.' },
-  { key: 'businessName', label: 'Business name', locked: true, textKey: 'tradeName', lockedReason: 'Trade name heads the TIS sample (page 8) and is transmitted as trdeNm. You can change the text, not remove it.' },
+  { key: 'businessName', label: 'Business name', locked: true, lockedReason: 'The full registered business name heads the TIS sample (page 8). It is never shortened or removed.' },
+  { key: 'tradeName', label: 'Trade name (optional, "Trading as")', locked: false, textKey: 'tradeName' },
   { key: 'address', label: 'Address', locked: true, textKey: 'address', lockedReason: 'Shop address is on the TIS sample (page 8) and transmitted as adrs. You can change the text. Locked because the spec wording is unsure.' },
   { key: 'supplierPin', label: 'Supplier PIN', locked: true, lockedReason: 'TIS page 8: the supplier PIN is mandatory.' },
   { key: 'documentTitle', label: 'Document title', locked: true, lockedReason: 'TAX INVOICE / CREDIT NOTE title is mandatory (pages 8 and 10).' },
@@ -65,6 +70,7 @@ export const LOCKED_SECTION_KEYS: readonly string[] = RECEIPT_SECTIONS.filter((s
 /** What a section does when the business has never configured it. */
 const DEFAULT_ENABLED: Record<string, boolean> = {
   logo: false, // no logo until one is uploaded and switched on
+  tradeName: true,
   headerMessage: true,
   customerPhone: true, // the receipt already printed "Tel:" when a phone existed
   itemCodes: false, // today's receipt does not print item codes
@@ -74,7 +80,7 @@ const DEFAULT_ENABLED: Record<string, boolean> = {
 export interface ReceiptSettingsData {
   /** Only non-locked section keys ever appear with enabled:false; locked ones are always on. */
   sections: Record<string, { enabled: boolean }>;
-  /** Overrides; null/absent falls back to today's source (tenant name, connection address/messages). */
+  /** tradeName/headerMessage/footerMessage are optional and never defaulted; address overrides the connection address. */
   texts: Partial<Record<ReceiptTextKey, string | null>>;
 }
 
@@ -110,6 +116,12 @@ export function truncateReceiptText(value: string | null, max: number): string |
 
 function fitted(value: string | null | undefined, max: number): string | null {
   return truncateReceiptText(normaliseReceiptText(value), max);
+}
+
+/** Like fitted() but NEVER shortens: a value over the limit is ignored (null), so nothing is silently cut. */
+function exact(value: string | null | undefined, max: number): string | null {
+  const n = normaliseReceiptText(value);
+  return n && n.length <= max ? n : null;
 }
 
 /** Validates + canonicalises a PUT body. Throws ReceiptSettingsValidationError (-> 400). */
@@ -174,7 +186,7 @@ export function isSectionEnabled(settings: ReceiptSettingsData | null | undefine
 
 export interface ReceiptViewInput {
   settings: ReceiptSettingsData | null | undefined;
-  /** Tenant display name -- the legacy source of the trade name. */
+  /** The registered business name (tenant display name): printed in FULL, never transmitted as trdeNm. */
   supplierName: string | null | undefined;
   connection: {
     tradeAddressLine1?: string | null;
@@ -188,19 +200,21 @@ export interface ReceiptViewInput {
 }
 
 /**
- * Everything the receipt layouts and the OSCU `receipt` block need. `text` values are
- * already normalised and truncated to KRA's limits; null means "nothing printed AND
- * null transmitted".
+ * Everything the receipt layouts and the OSCU `receipt` block need. Every text except
+ * `legalName` is the exact string printed AND transmitted; null means "nothing printed AND
+ * null transmitted". Nothing here is silently shortened except the address (200) and phone (20).
  */
 export interface ResolvedReceiptView {
   text: {
-    /** OSCU trdeNm */
+    /** Registered business name, printed in full on paper. NOT transmitted. */
+    legalName: string | null;
+    /** OSCU trdeNm -- optional "Trading as" name (<=20); printed on paper when set. */
     tradeName: string | null;
     /** OSCU adrs */
     address: string | null;
-    /** OSCU topMsg */
+    /** OSCU topMsg (<=20) */
     headerMessage: string | null;
-    /** OSCU btmMsg */
+    /** OSCU btmMsg (<=20) */
     footerMessage: string | null;
     /** OSCU custMblNo */
     customerMobile: string | null;
@@ -212,24 +226,41 @@ export interface ResolvedReceiptView {
   };
 }
 
+/** A legacy connection/tenant message is only a usable starting value when it fits KRA's limit. */
+export function legacyMessageNotices(connection: ReceiptViewInput['connection']): string[] {
+  const notices: string[] = [];
+  const h = normaliseReceiptText(connection?.receiptHeaderMessage);
+  const f = normaliseReceiptText(connection?.receiptFooterMessage);
+  if (h && h.length > RECEIPT_FIELD_LIMITS.headerMessage) {
+    notices.push(`Your previous header message is longer than KRA allows (${RECEIPT_FIELD_LIMITS.headerMessage} characters); choose a shorter one.`);
+  }
+  if (f && f.length > RECEIPT_FIELD_LIMITS.footerMessage) {
+    notices.push(`Your previous footer message is longer than KRA allows (${RECEIPT_FIELD_LIMITS.footerMessage} characters); choose a shorter one.`);
+  }
+  return notices;
+}
+
 export function resolveReceiptView(input: ReceiptViewInput): ResolvedReceiptView {
   const { settings, connection } = input;
   const t = settings?.texts ?? {};
   const legacyAddress = [connection?.tradeAddressLine1, connection?.tradeCity].filter(Boolean).join(', ');
 
+  const tradeOn = isSectionEnabled(settings, 'tradeName');
   const headerOn = isSectionEnabled(settings, 'headerMessage');
   const footerOn = isSectionEnabled(settings, 'footerMessage');
   const phoneOn = isSectionEnabled(settings, 'customerPhone');
 
   return {
     text: {
-      tradeName: fitted(t.tradeName || input.supplierName, RECEIPT_FIELD_LIMITS.tradeName),
+      legalName: normaliseReceiptText(input.supplierName),
+      tradeName: tradeOn ? exact(t.tradeName, RECEIPT_FIELD_LIMITS.tradeName) : null,
       address: fitted(t.address || legacyAddress, RECEIPT_FIELD_LIMITS.address),
+      // Unset -> nothing. A legacy connection message is a starting value only when it already fits.
       headerMessage: headerOn
-        ? fitted(t.headerMessage || connection?.receiptHeaderMessage || DEFAULT_HEADER_MESSAGE, RECEIPT_FIELD_LIMITS.headerMessage)
+        ? exact(t.headerMessage || connection?.receiptHeaderMessage, RECEIPT_FIELD_LIMITS.headerMessage)
         : null,
       footerMessage: footerOn
-        ? fitted(t.footerMessage || connection?.receiptFooterMessage || DEFAULT_FOOTER_MESSAGE, RECEIPT_FIELD_LIMITS.footerMessage)
+        ? exact(t.footerMessage || connection?.receiptFooterMessage, RECEIPT_FIELD_LIMITS.footerMessage)
         : null,
       customerMobile: phoneOn ? fitted(input.customerPhone, RECEIPT_FIELD_LIMITS.customerMobile) : null,
     },
@@ -237,6 +268,26 @@ export function resolveReceiptView(input: ReceiptViewInput): ResolvedReceiptView
       logo: isSectionEnabled(settings, 'logo') && input.hasLogo === true,
       itemCodes: isSectionEnabled(settings, 'itemCodes'),
       customerPhone: phoneOn,
+    },
+  };
+}
+
+/**
+ * The receipt as it printed BEFORE settings existed, for a document that was already
+ * transmitted without a snapshot: full name, the connection's messages (or the old generic
+ * defaults) untruncated, no trade name. Never retro-fitted to the new rules.
+ */
+export function legacyReceiptView(base: ResolvedReceiptView, input: ReceiptViewInput): ResolvedReceiptView {
+  const legacyAddress = [input.connection?.tradeAddressLine1, input.connection?.tradeCity].filter(Boolean).join(', ');
+  return {
+    ...base,
+    text: {
+      legalName: normaliseReceiptText(input.supplierName),
+      tradeName: null,
+      address: legacyAddress || null,
+      headerMessage: input.connection?.receiptHeaderMessage || LEGACY_HEADER_MESSAGE,
+      footerMessage: input.connection?.receiptFooterMessage || LEGACY_FOOTER_MESSAGE,
+      customerMobile: input.customerPhone || null,
     },
   };
 }
@@ -270,6 +321,7 @@ export function applyTransmittedSnapshot(
   return {
     ...view,
     text: {
+      legalName: view.text.legalName,
       tradeName: snapshot.trdeNm,
       address: snapshot.adrs,
       headerMessage: snapshot.topMsg,

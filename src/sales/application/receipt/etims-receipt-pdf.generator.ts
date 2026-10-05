@@ -214,8 +214,12 @@ export async function generateEtimsReceiptPdf(
     doc.fillColor('#000');
 
     const nameX = leftX + 44;
-    doc.fontSize(13).font('Helvetica-Bold').text(view.text.tradeName || '—', nameX, 38, { width: 300 });
+    doc.fontSize(13).font('Helvetica-Bold').text(view.text.legalName || data.supplierName || '—', nameX, 38, { width: 300 });
     doc.font('Helvetica').fontSize(9);
+    // Optional trade name (OSCU trdeNm): printed exactly when, and as, it is transmitted.
+    if (view.text.tradeName) {
+      doc.text(`Trading as: ${view.text.tradeName}`, nameX, doc.y, { width: 300 });
+    }
     if (view.text.address) {
       doc.text(view.text.address, nameX, doc.y, { width: 300 });
     }
