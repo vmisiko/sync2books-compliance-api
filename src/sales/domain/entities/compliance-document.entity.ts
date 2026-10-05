@@ -117,5 +117,13 @@ export interface ComplianceDocument {
   idempotencyKey: string;
   createdAt: Date;
   submittedAt: Date | null;
+  /** Receipt text exactly as transmitted (see the ORM column). Absent/null before first submission. */
+  receiptTextSnapshot?: {
+    trdeNm: string | null;
+    adrs: string | null;
+    topMsg: string | null;
+    btmMsg: string | null;
+    custMblNo: string | null;
+  } | null;
   lines: ComplianceLine[];
 }

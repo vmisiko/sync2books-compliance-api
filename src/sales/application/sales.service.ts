@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
@@ -62,6 +63,16 @@ import {
   EVENT_REPO,
   ITEM_REPO,
 } from '../../shared/tokens';
+import { ReceiptSettingsService } from '../../receipt-settings/application/receipt-settings.service';
+import {
+  EMPTY_RECEIPT_SETTINGS,
+  applyTransmittedSnapshot,
+  legacyReceiptView,
+  receiptBlockTextFromView,
+  resolveReceiptView,
+  type ReceiptSettingsData,
+  type ResolvedReceiptView,
+} from '../../receipt-settings/domain/receipt-settings.model';
 import { kraClockParts, splitKraDateTime } from '../../shared/utils/kra-time';
 
 export type SaleOutcomeListener = (
@@ -101,7 +112,42 @@ export class SalesService {
     @InjectRepository(OscuSyncStateOrmEntity)
     private readonly syncStateRepo: Repository<OscuSyncStateOrmEntity>,
     private readonly organizationService: ComplianceOrganizationApplicationService,
+    @Optional()
+    private readonly receiptSettings?: ReceiptSettingsService,
   ) {}
+
+  /**
+   * One resolution of the receipt text/layout for a document, shared by the paper PDF,
+   * the receipt JSON and (via submitDocument) the OSCU `receipt` block. A document that
+   * was already submitted prints exactly the text that was transmitted.
+   */
+  private async resolveReceiptViewFor(
+    document: ComplianceDocument,
+    connection: ComplianceConnection | null,
+    supplierName: string | null,
+    tenantId: string | null,
+    preloaded?: { settings: ReceiptSettingsData; hasLogo: boolean },
+  ): Promise<{ view: ResolvedReceiptView; tenantId: string | null }> {
+    const ctx =
+      preloaded ??
+      (tenantId && this.receiptSettings
+        ? await this.receiptSettings.getForRender(tenantId)
+        : { settings: EMPTY_RECEIPT_SETTINGS, hasLogo: false });
+    const input = {
+      settings: ctx.settings,
+      supplierName,
+      connection,
+      customerPhone: document.customerPhoneNumber,
+      hasLogo: ctx.hasLogo,
+    };
+    const view = resolveReceiptView(input);
+    if (document.receiptTextSnapshot) {
+      return { view: applyTransmittedSnapshot(view, document.receiptTextSnapshot), tenantId };
+    }
+    // Transmitted before settings existed (no snapshot): render exactly as it printed then; never retro-fit.
+    if (document.submittedAt) return { view: legacyReceiptView(view, input), tenantId };
+    return { view, tenantId };
+  }
 
   async createDocument(
     params: CreateDocumentInput,
@@ -241,6 +287,24 @@ export class SalesService {
       this.eventRepo,
       this.etimsAdapter,
       this.syncStateRepo,
+      async (doc, connection) => {
+        const tenant = await this.organizationService.getTenantBySync2booksCompanyId(
+          doc.merchantId,
+        );
+        // Resolved from settings only (never from the snapshot): this IS the value being snapshotted.
+        const ctx =
+          tenant?.id && this.receiptSettings
+            ? await this.receiptSettings.getForRender(tenant.id)
+            : { settings: EMPTY_RECEIPT_SETTINGS, hasLogo: false };
+        return receiptBlockTextFromView(
+          resolveReceiptView({
+            settings: ctx.settings,
+            supplierName: tenant?.displayName ?? null,
+            connection,
+            customerPhone: doc.customerPhoneNumber,
+          }),
+        );
+      },
     );
     await this.announceOutcome(documentId);
     return result;
@@ -509,9 +573,16 @@ export class SalesService {
       document,
       connection,
     );
+    const { view: receiptView } = await this.resolveReceiptViewFor(
+      document,
+      connection,
+      tenant?.displayName ?? null,
+      tenant?.id ?? null,
+    );
     const scu = buildScuFields({
       document,
       connection,
+      receiptView,
       kraData,
       receiptNumber,
       rcptSign,
@@ -552,6 +623,7 @@ export class SalesService {
       tradeAddress: scu.tradeAddress,
       receiptHeaderMessage: scu.receiptHeaderMessage,
       receiptFooterMessage: scu.receiptFooterMessage,
+      receiptView: scu.receiptView,
       originalSaleId: document.originalSaleId,
       sourceInvoiceId: document.sourceInvoiceId,
       syncErrorMessage,
@@ -608,7 +680,7 @@ export class SalesService {
           taxTypeCode: taxTyCd,
           discountRate: 0,
           discountAmount: 0,
-          etimsItemCode: null,
+          etimsItemCode: l.etimsItemCodeSnapshot ?? null,
           isStockable: item
             ? deriveItemType(item.productTypeCode) === ItemType.GOODS
             : null,
@@ -691,7 +763,20 @@ export class SalesService {
       connection,
     );
 
+    const { view: receiptView, tenantId } = await this.resolveReceiptViewFor(
+      document,
+      connection,
+      tenant?.displayName ?? null,
+      tenant?.id ?? null,
+    );
+    const logo =
+      receiptView.show.logo && tenantId && this.receiptSettings
+        ? await this.receiptSettings.findLogo(tenantId)
+        : null;
+
     return generateEtimsReceiptPdf({
+      receiptView,
+      logo,
       document,
       totRcptNo,
       sdcDateTime,
@@ -808,11 +893,40 @@ export class SalesService {
       return name;
     };
 
+    // Receipt settings per merchant, once per page.
+    const settingsByMerchant = new Map<
+      string,
+      Promise<{ settings: ReceiptSettingsData; hasLogo: boolean }>
+    >();
+    const getSettings = (merchantId: string) => {
+      let p = settingsByMerchant.get(merchantId);
+      if (!p) {
+        p = (async () => {
+          const tenant =
+            await this.organizationService.getTenantBySync2booksCompanyId(
+              merchantId,
+            );
+          return tenant?.id && this.receiptSettings
+            ? this.receiptSettings.getForRender(tenant.id)
+            : { settings: EMPTY_RECEIPT_SETTINGS, hasLogo: false };
+        })();
+        settingsByMerchant.set(merchantId, p);
+      }
+      return p;
+    };
+
     const data = await Promise.all(
       pageDocs.map(async (d) => {
         const kra = kraByDocId.get(d.id) ?? null;
         const conn = await getConn(d.merchantId, d.branchId);
         const supplierName = await getSupplierName(d.merchantId);
+        const { view: receiptView } = await this.resolveReceiptViewFor(
+          d,
+          conn,
+          supplierName,
+          null,
+          await getSettings(d.merchantId),
+        );
         // Only credit notes carry an originalSaleId, so this is one lookup per
         // credit-note row. Without it the dashboard's receipt dialog had no CU
         // number for "ORIGINAL CU INVOICE NO.#".
@@ -827,6 +941,7 @@ export class SalesService {
           itemsById,
           supplierName,
           originalCuInvoiceNo,
+          receiptView,
         });
       }),
     );
@@ -966,6 +1081,8 @@ function round2(n: number): number {
 function buildScuFields(input: {
   document: ComplianceDocument;
   connection: ComplianceConnection | null;
+  /** Resolved receipt text/layout; absent -> today's connection-only behaviour. */
+  receiptView?: ResolvedReceiptView;
   kraData: Record<string, unknown> | null;
   receiptNumber: number | null;
   rcptSign: string;
@@ -987,8 +1104,17 @@ function buildScuFields(input: {
   tradeAddress: string | null;
   receiptHeaderMessage: string | null;
   receiptFooterMessage: string | null;
+  receiptView: import('../controller/dto/sales-report.dto').ReceiptViewDto;
 } {
   const { document, connection, kraData } = input;
+  const receiptView =
+    input.receiptView ??
+    resolveReceiptView({
+      settings: null,
+      supplierName: null,
+      connection,
+      customerPhone: document.customerPhoneNumber,
+    });
   const isCreditNote =
     document.documentType === DocumentType.CREDIT_NOTE ||
     document.documentType === DocumentType.REVERSE_INVOICE;
@@ -1006,9 +1132,7 @@ function buildScuFields(input: {
     document.sdcDateTime ||
     null;
   const { date: scuDate, time: scuTime } = formatScuDateTime(sdcDateTime);
-  const tradeAddress = [connection?.tradeAddressLine1, connection?.tradeCity]
-    .filter(Boolean)
-    .join(', ') || null;
+  const tradeAddress = receiptView.text.address;
 
   return {
     scuId,
@@ -1023,8 +1147,15 @@ function buildScuFields(input: {
     originalCuInvoiceNo: input.originalCuInvoiceNo,
     itemsNumber: document.lines.length,
     tradeAddress,
-    receiptHeaderMessage: connection?.receiptHeaderMessage ?? null,
-    receiptFooterMessage: connection?.receiptFooterMessage ?? null,
+    receiptHeaderMessage: receiptView.text.headerMessage,
+    receiptFooterMessage: receiptView.text.footerMessage,
+    receiptView: {
+      tradeName: receiptView.text.tradeName,
+      customerMobile: receiptView.text.customerMobile,
+      showLogo: receiptView.show.logo,
+      showItemCodes: receiptView.show.itemCodes,
+      showCustomerPhone: receiptView.show.customerPhone,
+    },
   };
 }
 
@@ -1186,6 +1317,7 @@ function buildNormalizedSaleReport(input: {
   itemsById: Map<string, ComplianceItem>;
   supplierName: string | null;
   originalCuInvoiceNo?: string | null;
+  receiptView?: ResolvedReceiptView;
 }): import('../controller/dto/sales-report.dto').SaleReportDto {
   const { document, kraRaw, connection, itemsById, supplierName } = input;
   const kraData = (kraRaw?.data as Record<string, unknown> | null) ?? null;
@@ -1210,6 +1342,7 @@ function buildNormalizedSaleReport(input: {
   const scu = buildScuFields({
     document,
     connection,
+    receiptView: input.receiptView,
     kraData,
     receiptNumber,
     rcptSign,
@@ -1250,6 +1383,7 @@ function buildNormalizedSaleReport(input: {
     tradeAddress: scu.tradeAddress,
     receiptHeaderMessage: scu.receiptHeaderMessage,
     receiptFooterMessage: scu.receiptFooterMessage,
+    receiptView: scu.receiptView,
     originalSaleId: document.originalSaleId,
     sourceInvoiceId: document.sourceInvoiceId,
     // Not batched for the list view (would add an events-table query per row) --
@@ -1311,7 +1445,7 @@ function buildNormalizedSaleReport(input: {
         taxTypeCode: taxTyCd,
         discountRate: 0,
         discountAmount: 0,
-        etimsItemCode: null,
+        etimsItemCode: l.etimsItemCodeSnapshot ?? null,
         isStockable: item
           ? deriveItemType(item.productTypeCode) === ItemType.GOODS
           : null,

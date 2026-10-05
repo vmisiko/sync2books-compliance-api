@@ -61,6 +61,18 @@ export interface EtimsInvoicePayload {
   salesTypeCode?: string;
   /** Root-level `prchrAcptcYn` (default `N`). */
   purchaseAcceptanceYn?: 'Y' | 'N';
+  /**
+   * Resolved `receipt` block text (OSCU trdeNm/adrs/topMsg/btmMsg/custMblNo), already
+   * normalised and truncated by `resolveReceiptView` -- the SAME values the paper
+   * receipt prints. Absent -> null in the transmission (the pre-settings behaviour).
+   */
+  receiptText?: {
+    trdeNm: string | null;
+    adrs: string | null;
+    topMsg: string | null;
+    btmMsg: string | null;
+    custMblNo: string | null;
+  };
   /** Lines */
   lines: EtimsInvoiceLine[];
 }

@@ -146,12 +146,14 @@ export class OscuSalesRequestBuilder {
       modrNm: 'sync2books',
       receipt: {
         custTin: params.payload.customerPin ?? null,
-        custMblNo: null,
+        // Same resolved values the paper receipt prints (receipt-settings.model.ts) --
+        // KRA compares the transmitted receipt block against the physical invoice.
+        custMblNo: params.payload.receiptText?.custMblNo ?? null,
         rcptPbctDt: yyyyMMddhhmmss,
-        trdeNm: null,
-        adrs: null,
-        topMsg: null,
-        btmMsg: null,
+        trdeNm: params.payload.receiptText?.trdeNm ?? null,
+        adrs: params.payload.receiptText?.adrs ?? null,
+        topMsg: params.payload.receiptText?.topMsg ?? null,
+        btmMsg: params.payload.receiptText?.btmMsg ?? null,
         prchrAcptcYn: 'N',
       },
       itemList,

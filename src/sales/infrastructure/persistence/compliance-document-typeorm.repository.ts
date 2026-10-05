@@ -80,6 +80,7 @@ function docOrmToDomain(
     idempotencyKey: row.idempotencyKey,
     createdAt: row.createdAt,
     submittedAt: row.submittedAt,
+    receiptTextSnapshot: row.receiptTextSnapshot ?? null,
     lines: lines.map(lineOrmToDomain),
   };
 }
@@ -130,6 +131,7 @@ function docDomainToOrm(
   e.idempotencyKey = document.idempotencyKey;
   e.createdAt = document.createdAt;
   e.submittedAt = document.submittedAt;
+  e.receiptTextSnapshot = document.receiptTextSnapshot ?? null;
 
   return e;
 }
