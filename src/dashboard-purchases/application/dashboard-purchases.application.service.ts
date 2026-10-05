@@ -634,6 +634,7 @@ export class DashboardPurchasesApplicationService {
   async syncToErp(
     complianceTenantId: string,
     ids: string[],
+    options: { expenseAccountId?: string } = {},
   ): Promise<{
     data: PurchaseInvoiceDto[];
     total: number;
@@ -654,10 +655,25 @@ export class DashboardPurchasesApplicationService {
       await this.repo.save(row);
     };
 
-    const mapping = await this.billMapping.resolveForSync(
+    const resolved = await this.billMapping.resolveForSync(
       complianceTenantId,
       merchantId,
     );
+
+    // A per-sync account replaces the saved default for this run only. It is
+    // checked against the ERP's live accounts before anything is touched, so a
+    // bad id fails the whole request instead of half-syncing a batch. With an
+    // account chosen here the saved default is not needed at all.
+    const mapping =
+      resolved && options.expenseAccountId
+        ? {
+            ...resolved,
+            expenseAccount: await this.billMapping.resolveAccountOverride(
+              resolved,
+              options.expenseAccountId,
+            ),
+          }
+        : resolved;
 
     if (!mapping) {
       for (const row of rows) {

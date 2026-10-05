@@ -29,6 +29,7 @@ import {
   SavePurchaseBillMappingDto,
   PullPurchasesDto,
   PurchaseIdsDto,
+  SyncPurchasesToErpDto,
   RegisterPurchaseLineItemDto,
 } from './dto/purchase.dto';
 
@@ -225,8 +226,10 @@ export class DashboardPurchasesController {
   @ApiResponse({ status: 400, description: 'Bad request' })
   async syncToErp(
     @ActiveTenant() tenantId: string,
-    @Body() body: PurchaseIdsDto,
+    @Body() body: SyncPurchasesToErpDto,
   ) {
-    return this.purchases.syncToErp(tenantId, body.ids);
+    return this.purchases.syncToErp(tenantId, body.ids, {
+      expenseAccountId: body.expenseAccountId,
+    });
   }
 }

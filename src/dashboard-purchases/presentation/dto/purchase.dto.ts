@@ -20,6 +20,14 @@ export class PurchaseIdsDto {
   ids!: string[];
 }
 
+export class SyncPurchasesToErpDto extends PurchaseIdsDto {
+  @ApiPropertyOptional({
+    description:
+      "ERP account id to post these bills to, for this sync only. Omit to use the default from Mapping Center -> Purchase Bills. It must be one of the connected ERP's own accounts; it does not change the saved default.",
+  })
+  expenseAccountId?: string;
+}
+
 export class LinkSupplierDto {
   @ApiProperty({
     description: 'dashboard_suppliers.id to link this purchase invoice to',
