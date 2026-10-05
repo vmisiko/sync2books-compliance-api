@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { DashboardPurchasesApplicationService } from './dashboard-purchases.application.service';
 import type { PurchaseInvoiceOrmEntity } from '../infrastructure/persistence/purchase-invoice.orm-entity';
 import type { ComplianceOrganizationApplicationService } from '../../compliance-organization/application/compliance-organization.application.service';
@@ -97,6 +98,7 @@ type Setup = {
   save: jest.Mock;
   ensureInErp: jest.Mock;
   resolveForSync: jest.Mock;
+  resolveAccountOverride: jest.Mock;
   createBill: jest.Mock;
 };
 
@@ -136,7 +138,10 @@ function makeService(setup: Partial<Setup> & { rows: PurchaseInvoiceOrmEntity[] 
     });
   const mainApiPull = { createBill };
   const resolveForSync = setup.resolveForSync ?? jest.fn().mockResolvedValue(MAPPED);
-  const billMapping = { resolveForSync };
+  const resolveAccountOverride =
+    setup.resolveAccountOverride ??
+    jest.fn().mockResolvedValue({ erpId: '99', erpName: 'Office Supplies' });
+  const billMapping = { resolveForSync, resolveAccountOverride };
 
   const service = new DashboardPurchasesApplicationService(
     repo as any,
@@ -151,7 +156,7 @@ function makeService(setup: Partial<Setup> & { rows: PurchaseInvoiceOrmEntity[] 
     billMapping as unknown as PurchaseBillMappingService,
   );
 
-  return { service, repo, save, ensureInErp, createBill };
+  return { service, resolveAccountOverride, repo, save, ensureInErp, createBill };
 }
 
 describe('DashboardPurchasesApplicationService.syncToErp', () => {
@@ -279,6 +284,84 @@ describe('DashboardPurchasesApplicationService.syncToErp', () => {
 
     expect(createBill).not.toHaveBeenCalled();
     expect(row.erpSyncError).toMatch(/Mapping Center → Purchase Bills/);
+  });
+
+  describe('choosing the account for this sync', () => {
+    it('posts the bill to the chosen account instead of the saved default', async () => {
+      const row = makePurchaseRow();
+      const { service, createBill, resolveAccountOverride } = makeService({ rows: [row] });
+
+      await service.syncToErp(TENANT_ID, [row.id], { expenseAccountId: '99' });
+
+      expect(resolveAccountOverride).toHaveBeenCalledWith(expect.objectContaining({ connectionId: 'conn-1' }), '99');
+      const bill = createBill.mock.calls[0][2];
+      expect(bill.lineItems[0].accountRef).toEqual({ id: '99', name: 'Office Supplies' });
+      expect(row.erpSyncStatus).toBe('synced');
+    });
+
+    it('works when no default account is saved, which is what a user stuck on that error needs', async () => {
+      const row = makePurchaseRow();
+      const resolveForSync = jest.fn().mockResolvedValue({ ...MAPPED, expenseAccount: null });
+      const { service, createBill } = makeService({ rows: [row], resolveForSync });
+
+      await service.syncToErp(TENANT_ID, [row.id], { expenseAccountId: '99' });
+
+      expect(createBill).toHaveBeenCalledTimes(1);
+      expect(row.erpSyncStatus).toBe('synced');
+    });
+
+    it('uses the saved default when no account is chosen, and never looks one up', async () => {
+      const row = makePurchaseRow();
+      const { service, createBill, resolveAccountOverride } = makeService({ rows: [row] });
+
+      await service.syncToErp(TENANT_ID, [row.id]);
+
+      expect(resolveAccountOverride).not.toHaveBeenCalled();
+      expect(createBill.mock.calls[0][2].lineItems[0].accountRef).toEqual({
+        id: '80',
+        name: 'Cost of Goods Sold',
+      });
+    });
+
+    it('applies the chosen account to every purchase in the batch', async () => {
+      const a = makePurchaseRow({ id: 'p-a' });
+      const b = makePurchaseRow({ id: 'p-b', spplrInvcNo: '2' });
+      const { service, createBill } = makeService({ rows: [a, b] });
+
+      await service.syncToErp(TENANT_ID, [a.id, b.id], { expenseAccountId: '99' });
+
+      expect(createBill).toHaveBeenCalledTimes(2);
+      for (const call of createBill.mock.calls) {
+        expect(call[2].lineItems[0].accountRef.id).toBe('99');
+      }
+    });
+
+    it('refuses an account the ERP does not have, before touching any purchase', async () => {
+      const row = makePurchaseRow();
+      const resolveAccountOverride = jest
+        .fn()
+        .mockRejectedValue(new BadRequestException('Account 404 was not found in your accounting system.'));
+      const { service, createBill } = makeService({ rows: [row], resolveAccountOverride });
+
+      await expect(service.syncToErp(TENANT_ID, [row.id], { expenseAccountId: '404' })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+
+      expect(createBill).not.toHaveBeenCalled();
+      expect(row.erpSyncStatus).toBe('not_synced');
+      expect(row.erpSyncError).toBeNull();
+    });
+
+    it('ignores the chosen account when no accounting system is connected, with the usual message', async () => {
+      const row = makePurchaseRow();
+      const resolveForSync = jest.fn().mockResolvedValue(null);
+      const { service, resolveAccountOverride } = makeService({ rows: [row], resolveForSync });
+
+      await service.syncToErp(TENANT_ID, [row.id], { expenseAccountId: '99' });
+
+      expect(resolveAccountOverride).not.toHaveBeenCalled();
+      expect(row.erpSyncError).toMatch(/No connected accounting system/);
+    });
   });
 
   it('names every KRA tax type on the bill that has no ERP tax mapped', async () => {

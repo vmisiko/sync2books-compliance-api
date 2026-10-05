@@ -122,4 +122,34 @@ describe('PurchaseBillMappingService', () => {
     expect(await service.resolveForSync(TENANT_ID, MERCHANT_ID)).toBeNull();
     expect(mainApiPull.getBillMappingOptions).not.toHaveBeenCalled();
   });
+  describe('resolveAccountOverride', () => {
+    const connection = { connectionId: 'conn-1', mainApiApiKey: 'key-1' };
+
+    it('returns the ERP\'s own name for an account it has, not anything from the caller', async () => {
+      const { service, mainApiPull } = makeService();
+
+      await expect(service.resolveAccountOverride(connection, '80')).resolves.toEqual({
+        erpId: '80',
+        erpName: 'Cost of Goods Sold',
+      });
+      expect(mainApiPull.getBillMappingOptions).toHaveBeenCalledWith('key-1', 'conn-1');
+    });
+
+    it('accepts any account the ERP lists, expense or not, since the user chose it on purpose', async () => {
+      const { service } = makeService();
+      await expect(service.resolveAccountOverride(connection, '1')).resolves.toMatchObject({ erpName: 'Services' });
+    });
+
+    it('refuses an id the ERP does not have', async () => {
+      const { service } = makeService();
+      await expect(service.resolveAccountOverride(connection, '999')).rejects.toThrow(BadRequestException);
+      await expect(service.resolveAccountOverride(connection, '999')).rejects.toThrow(/was not found/);
+    });
+
+    it('does not change the saved default', async () => {
+      const { service, rows } = makeService();
+      await service.resolveAccountOverride(connection, '80');
+      expect(rows).toHaveLength(0);
+    });
+  });
 });

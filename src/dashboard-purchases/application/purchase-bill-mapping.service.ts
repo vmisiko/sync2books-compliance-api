@@ -197,6 +197,28 @@ export class PurchaseBillMappingService {
     return this.get(complianceTenantId);
   }
 
+  /**
+   * Turns an account id chosen at sync time into the ERP's own name for it,
+   * refusing one the connected ERP does not have. Same rule as saving the
+   * default: ids and names come from the ERP's live list, never from the caller.
+   */
+  async resolveAccountOverride(
+    mapping: Pick<ResolvedPurchaseBillMapping, 'connectionId' | 'mainApiApiKey'>,
+    accountId: string,
+  ): Promise<ErpRef> {
+    const options = await this.mainApiPull.getBillMappingOptions(
+      mapping.mainApiApiKey,
+      mapping.connectionId,
+    );
+    const account = options.accounts.find((a) => a.id === accountId);
+    if (!account) {
+      throw new BadRequestException(
+        `Account ${accountId} was not found in your accounting system.`,
+      );
+    }
+    return { erpId: account.id, erpName: account.name };
+  }
+
   /** What syncToErp() applies — null when no supported ERP is connected. */
   async resolveForSync(
     complianceTenantId: string,
