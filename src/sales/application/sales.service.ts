@@ -1,8 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -33,6 +35,8 @@ import {
   type RetrySalesResult,
 } from './use-cases/retry-sales.usecase';
 import type { IEtimsAdapter } from '../../regulatory/oscu/ports/etims-adapter.port';
+import { getSaleEditability } from '../domain/rules/sale-editability';
+import { runPinRules } from '../domain/rules/pin-rule.engine';
 import { canTransition } from '../domain/state-machine/compliance-state-machine';
 import { ComplianceStatus } from '../../shared/domain/enums/compliance-status.enum';
 import type { ComplianceDocument } from '../domain/entities/compliance-document.entity';
@@ -74,6 +78,15 @@ import {
   type ResolvedReceiptView,
 } from '../../receipt-settings/domain/receipt-settings.model';
 import { kraClockParts, splitKraDateTime } from '../../shared/utils/kra-time';
+
+export interface UpdateSaleDetailsInput {
+  customerPin?: string | null;
+  customerName?: string | null;
+  customerPhoneNumber?: string | null;
+  customerEmail?: string | null;
+  saleDate?: string;
+  paymentTypeCode?: string;
+}
 
 export type SaleOutcomeListener = (
   document: ComplianceDocument,
@@ -387,6 +400,72 @@ export class SalesService {
   }
 
   /**
+   * Edit the header details (customer, payment type, date) of a sale that has
+   * not been submitted to KRA yet. Refuses anything fiscalised or in flight --
+   * see getSaleEditability for the full rule. The customer PIN is validated
+   * here with the same rule engine submit uses, so a malformed PIN is rejected
+   * at edit time (400 with `errors`) and nothing is saved.
+   *
+   * Callers must already have established the document belongs to the caller
+   * (SaleOwnershipGuard); `merchantId` is re-checked here as defence in depth.
+   */
+  async updateSaleDetails(
+    documentId: string,
+    merchantId: string,
+    patch: UpdateSaleDetailsInput,
+  ): Promise<ComplianceDocument> {
+    const document = await this.findDocumentForMerchant(documentId, merchantId);
+    if (!document) throw new NotFoundException('Sale not found');
+
+    const editability = getSaleEditability(document);
+    if (!editability.editable) {
+      throw new ConflictException({
+        message: editability.reason,
+        status: document.complianceStatus,
+      });
+    }
+
+    const clean = (v: string | null | undefined): string | null => {
+      if (v === undefined || v === null) return null;
+      const t = v.trim();
+      return t === '' ? null : t;
+    };
+    const next: ComplianceDocument = { ...document };
+    if (patch.customerPin !== undefined) next.customerPin = clean(patch.customerPin)?.toUpperCase() ?? null;
+    if (patch.customerName !== undefined) next.customerName = clean(patch.customerName);
+    if (patch.customerPhoneNumber !== undefined) next.customerPhoneNumber = clean(patch.customerPhoneNumber);
+    if (patch.customerEmail !== undefined) next.customerEmail = clean(patch.customerEmail);
+    if (patch.saleDate !== undefined) {
+      const d = clean(patch.saleDate);
+      if (!d) throw new BadRequestException({ message: 'saleDate cannot be empty' });
+      next.saleDate = d;
+    }
+    if (patch.paymentTypeCode !== undefined) {
+      const c = clean(patch.paymentTypeCode);
+      if (!c) throw new BadRequestException({ message: 'paymentTypeCode cannot be empty' });
+      next.paymentTypeCode = c;
+    }
+
+    const pin = runPinRules({ customerPin: next.customerPin });
+    if (!pin.isValid) {
+      throw new BadRequestException({
+        message: 'Sale validation failed',
+        errors: pin.errors,
+      });
+    }
+
+    // No new event type: ComplianceEventType is a closed union shared with the
+    // audit trail; the edit is logged instead.
+    const saved = await this.documentRepo.save(next);
+    this.logger.log(
+      `sale ${documentId} (merchant ${merchantId}) edited: ${Object.keys(patch)
+        .filter((k) => (patch as Record<string, unknown>)[k] !== undefined)
+        .join(',')}`,
+    );
+    return saved;
+  }
+
+  /**
    * Shared "submit a freshly-created document" pipeline: applies inventory
    * movements, then validate → prepare → submit. This is exactly the
    * sequence that `ApiSalesController.createSale` /
@@ -634,6 +713,7 @@ export class SalesService {
       supplierName: tenant?.displayName ?? null,
       supplierPin: connection?.kraPin ?? null,
       sourceSystem: document.sourceSystem,
+      editable: getSaleEditability(document).editable,
       paymentTypeCode: document.paymentTypeCode,
       paymentTypeDescription: paymentTypeDescription(document.paymentTypeCode),
       salesTaxSummary: {
@@ -1400,6 +1480,7 @@ function buildNormalizedSaleReport(input: {
     supplierName,
     supplierPin: connection?.kraPin ?? null,
     sourceSystem: document.sourceSystem,
+    editable: getSaleEditability(document).editable,
     paymentTypeCode: document.paymentTypeCode,
     paymentTypeDescription: paymentTypeDescription(document.paymentTypeCode),
     salesTaxSummary: {

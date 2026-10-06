@@ -7,6 +7,7 @@ import {
   HttpStatus,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -22,6 +23,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { SalesService } from '../application/sales.service';
+import { UpdateSaleDto } from './dto/update-sale.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { DocumentType } from '../../shared/domain/enums/document-type.enum';
 import { InvoiceType } from '../../shared/domain/enums/invoice-type.enum';
@@ -414,6 +416,41 @@ export class DashboardSalesController {
   async getSaleReport(
     @Param('id') id: string,
   ): Promise<SalesReportDetailResponseDto> {
+    const data = await this.salesService.getNormalizedSaleReport(id);
+    return { data };
+  }
+
+  @Patch(':id')
+  @OwnedSaleRoute()
+  @ApiOperation({
+    summary:
+      'Edit the customer/payment/date details of a manual sale that has not been submitted to KRA yet. Submitted, accepted, in-flight and ERP-sourced sales are refused (409).',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Updated sale report detail',
+    type: SalesReportDetailResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'Validation failed (e.g. PIN_MALFORMED)' })
+  async updateSale(
+    @Param('id') id: string,
+    @Body() body: UpdateSaleDto,
+  ): Promise<SalesReportDetailResponseDto> {
+    // SaleOwnershipGuard has proven the document belongs to the caller's
+    // organization; the merchant it carries is the one the service re-checks.
+    const existing = await this.salesService.getDocument(id);
+    await this.salesService.updateSaleDetails(
+      id,
+      existing.document.merchantId,
+      {
+        customerPin: body.customerTin,
+        customerName: body.customerName,
+        customerPhoneNumber: body.customerPhoneNumber,
+        customerEmail: body.customerEmail,
+        saleDate: body.saleDate,
+        paymentTypeCode: body.paymentTypeCode,
+      },
+    );
     const data = await this.salesService.getNormalizedSaleReport(id);
     return { data };
   }

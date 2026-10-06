@@ -270,6 +270,12 @@ export class SaleReportDto {
   @ApiProperty({ enum: SourceSystem, description: 'ERP provenance of this document, e.g. QUICKBOOKS/ODOO/API/MANUAL' })
   sourceSystem!: SourceSystem;
 
+  @ApiProperty({
+    description:
+      'True while the sale may still be edited (PATCH /sales/:id): a manually-entered sale that has not been submitted to KRA. Always false for ERP-sourced sales, credit notes and anything submitted/accepted.',
+  })
+  editable!: boolean;
+
   @ApiProperty({ nullable: true, description: 'OSCU pmtTyCd, e.g. "01"' })
   paymentTypeCode!: string | null;
 
