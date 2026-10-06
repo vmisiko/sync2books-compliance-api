@@ -264,3 +264,77 @@ describe('SalesService.getNormalizedSaleReport etimsUrl branch segment', () => {
     expect(report.etimsUrl).toBeNull();
   });
 });
+
+describe('SalesService.updateSaleDetails', () => {
+  function build(document: ComplianceDocument | null) {
+    const save = jest.fn(async (d: ComplianceDocument) => d);
+    const documentRepo = {
+      save,
+      findById: jest.fn().mockResolvedValue(document),
+    } as unknown as IComplianceDocumentRepository;
+    const service = new SalesService(
+      documentRepo,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    return { service, save };
+  }
+  const manual = (over: Partial<ComplianceDocument> = {}): ComplianceDocument => ({
+    ...baseDocument(TaxCategory.VAT_STANDARD, 'B'),
+    sourceSystem: SourceSystem.MANUAL,
+    complianceStatus: ComplianceStatus.DRAFT,
+    customerPin: 'A009818365SS',
+    ...over,
+  });
+
+  it('rejects a malformed PIN at edit time and saves nothing', async () => {
+    const { service, save } = build(manual());
+    await expect(
+      service.updateSaleDetails('doc-1', 'merchant-1', { customerPin: 'A009818365SS' }),
+    ).rejects.toMatchObject({
+      response: { errors: [expect.objectContaining({ code: 'PIN_MALFORMED' })] },
+    });
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('fixes the PIN on a ready-to-submit manual sale (trimmed, upper-cased)', async () => {
+    const { service, save } = build(manual({ complianceStatus: ComplianceStatus.READY_FOR_SUBMISSION }));
+    const out = await service.updateSaleDetails('doc-1', 'merchant-1', { customerPin: ' a009818365s ' });
+    expect(out.customerPin).toBe('A009818365S');
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses an ACCEPTED sale (immutable) with 409', async () => {
+    const { service, save } = build(manual({ complianceStatus: ComplianceStatus.ACCEPTED }));
+    await expect(
+      service.updateSaleDetails('doc-1', 'merchant-1', { customerName: 'X' }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('refuses an ERP-sourced sale', async () => {
+    const { service } = build(manual({ sourceSystem: SourceSystem.QUICKBOOKS, sourceInvoiceId: 'inv-1' }));
+    await expect(
+      service.updateSaleDetails('doc-1', 'merchant-1', { customerName: 'X' }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("treats another merchant's sale as not found", async () => {
+    const { service, save } = build(manual());
+    await expect(
+      service.updateSaleDetails('doc-1', 'other-merchant', { customerName: 'X' }),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('allows clearing the PIN (B2C)', async () => {
+    const { service } = build(manual());
+    const out = await service.updateSaleDetails('doc-1', 'merchant-1', { customerPin: '' });
+    expect(out.customerPin).toBeNull();
+  });
+});

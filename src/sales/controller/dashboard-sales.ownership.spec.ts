@@ -63,6 +63,8 @@ describe('DashboardSalesController -- cross-organization access', () => {
       createDocument: jest.fn(),
       submitDraftDocument: jest.fn(),
       retrySales: jest.fn(async () => ({ results: [] })),
+      getDocument: jest.fn(async (id: string) => ({ document: documents[id] })),
+      updateSaleDetails: jest.fn(async () => ({})),
     };
     mailer = { send: jest.fn(async () => ({ sent: true })) };
 
@@ -148,6 +150,14 @@ describe('DashboardSalesController -- cross-organization access', () => {
             .set(as(org)),
       ],
       [
+        'PATCH :id',
+        (id, org) =>
+          http()
+            .patch(`/dashboard-api/sales/${encode(id)}`)
+            .set(as(org))
+            .send({ customerTin: 'A009818365S' }),
+      ],
+      [
         'POST :id/email',
         (id, org) =>
           http()
@@ -170,6 +180,7 @@ describe('DashboardSalesController -- cross-organization access', () => {
         const res = await call(id, org);
         expect(res.status).toBe(404);
         expect(sales.getNormalizedSaleReport).not.toHaveBeenCalled();
+        expect(sales.updateSaleDetails).not.toHaveBeenCalled();
         expect(sales.getEtimsReceiptPdf).not.toHaveBeenCalled();
         expect(mailer.send).not.toHaveBeenCalled();
       });
