@@ -8,6 +8,9 @@ export interface EtimsInvoiceLine {
   description: string;
   quantity: number;
   unitPrice: number;
+  /** Line discount, tax-inclusive (OSCU dcRt / dcAmt). */
+  discountRate?: number;
+  discountAmount?: number;
   taxAmount: number;
   classificationCode: string;
   /** OSCU qtyUnitCd */

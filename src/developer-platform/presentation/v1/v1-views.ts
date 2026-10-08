@@ -46,6 +46,8 @@ export function toV1Sale(report: SaleReportDto) {
       description: line.itemDescription,
       quantity: line.quantity,
       unitPrice: line.unitPrice,
+      discountRate: line.discountRate,
+      discountAmount: line.discountAmount,
       total: line.totalAmount,
       taxableAmount: line.taxableAmount,
       taxAmount: line.taxAmount,

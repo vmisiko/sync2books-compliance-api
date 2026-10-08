@@ -39,6 +39,12 @@ export class ComplianceLineOrmEntity {
   @Column('float')
   taxAmount!: number;
 
+  @Column('float', { default: 0 })
+  discountRate!: number;
+
+  @Column('float', { default: 0 })
+  discountAmount!: number;
+
   @Column('varchar')
   classificationCodeSnapshot!: string;
 

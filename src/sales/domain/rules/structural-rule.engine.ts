@@ -65,7 +65,8 @@ export function runStructuralRules(
 
     // Subtotal = sum(line subtotals)
     const computedSubtotal = document.lines.reduce(
-      (sum, line) => sum + line.quantity * line.unitPrice,
+      (sum, line) =>
+        sum + line.quantity * line.unitPrice - (line.discountAmount ?? 0),
       0,
     );
     if (Math.abs(computedSubtotal - document.subtotalAmount) > tolerance) {

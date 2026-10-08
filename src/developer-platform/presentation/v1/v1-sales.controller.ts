@@ -1,3 +1,4 @@
+import { resolveLineDiscount } from '../../../shared/utils/line-discount';
 import {
   BadRequestException,
   Body,
@@ -38,6 +39,7 @@ import {
   readPageSize,
   requiredArray,
   requiredDate,
+  optionalNumber,
   requiredNumber,
   requiredString,
   withIndex,
@@ -91,6 +93,9 @@ export class V1SalesController {
           itemId: requiredString(line, 'itemId'),
           quantity: requiredNumber(line, 'quantity', { exclusiveMin: 0 }),
           unitPrice: requiredNumber(line, 'unitPrice', { min: 0 }),
+          // Optional line discount, tax-inclusive: an amount, or a percent of qty x unitPrice.
+          discountRate: optionalNumber(line, 'discountRate', { min: 0, max: 100 }),
+          discountAmount: optionalNumber(line, 'discountAmount', { min: 0 }),
           description: optionalString(line, 'description', { max: 200 }),
         };
       }),
@@ -143,7 +148,10 @@ export class V1SalesController {
         // caller-chosen tax rate on a fiscal document.
         taxCategory: item.taxCategory,
         taxAmount: 0,
-        total: round2(l.quantity * l.unitPrice),
+        ...(() => {
+          const d = resolveLineDiscount(l.quantity, l.unitPrice, l.discountRate, l.discountAmount);
+          return { discountRate: d.rate, discountAmount: d.amount, total: d.net };
+        })(),
       };
     });
     const totalAmount = round2(priced.reduce((s, l) => s + l.total, 0));
@@ -418,7 +426,9 @@ export class V1SalesController {
       unitPrice: l.unitPrice,
       taxCategory: l.taxCategory,
       taxAmount: Math.abs(l.taxAmount),
-      total: round2(Math.abs(l.quantity) * l.unitPrice),
+      discountRate: l.discountRate,
+      discountAmount: l.discountAmount,
+      total: resolveLineDiscount(l.quantity, l.unitPrice, l.discountRate, l.discountAmount).net,
     }));
     const subtotalAmount = round2(priced.reduce((s, l) => s + l.total, 0));
     const totalTax = round2(priced.reduce((s, l) => s + l.taxAmount, 0));

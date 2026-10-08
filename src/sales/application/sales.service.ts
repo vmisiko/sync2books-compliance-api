@@ -1,3 +1,4 @@
+import { resolveLineDiscount } from '../../shared/utils/line-discount';
 import {
   BadRequestException,
   ConflictException,
@@ -740,7 +741,8 @@ export class SalesService {
       itemList: document.lines.map((l) => {
         // Same split as the OSCU request builder, so the receipt shows exactly
         // what KRA recorded: qty x unitPrice is tax-inclusive, VAT comes out of it.
-        const totAmt = round2(l.quantity * l.unitPrice);
+        const dc = resolveLineDiscount(l.quantity, l.unitPrice, l.discountRate, l.discountAmount);
+        const totAmt = dc.net;
         const { taxblAmt: splyAmt, taxAmt } = splitTaxInclusiveAmount(
           totAmt,
           resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory),
@@ -758,8 +760,8 @@ export class SalesService {
           taxAmount: sign(taxAmt),
           taxRate,
           taxTypeCode: taxTyCd,
-          discountRate: 0,
-          discountAmount: 0,
+          discountRate: dc.rate,
+          discountAmount: sign(dc.amount),
           etimsItemCode: l.etimsItemCodeSnapshot ?? null,
           isStockable: item
             ? deriveItemType(item.productTypeCode) === ItemType.GOODS
@@ -1344,7 +1346,7 @@ function computeTaxBuckets(document: ComplianceDocument): {
     // KRA treats qty x unitPrice as tax-inclusive (oscu-sales-request.builder.ts);
     // the stored line taxAmount is on top of that and would overstate the receipt.
     const { taxblAmt: taxable, taxAmt } = splitTaxInclusiveAmount(
-      round2(l.quantity * l.unitPrice),
+      resolveLineDiscount(l.quantity, l.unitPrice, l.discountRate, l.discountAmount).net,
       code,
     );
     switch (code) {
@@ -1506,7 +1508,8 @@ function buildNormalizedSaleReport(input: {
     },
     itemList: document.lines.map((l) => {
       // Same tax-inclusive split as the OSCU request builder -- see buildSaleReport.
-      const totAmt = round2(l.quantity * l.unitPrice);
+      const dc = resolveLineDiscount(l.quantity, l.unitPrice, l.discountRate, l.discountAmount);
+      const totAmt = dc.net;
       const { taxblAmt: splyAmt, taxAmt } = splitTaxInclusiveAmount(
         totAmt,
         resolveTaxTypeCode(l.taxTyCdSnapshot, l.taxCategory),
@@ -1524,8 +1527,8 @@ function buildNormalizedSaleReport(input: {
         taxAmount: sign(taxAmt),
         taxRate,
         taxTypeCode: taxTyCd,
-        discountRate: 0,
-        discountAmount: 0,
+        discountRate: dc.rate,
+        discountAmount: sign(dc.amount),
         etimsItemCode: l.etimsItemCodeSnapshot ?? null,
         isStockable: item
           ? deriveItemType(item.productTypeCode) === ItemType.GOODS

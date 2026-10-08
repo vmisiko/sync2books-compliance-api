@@ -1,3 +1,4 @@
+import { resolveLineDiscount } from '../../../shared/utils/line-discount';
 import { ComplianceLine } from '../../domain/entities/compliance-line.entity';
 import { ComplianceDocument } from '../../domain/entities/compliance-document.entity';
 import { generateIdempotencyKey } from '../../domain/utils/idempotency.util';
@@ -52,6 +53,9 @@ export interface CreateDocumentInput {
     unitPrice: number;
     taxCategory: string;
     taxAmount: number;
+    /** Optional line discount, tax-inclusive; defaults to none. */
+    discountRate?: number;
+    discountAmount?: number;
     /** Optional overrides; normally server snapshots from the referenced item. */
     classificationCodeSnapshot?: string;
     unitCodeSnapshot?: string;
@@ -132,6 +136,10 @@ export async function createDocument(
       unitPrice: l.unitPrice,
       taxCategory: l.taxCategory as ComplianceLine['taxCategory'],
       taxAmount: l.taxAmount,
+      ...(() => {
+        const d = resolveLineDiscount(l.quantity, l.unitPrice, l.discountRate, l.discountAmount);
+        return { discountRate: d.rate, discountAmount: d.amount };
+      })(),
       ...deriveLineSnapshot(l, item),
       packagingUnitCodeSnapshot:
         l.packagingUnitCodeSnapshot ?? item.packagingUnitCode,
