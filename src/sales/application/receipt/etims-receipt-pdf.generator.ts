@@ -1,3 +1,4 @@
+import { resolveLineDiscount } from '../../../shared/utils/line-discount';
 import * as PDFDocument from 'pdfkit';
 import * as QRCode from 'qrcode';
 import type { ComplianceDocument } from '../../domain/entities/compliance-document.entity';
@@ -331,7 +332,8 @@ export async function generateEtimsReceiptPdf(
     for (const line of document.lines) {
       const item = itemsById.get(line.itemId);
       // qty x unitPrice is the tax-inclusive line total KRA recorded (taxTyCd suffix per page 8).
-      const total = line.quantity * line.unitPrice;
+      const lineDc = resolveLineDiscount(line.quantity, line.unitPrice, line.discountRate, line.discountAmount);
+      const total = lineDc.gross;
       const y = doc.y;
       const name = item?.name || line.itemId;
       // Receipt setting "item codes": KRA's own receipt page prints the item code beside the name.
@@ -347,8 +349,23 @@ export async function generateEtimsReceiptPdf(
       doc.text(line.unitPrice.toFixed(2), 300, y, { width: 65 });
       doc.text(`x${line.quantity}`, 368, y, { width: 40 });
       doc.text(`${money(total)}${taxTyCd}`, 445, y, { width: 105, align: 'right' });
+      // Page 8: a discounted line is followed by its narration -- the rate and the amount taken off.
+      if (lineDc.amount > 0) {
+        doc.fontSize(8).fillColor('#444');
+        const dy = doc.y;
+        doc.text(`Discount ${lineDc.rate}%`, leftX, dy, { width: 210 });
+        doc.text(`(${money(lineDc.amount)})`, 445, dy, { width: 105, align: 'right' });
+        doc.fillColor('#000');
+      }
       doc.moveDown(0.3);
     }
+    const discountTotals = document.lines.reduce(
+      (acc, l) => {
+        const d = resolveLineDiscount(l.quantity, l.unitPrice, l.discountRate, l.discountAmount);
+        return { gross: acc.gross + d.gross, discount: acc.discount + d.amount };
+      },
+      { gross: 0, discount: 0 },
+    );
 
     doc.moveDown(0.2);
     doc.moveTo(leftX, doc.y).lineTo(pageRight, doc.y).strokeColor('#ccc').stroke();
@@ -361,6 +378,11 @@ export async function generateEtimsReceiptPdf(
     // document's stored subtotal/tax/total, which add line tax on top and overstate it.
     const receiptTotals = totalsFromTaxBuckets(taxBuckets);
     doc.font('Helvetica-Bold');
+    if (discountTotals.discount > 0) {
+      // Page 8 sample: gross, then the discount in brackets, then the discounted SUB TOTAL.
+      doc.text(`TOTAL BEFORE DISCOUNT: ${money(discountTotals.gross)}`, leftX, doc.y, { width: pageRight - leftX, align: 'right' });
+      doc.text(`TOTAL DISCOUNT AWARDED: (${money(discountTotals.discount)})`, leftX, doc.y, { width: pageRight - leftX, align: 'right' });
+    }
     if (isCreditNote) {
       doc.text(`TOTAL: ${money(receiptTotals.total)}`, { align: 'right' });
       doc.text(`TOTAL TAX: ${money(receiptTotals.tax)}`, { align: 'right' });

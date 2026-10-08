@@ -19,6 +19,8 @@ function lineOrmToDomain(row: ComplianceLineOrmEntity): ComplianceLine {
     unitPrice: row.unitPrice,
     taxCategory: row.taxCategory as ComplianceLine['taxCategory'],
     taxAmount: row.taxAmount,
+    discountRate: row.discountRate ?? 0,
+    discountAmount: row.discountAmount ?? 0,
     classificationCodeSnapshot: row.classificationCodeSnapshot,
     unitCodeSnapshot: row.unitCodeSnapshot,
     packagingUnitCodeSnapshot: ensureNullableString(
@@ -158,6 +160,8 @@ export class ComplianceDocumentTypeOrmRepository implements IComplianceDocumentR
       le.unitPrice = l.unitPrice;
       le.taxCategory = l.taxCategory;
       le.taxAmount = l.taxAmount;
+      le.discountRate = l.discountRate ?? 0;
+      le.discountAmount = l.discountAmount ?? 0;
       le.classificationCodeSnapshot = l.classificationCodeSnapshot;
       le.unitCodeSnapshot = l.unitCodeSnapshot;
       le.packagingUnitCodeSnapshot = l.packagingUnitCodeSnapshot ?? null;

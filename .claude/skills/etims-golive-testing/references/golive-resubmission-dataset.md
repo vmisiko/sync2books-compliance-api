@@ -155,10 +155,12 @@ the payment spread here is deliberate, because a synced QuickBooks `Invoice` can
   and NPEs if it is null. Until 2026-09-17 compliance-api dropped `customerName` on `POST /api/sales` (and the
   payload builder never mapped it), so INV-260917-01..07 went to KRA nameless and **can never be credited** —
   they were re-issued as -08..-14. Both bugs are fixed.
-- **Discount document — not yet.** `EtimsCreateSaleLineItemDto` accepts `discountRate`/`discountAmount`, but
-  `oscu-sales-request.builder.ts` still hardcodes `dcRt: 0, dcAmt: 0` and the PDF has no discount rows (plan
-  §2.3). Sending a discount today yields an undiscounted KRA record — don't put one in the evidence until
-  2.3 lands.
+- **Discount document — built 2026-10-08, KRA-accepted live (receipt 19).** Send `discountRate` (percent) and/or
+  `discountAmount` (tax-inclusive) per line on `/v1/sales` or `/api/sales`; `dcRt`/`dcAmt` go to KRA and the receipt
+  prints the per-line narration, TOTAL BEFORE DISCOUNT and TOTAL DISCOUNT AWARDED. **KRA wants `splyAmt` AFTER the
+  discount** (`prc x qty - dcAmt`), not prc x qty: "Invalid splyAmnt on item: 1. Expected: 37584.00, But Found: 41760.00".
+  Restart check: a stale orphan `dist/main` can hold :3001 with old code (it silently issued an undiscounted invoice) —
+  confirm the process serving the port is the one you just built.
 - After each: confirm `complianceStatus = ACCEPTED` in `compliance_documents`, then pull the PDF with
   `curl "http://localhost:3001/api/sales/<url-encoded-document-id>/receipt" -o <name>.pdf`.
 

@@ -1,3 +1,4 @@
+import { resolveLineDiscount } from '../../shared/utils/line-discount';
 import {
   BadRequestException,
   Body,
@@ -154,12 +155,14 @@ export class DashboardSalesController {
         currency: 'KES',
         exchangeRate: 1,
         subtotalAmount: items.reduce(
-          (sum, i) => sum + i.quantity * i.unitPrice,
+          (sum, i) =>
+            sum + resolveLineDiscount(i.quantity, i.unitPrice, i.discountRate, i.discountAmount).net,
           0,
         ),
         totalTax: items.reduce((sum, i) => sum + i.taxAmount, 0),
         totalAmount: items.reduce(
-          (sum, i) => sum + i.quantity * i.unitPrice + i.taxAmount,
+          (sum, i) =>
+            sum + resolveLineDiscount(i.quantity, i.unitPrice, i.discountRate, i.discountAmount).net + i.taxAmount,
           0,
         ),
         customerPin: body.customerTin ?? null,
@@ -174,6 +177,8 @@ export class DashboardSalesController {
           unitPrice: i.unitPrice,
           taxCategory: i.taxCategory,
           taxAmount: i.taxAmount,
+          discountRate: i.discountRate,
+          discountAmount: i.discountAmount,
           // Set only when applyInvoiceTypeOverride forced EXEMPT above;
           // undefined otherwise, so a normal sale still falls back to the
           // item's own catalog taxTyCd exactly as before this field existed.
@@ -270,6 +275,8 @@ export class DashboardSalesController {
       unitPrice: l.unitPrice,
       taxCategory: l.taxCategory,
       taxAmount: Math.abs(l.taxAmount),
+      discountRate: l.discountRate,
+      discountAmount: l.discountAmount,
       // Carries the original's actual submitted tax code forward (e.g. 'A'
       // on a line from an EXEMPT sale) -- without it, this would silently
       // re-derive from the catalog item's current taxTyCd, which can differ
@@ -317,12 +324,14 @@ export class DashboardSalesController {
         currency: original.currency,
         exchangeRate: original.exchangeRate,
         subtotalAmount: items.reduce(
-          (sum, i) => sum + i.quantity * i.unitPrice,
+          (sum, i) =>
+            sum + resolveLineDiscount(i.quantity, i.unitPrice, i.discountRate, i.discountAmount).net,
           0,
         ),
         totalTax: items.reduce((sum, i) => sum + i.taxAmount, 0),
         totalAmount: items.reduce(
-          (sum, i) => sum + i.quantity * i.unitPrice + i.taxAmount,
+          (sum, i) =>
+            sum + resolveLineDiscount(i.quantity, i.unitPrice, i.discountRate, i.discountAmount).net + i.taxAmount,
           0,
         ),
         customerPin: original.customerPin,

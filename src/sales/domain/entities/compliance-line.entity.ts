@@ -15,6 +15,9 @@ export interface ComplianceLine {
   unitPrice: number;
   taxCategory: TaxCategory;
   taxAmount: number;
+  /** Line discount (tax-inclusive amount / percent); 0 when none. */
+  discountRate?: number;
+  discountAmount?: number;
   classificationCodeSnapshot: string;
   unitCodeSnapshot: string;
   packagingUnitCodeSnapshot: string | null;

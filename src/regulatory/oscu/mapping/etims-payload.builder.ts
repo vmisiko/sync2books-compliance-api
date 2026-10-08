@@ -15,6 +15,8 @@ export class EtimsPayloadBuilder {
       description: line.description,
       quantity: line.quantity,
       unitPrice: line.unitPrice,
+      discountRate: line.discountRate,
+      discountAmount: line.discountAmount,
       taxAmount: line.taxAmount,
       classificationCode: line.classificationCodeSnapshot,
       unitCode: line.unitCodeSnapshot,

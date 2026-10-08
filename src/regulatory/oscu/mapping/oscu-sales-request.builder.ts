@@ -6,6 +6,7 @@ import {
   splitTaxInclusiveAmount,
 } from './oscu-tax-rates';
 import { pkgUnitCdSlice, qtyUnitCdSlice } from './oscu-item-cd-slices';
+import { resolveLineDiscount } from '../../../shared/utils/line-discount';
 import { formatKraDateTime, resolveKraSaleMoment } from '../../../shared/utils/kra-time';
 
 export class OscuSalesRequestBuilder {
@@ -29,9 +30,15 @@ export class OscuSalesRequestBuilder {
       // with taxblAmt: splyAmt (i.e. treating unitPrice as tax-exclusive) was rejected
       // with "Invalid taxblAmt on item: N. Expected: <splyAmt/rate>, But Found: <splyAmt>".
       // Same rule as insertStockIO (see oscu-payload-gotchas.md).
-      const splyAmt = round2(l.quantity * l.unitPrice);
-      const { taxblAmt, taxAmt } = splitTaxInclusiveAmount(splyAmt, l.taxTyCd);
-      const totAmt = splyAmt;
+      // KRA validates splyAmt as the amount AFTER the discount, not prc x qty --
+      // confirmed live 2026-10-08: a 10% line (2 x 20,880) sent with splyAmt 41,760
+      // was rejected "Invalid splyAmnt on item: 1. Expected: 37584.00, But Found:
+      // 41760.00". dcRt/dcAmt carry the discount; splyAmt = totAmt = prc x qty - dcAmt,
+      // and tax is split out of that.
+      const dc = resolveLineDiscount(l.quantity, l.unitPrice, l.discountRate, l.discountAmount);
+      const splyAmt = dc.net;
+      const totAmt = dc.net;
+      const { taxblAmt, taxAmt } = splitTaxInclusiveAmount(totAmt, l.taxTyCd);
       // Not l.packagingUnitCode/l.unitCode raw: the itemCd on this same line
       // embeds 2-char SLICES of these two codes, and KRA cross-checks the flat
       // field against what itemCd carries. Any real code that isn't exactly 2
@@ -61,8 +68,8 @@ export class OscuSalesRequestBuilder {
         qty: l.quantity,
         prc: l.unitPrice,
         splyAmt,
-        dcRt: 0,
-        dcAmt: 0,
+        dcRt: dc.rate,
+        dcAmt: dc.amount,
         taxTyCd: l.taxTyCd,
         taxblAmt,
         taxAmt,
